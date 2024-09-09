@@ -1,0 +1,54 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Project metadata -->
+    <groupId>com.example</groupId>
+    <artifactId>ProjectScannerPlugin</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <!-- Repositories for resolving dependencies -->
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+
+    <!-- Project dependencies -->
+    <dependencies>
+        <!-- IntelliJ Platform dependencies -->
+        <!-- IntelliJ Plugin SDK is provided by the intellij-maven-plugin, so no need to add it here -->
+
+        <!-- Example: SnakeYAML for YAML parsing -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.29</version>
+        </dependency>
+
+        <!-- You can add more dependencies here, for example, logging or other utilities -->
+    </dependencies>
+
+    <!-- IntelliJ IDEA Plugin Configuration -->
+    <build>
+        <plugins>
+            <!-- IntelliJ Maven Plugin: necessary to develop IntelliJ IDEA plugins with Maven -->
+            <plugin>
+                <groupId>org.jetbrains.intellij.plugins</groupId>
+                <artifactId>intellij-maven-plugin</artifactId>
+                <version>0.5.2</version>  <!-- Latest stable version of the IntelliJ Maven plugin -->
+                
+                <configuration>
+                    <intellijVersion>2023.1</intellijVersion> <!-- Version of IntelliJ IDEA to target -->
+                    <type>IC</type> <!-- 'IC' for Community Edition, 'IU' for Ultimate Edition -->
+                    <downloadSources>true</downloadSources> <!-- Downloads IntelliJ SDK sources for better development experience -->
+                    <plugins>
+                        <plugin>java</plugin> <!-- Adds Java support in the plugin environment -->
+                    </plugins>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
