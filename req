@@ -1,0 +1,189 @@
+To add libraries to your IntelliJ IDEA plugin project, you’ll need to ensure that any external dependencies (such as SnakeYAML for YAML parsing) are properly included in your project. Depending on your build tool (either Gradle or Maven), this can be done by configuring your build.gradle or pom.xml file, or by manually adding JAR files to your project if you're not using a build system.
+
+Here’s a detailed guide on how to add libraries for both Gradle and Maven, as well as how to do it manually.
+
+1. Adding Libraries Using Gradle
+If you’re using Gradle as your build system, adding libraries is straightforward by defining dependencies in your build.gradle file.
+
+Step 1: Modify build.gradle to Include Dependencies
+The build.gradle file is the configuration file for your Gradle project. Here’s how to add dependencies, such as SnakeYAML, to your plugin project.
+
+Open the build.gradle file in the root of your project.
+Add the required dependencies under the dependencies block.
+Here’s an example build.gradle configuration for your plugin:
+
+groovy
+Copy code
+plugins {
+    id 'java' // Java support
+    id 'org.jetbrains.intellij' version '1.10.0' // IntelliJ plugin support
+}
+
+group 'com.example'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral() // Required to fetch libraries from Maven Central
+}
+
+dependencies {
+    // Include SnakeYAML for YAML parsing (needed for your YAML configuration)
+    implementation 'org.yaml:snakeyaml:1.29'
+    
+    // Add other libraries here if needed
+}
+
+intellij {
+    version '2023.1' // Set the IntelliJ version for your plugin
+    type 'IC' // Target IntelliJ IDEA Community Edition (or 'IU' for Ultimate)
+    plugins = ['java'] // Ensure Java support is available
+}
+
+tasks {
+    patchPluginXml {
+        sinceBuild '223'
+        untilBuild '231.*'
+    }
+}
+Explanation:
+plugins:
+
+id 'java': Ensures Java support for your project.
+id 'org.jetbrains.intellij': This plugin allows Gradle to build IntelliJ IDEA plugins.
+repositories:
+
+mavenCentral(): This tells Gradle to use Maven Central, a popular repository for open-source libraries.
+dependencies:
+
+implementation 'org.yaml:snakeyaml:1.29': This adds SnakeYAML, a YAML parsing library, to your project.
+You can add additional libraries here, such as testing frameworks or logging libraries (e.g., Log4j, JUnit, etc.).
+intellij:
+
+version '2023.1': Specifies the IntelliJ IDEA version your plugin will target.
+type 'IC': Specifies whether you're targeting IntelliJ IDEA Community Edition (IC) or Ultimate Edition (IU).
+plugins = ['java']: Declares that your plugin depends on Java support.
+tasks:
+
+patchPluginXml: This task automatically adjusts the plugin XML to be compatible with specific versions of IntelliJ.
+Step 2: Sync Gradle
+After modifying build.gradle:
+
+Open the Gradle Tool Window in IntelliJ IDEA.
+Click the Reload All Gradle Projects button or run the following command in your terminal to ensure the new dependencies are downloaded and integrated:
+bash
+Copy code
+./gradlew build
+This will automatically download SnakeYAML and any other dependencies you’ve specified.
+
+2. Adding Libraries Using Maven
+If you’re using Maven instead of Gradle, the pom.xml file is the configuration file where dependencies are managed.
+
+Step 1: Modify pom.xml to Include Dependencies
+Open the pom.xml file in the root of your project.
+Add the required dependencies under the <dependencies> section.
+Here’s an example pom.xml configuration for your plugin:
+
+xml
+Copy code
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>ProjectScannerPlugin</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <!-- Maven Repositories -->
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+
+    <!-- Dependencies -->
+    <dependencies>
+        <!-- SnakeYAML for YAML parsing -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.29</version>
+        </dependency>
+
+        <!-- Add other dependencies here as needed -->
+    </dependencies>
+
+    <!-- IntelliJ Plugin Configuration -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.jetbrains.intellij.plugins</groupId>
+                <artifactId>intellij-maven-plugin</artifactId>
+                <version>0.5.2</version>
+                <configuration>
+                    <intellijVersion>2023.1</intellijVersion>
+                    <type>IC</type> <!-- IntelliJ Community Edition -->
+                    <plugins>
+                        <plugin>java</plugin> <!-- Ensure Java support -->
+                    </plugins>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+Explanation:
+<dependencies>:
+
+Each <dependency> defines a library you want to include in your project.
+SnakeYAML is included for YAML parsing (groupId: org.yaml, artifactId: snakeyaml, version: 1.29).
+<plugin>:
+
+The IntelliJ IDEA Maven Plugin allows you to build IntelliJ plugins using Maven.
+You specify the target IntelliJ version (2023.1) and edition (IC for Community or IU for Ultimate).
+Step 2: Sync Maven
+After modifying pom.xml:
+
+Right-click on the project and select Maven > Reload Project.
+You can also run the following Maven command in your terminal to install the new dependencies:
+bash
+Copy code
+mvn clean install
+This will automatically download SnakeYAML and other specified dependencies from Maven Central.
+
+3. Manually Adding Libraries (Without Build Tools)
+If you're not using a build system like Gradle or Maven, you can manually add external libraries by downloading JAR files and including them in your project.
+
+Step 1: Download the JAR Files
+Go to Maven Central or another trusted repository.
+For SnakeYAML, visit Maven Central and download the latest version (e.g., snakeyaml-1.29.jar).
+Download any other libraries you need (for example, Gson for JSON handling or Log4j for logging).
+Step 2: Add the JARs to Your Project
+Create a libs directory in the root of your project if it doesn’t already exist.
+Place the downloaded JAR files (e.g., snakeyaml-1.29.jar) in this libs directory.
+Step 3: Add the JARs to Your Project Classpath
+Right-click on your IntelliJ IDEA project and go to Module Settings.
+In the Project Structure dialog:
+Select Libraries from the left-hand menu.
+Click the + button to add a new library.
+Choose the JARs or directories option and select the JAR files from the libs directory.
+Click OK to add the JARs to your project.
+This will manually add the external libraries to your classpath, making them available in your project.
+
+4. Verifying the Libraries are Available
+After adding the libraries (whether via Gradle, Maven, or manually), verify that they are properly integrated into your project:
+
+Check the Imports: In your ProjectScanner code, ensure that the relevant imports for the external libraries (such as org.yaml.snakeyaml.Yaml for SnakeYAML) work without errors.
+
+java
+Copy code
+import org.yaml.snakeyaml.Yaml;  // Check for any errors here
+Run the Project: After the libraries are added, try to run the project to confirm that the libraries are working as expected. For example, ensure that the YAML parsing functions correctly when you load the config.yaml file in your ProjectScanner class.
+
+Summary
+To integrate external libraries like SnakeYAML into your IntelliJ Plugin project, you can:
+
+Use Gradle by adding the dependencies in the build.gradle file and syncing the project.
+Use Maven by adding the dependencies in the pom.xml file and reloading the project.
+Manually download JAR files, add them to your project, and configure the classpath if you’re not using a build system.
+By doing this, your plugin will have access to all the necessary libraries, and you’ll be able to use functionalities like YAML parsing, JSON handling, or logging within your ProjectScanner plugin.
