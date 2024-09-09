@@ -1,0 +1,341 @@
+package com.example.plugin;
+
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.project.Project;
+import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.FileTypeIndex;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.lang.java.JavaFileType;
+import com.intellij.openapi.wm.ToolWindowFactory;
+import com.intellij.openapi.wm.ToolWindow;
+import org.jetbrains.annotations.NotNull;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.yaml.snakeyaml.Yaml;
+
+import javax.swing.*;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeModel;
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+// Core ProjectScanner class that orchestrates service identification
+public class ProjectScanner implements ToolWindowFactory {
+    private static final Logger logger = Logger.getLogger(ProjectScanner.class.getName());
+
+    // Metadata cache for incremental scanning with timestamp
+    private static final Map<String, ClassMetadata> metadataCache = new ConcurrentHashMap<>();
+
+    // Data structure to hold output artifacts for export
+    private static final List<JSONObject> serviceArtifacts = new ArrayList<>();
+
+    // Configuration loaded from YAML file
+    private static Map<String, String> domainMappings;
+    private static List<String> apiAnnotations;
+
+    // UI component to display scan results
+    private JTree resultTree;
+
+    // Load configuration from YAML file
+    static {
+        loadConfiguration();
+    }
+
+    private static void loadConfiguration() {
+        Yaml yaml = new Yaml();
+        try (InputStream inputStream = new FileInputStream("config.yaml")) {
+            Map<String, Object> config = yaml.load(inputStream);
+
+            // Load domain mappings
+            domainMappings = new HashMap<>();
+            List<Map<String, String>> domains = (List<Map<String, String>>) config.get("domainMappings");
+            for (Map<String, String> domain : domains) {
+                domainMappings.put(domain.get("pattern"), domain.get("domain"));
+            }
+
+            // Load API annotations
+            apiAnnotations = (List<String>) config.get("apiAnnotations");
+
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Error loading configuration: ", e);
+        }
+    }
+
+    // Main function to scan the project asynchronously
+    public static void scanProjectAsync(Project project, JTree resultTree) {
+        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Scanning Project for Services") {
+            @Override
+            public void run(ProgressIndicator progressIndicator) {
+                progressIndicator.setIndeterminate(false);
+                scanProject(project, progressIndicator, resultTree);  // Start scanning
+                exportOutputArtifacts(); // Export artifacts to JSON file
+            }
+        });
+    }
+
+    // Scans the project for services, APIs, dependencies, and more
+    public static void scanProject(Project project, ProgressIndicator progressIndicator, JTree resultTree) {
+        // Get all Java files in the project
+        Collection<VirtualFile> javaFiles = FileTypeIndex.getFiles(JavaFileType.INSTANCE, GlobalSearchScope.projectScope(project));
+
+        // Parallelize the processing of files
+        ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        List<Future<?>> futures = new ArrayList<>();
+
+        // Tree model to update UI
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode("Project Scan Results");
+        DefaultTreeModel treeModel = new DefaultTreeModel(root);
+        SwingUtilities.invokeLater(() -> resultTree.setModel(treeModel));
+
+        // Process each file in parallel
+        int totalFiles = javaFiles.size();
+        AtomicInteger processedFiles = new AtomicInteger(0);
+
+        for (VirtualFile file : javaFiles) {
+            futures.add(executor.submit(() -> {
+                try {
+                    PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
+                    if (psiFile instanceof PsiJavaFile) {
+                        PsiJavaFile psiJavaFile = (PsiJavaFile) psiFile;
+                        for (PsiClass psiClass : psiJavaFile.getClasses()) {
+                            scanClass(psiClass, project, root);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.log(Level.SEVERE, "Error processing file: " + file.getName(), e);
+                }
+                if (processedFiles.incrementAndGet() % 10 == 0) {
+                    progressIndicator.setFraction((double) processedFiles.get() / totalFiles);
+                }
+            }));
+        }
+
+        // Wait for all tasks to finish
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (Exception e) {
+                logger.warning("Error in parallel scanning: " + e.getMessage());
+            }
+        }
+
+        // Gracefully shutdown the executor
+        shutdownExecutor(executor);
+    }
+
+    // Scans a class for service boundaries, APIs, entities, and dependencies
+    private static void scanClass(PsiClass psiClass, Project project, DefaultMutableTreeNode root) {
+        try {
+            VirtualFile file = psiClass.getContainingFile().getVirtualFile();
+            long lastModified = file.getModificationStamp();
+
+            if (metadataCache.containsKey(psiClass.getQualifiedName())) {
+                ClassMetadata metadata = metadataCache.get(psiClass.getQualifiedName());
+                if (!metadata.isStale(lastModified)) {
+                    return;  // Skip if the file is unchanged
+                }
+            }
+
+            // Create node for the class in the UI
+            DefaultMutableTreeNode classNode = new DefaultMutableTreeNode(psiClass.getQualifiedName());
+            SwingUtilities.invokeLater(() -> root.add(classNode));
+
+            // Perform class scans
+            String domain = assignDomain(psiClass);
+            scanForSpringServices(psiClass, classNode);
+            scanForJpaEntities(psiClass, classNode);
+            scanForClassDependencies(psiClass, classNode);
+            scanForInterServiceDependencies(psiClass, classNode);
+
+            // Cache metadata
+            ClassMetadata classMetadata = new ClassMetadata(psiClass.getQualifiedName(), domain, lastModified);
+            metadataCache.put(psiClass.getQualifiedName(), classMetadata);
+
+            // Add the class to output artifacts
+            JSONObject serviceArtifact = new JSONObject();
+            serviceArtifact.put("className", psiClass.getQualifiedName());
+            serviceArtifact.put("domain", domain);
+            serviceArtifacts.add(serviceArtifact);
+
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Error processing class: " + psiClass.getQualifiedName(), e);
+        }
+    }
+
+    // Assign domain based on class patterns and custom YAML config
+    private static String assignDomain(PsiClass psiClass) {
+        String className = psiClass.getQualifiedName();
+        for (String pattern : domainMappings.keySet()) {
+            if (className.toLowerCase().contains(pattern)) {
+                return domainMappings.get(pattern);
+            }
+        }
+        return "General Domain";
+    }
+
+    // Scan for Spring services and APIs
+    private static void scanForSpringServices(PsiClass psiClass, DefaultMutableTreeNode classNode) {
+        if (isServiceClass(psiClass)) {
+            DefaultMutableTreeNode serviceNode = new DefaultMutableTreeNode("Service: " + psiClass.getQualifiedName());
+            SwingUtilities.invokeLater(() -> classNode.add(serviceNode));
+
+            for (PsiMethod psiMethod : psiClass.getMethods()) {
+                DefaultMutableTreeNode methodNode = new DefaultMutableTreeNode("Method: " + psiMethod.getName());
+                SwingUtilities.invokeLater(() -> serviceNode.add(methodNode));
+
+                listApiEndpoints(psiClass, psiMethod, methodNode);
+            }
+        }
+    }
+
+    // Scan for JPA entities and identify data ownership
+    private static void scanForJpaEntities(PsiClass psiClass, DefaultMutableTreeNode classNode) {
+        if (psiClass.hasAnnotation("javax.persistence.Entity") || psiClass.hasAnnotation("javax.persistence.Table")) {
+            DefaultMutableTreeNode entityNode = new DefaultMutableTreeNode("Entity: " + psiClass.getQualifiedName());
+            SwingUtilities.invokeLater(() -> classNode.add(entityNode));
+
+            for (PsiField field : psiClass.getFields()) {
+                String fieldType = field.hasAnnotation("javax.persistence.Id") ? "Primary Key Field: " : "Field: ";
+                DefaultMutableTreeNode fieldNode = new DefaultMutableTreeNode(fieldType + field.getName());
+                SwingUtilities.invokeLater(() -> entityNode.add(fieldNode));
+            }
+        }
+    }
+
+    // Identify class-level dependencies by analyzing import statements
+    private static void scanForClassDependencies(PsiClass psiClass, DefaultMutableTreeNode classNode) {
+        PsiImportList importList = ((PsiJavaFile) psiClass.getContainingFile()).getImportList();
+        if (importList != null) {
+            for (PsiImportStatement importStatement : importList.getAllImportStatements()) {
+                String dependency = importStatement.getQualifiedName();
+                if (dependency != null) {
+                    DefaultMutableTreeNode depNode = new DefaultMutableTreeNode("Depends on: " + dependency);
+                    SwingUtilities.invokeLater(() -> classNode.add(depNode));
+                }
+            }
+        }
+    }
+
+    // Scan for inter-service dependencies
+    private static void scanForInterServiceDependencies(PsiClass psiClass, DefaultMutableTreeNode classNode) {
+        // Scan for injected services using @Autowired
+        for (PsiField field : psiClass.getFields()) {
+            if (field.hasAnnotation("org.springframework.beans.factory.annotation.Autowired")) {
+                String injectedService = field.getType().getCanonicalText();
+                DefaultMutableTreeNode depNode = new DefaultMutableTreeNode("Uses service: " + injectedService);
+                SwingUtilities.invokeLater(() -> classNode.add(depNode));
+            }
+        }
+
+        // Detect REST API client calls
+        for (PsiMethod method : psiClass.getMethods()) {
+            method.accept(new JavaRecursiveElementVisitor() {
+                @Override
+                public void visitMethodCallExpression(PsiMethodCallExpression expression) {
+                    if (expression.getMethodExpression().getText().contains("RestTemplate") ||
+                        expression.getMethodExpression().getText().contains("FeignClient")) {
+                        DefaultMutableTreeNode depNode = new DefaultMutableTreeNode("Calls external API via " + expression.getMethodExpression().getText());
+                        SwingUtilities.invokeLater(() -> classNode.add(depNode));
+                    }
+                }
+            });
+        }
+    }
+
+    // List API endpoints in a service, customized via YAML config
+    private static void listApiEndpoints(PsiClass psiClass, PsiMethod psiMethod, DefaultMutableTreeNode methodNode) {
+        for (String mappingAnnotation : apiAnnotations) {
+            if (psiMethod.hasAnnotation("org.springframework.web.bind.annotation." + mappingAnnotation)) {
+                PsiAnnotation annotation = psiMethod.getAnnotation("org.springframework.web.bind.annotation." + mappingAnnotation);
+                String endpoint = annotation.findAttributeValue("value").getText();
+                DefaultMutableTreeNode apiNode = new DefaultMutableTreeNode(mappingAnnotation + " Endpoint: " + endpoint);
+                SwingUtilities.invokeLater(() -> methodNode.add(apiNode));
+
+                // Extract method parameters
+                for (PsiParameter parameter : psiMethod.getParameterList().getParameters()) {
+                    DefaultMutableTreeNode paramNode = new DefaultMutableTreeNode("Param: " + parameter.getName() + " (" + parameter.getType().getCanonicalText() + ")");
+                    SwingUtilities.invokeLater(() -> methodNode.add(paramNode));
+                }
+
+                // Check for security annotations (e.g., @PreAuthorize)
+                if (psiMethod.hasAnnotation("org.springframework.security.access.prepost.PreAuthorize")) {
+                    DefaultMutableTreeNode securityNode = new DefaultMutableTreeNode("Requires authentication");
+                    SwingUtilities.invokeLater(() -> methodNode.add(securityNode));
+                }
+            }
+        }
+    }
+
+    // Export the output artifacts to a JSON file
+    private static void exportOutputArtifacts() {
+        try (FileWriter file = new FileWriter("outputArtifacts.json")) {
+            JSONArray jsonArray = new JSONArray();
+            for (JSONObject serviceArtifact : serviceArtifacts) {
+                jsonArray.put(serviceArtifact);
+            }
+            file.write(jsonArray.toString(4)); // Pretty print with 4-space indentation
+            file.flush();
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Error exporting output artifacts: ", e);
+        }
+    }
+
+    // ToolWindowFactory implementation to display scanning results in the IntelliJ tool window
+    @Override
+    public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
+        resultTree = new JTree(new DefaultMutableTreeNode("Scanning..."));
+        JScrollPane scrollPane = new JScrollPane(resultTree);
+        toolWindow.getComponent().add(scrollPane);
+
+        // Trigger project scan when the tool window is created
+        scanProjectAsync(project, resultTree);
+    }
+
+    // Gracefully shutdown the executor
+    private static void shutdownExecutor(ExecutorService executor) {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                    logger.severe("Executor did not terminate");
+                }
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+
+// Metadata class for caching
+class ClassMetadata {
+    private final String className;
+    private final String domain;
+    private final long lastModified;
+
+    public ClassMetadata(String className, String domain, long lastModified) {
+        this.className = className;
+        this.domain = domain;
+        this.lastModified = lastModified;
+    }
+
+    public boolean isStale(long newModifiedTime) {
+        return this.lastModified < newModifiedTime;
+    }
+
+    public String getClassName() {
+        return className;
+    }
+
+    public String getDomain() {
+        return domain;
+    }
+}
