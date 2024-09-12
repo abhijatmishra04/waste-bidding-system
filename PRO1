@@ -228,5 +228,42 @@ public class RetrievalDTOItemReader {
 }
 
 
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.support.ClassifierCompositeItemWriter;
+import org.springframework.classify.Classifier;
+
+public class HangingReportClassifierWriter extends ClassifierCompositeItemWriter<ProcessedRetrievalDTO> {
+
+    public HangingReportClassifierWriter(
+            ItemWriter<ProcessedRetrievalDTO> dayPlusOneWriter,
+            ItemWriter<ProcessedRetrievalDTO> moreThan7DaysWriter,
+            ItemWriter<ProcessedRetrievalDTO> moreThan25DaysWriter) {
+
+        // Set the classifier with the categorization logic
+        this.setClassifier(new Classifier<ProcessedRetrievalDTO, ItemWriter<? super ProcessedRetrievalDTO>>() {
+            @Override
+            public ItemWriter<? super ProcessedRetrievalDTO> classify(ProcessedRetrievalDTO item) {
+                // Step 3: Categorize the record based on hanging days
+                int hangingDays = item.getHangingDays();
+                String hangingCategory;
+                
+                if (hangingDays == 1) {
+                    hangingCategory = "GIVEN DAY + 1 DAY Section";
+                    return dayPlusOneWriter;  // Route to day + 1 writer
+                } else if (hangingDays >= 7 && hangingDays < 25) {
+                    hangingCategory = "MORE THAN 7 DAYS Section";
+                    return moreThan7DaysWriter;  // Route to 7-25 days writer
+                } else if (hangingDays >= 25) {
+                    hangingCategory = "MORE THAN 25 DAYS Section";
+                    return moreThan25DaysWriter;  // Route to 25+ days writer
+                } else {
+                    return null;  // No writer for records that don't meet the criteria
+                }
+            }
+        });
+    }
+}
+
+
 file.input.fieldNames=detailRecordId,accountNumber,referenceKey,systemId,sstKey,confirmationNumber,transactionReferenceId,paymentType,xdays,dueDate,marketId,createTimestamp,subChannel,statementBalance
 file.input.fieldRanges=1-1,2-22,23-31,32-32,33-41,42-51,52-63,64-64,65-66,67-74,75-77,96-159,160-185,186-188
