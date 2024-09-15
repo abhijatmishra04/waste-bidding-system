@@ -1,0 +1,635 @@
+import os
+import javalang
+import yaml
+import logging
+import json
+import streamlit as st
+import networkx as nx
+from pathlib import Path
+from collections import defaultdict
+from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from matplotlib import pyplot as plt
+from pyvis.network import Network
+from altair.vegalite.v4.api import (Chart)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Metadata cache to avoid re-processing unchanged files
+metadata_cache = {}
+
+# Configuration loaded from YAML
+config = {}
+scan_summary = defaultdict(lambda: defaultdict(list))
+
+
+def load_configuration(config_path: str):
+    """Load configuration from YAML at the given path."""
+    global config
+    if not os.path.exists(config_path):
+        logger.error(f"Configuration file not found at {config_path}. Exiting.")
+        exit(1)
+
+    try:
+        with open(config_path, 'r') as config_file:
+            config = yaml.safe_load(config_file)
+            logger.info(f"Successfully loaded configuration from {config_path}")
+    except Exception as e:
+        logger.error(f"Error loading configuration from {config_path}: {e}")
+        exit(1)
+
+    config.setdefault('annotation_filters', [])
+    config.setdefault('dependency_filters', {'include': [], 'exclude': []})
+    config.setdefault('file_path_filters', {'include': [], 'exclude': []})
+
+
+def scan_project_async(project_path: str, output_format: str = 'json'):
+    """Scan the Java project asynchronously with filtering options."""
+    logger.info(f"Starting to scan project at {project_path}")
+
+    if not os.path.exists(project_path):
+        logger.error(f"Project path {project_path} does not exist.")
+        exit(1)
+
+    java_files = list(Path(project_path).rglob("*.java"))
+
+    if not java_files:
+        logger.error(f"No Java files found in the directory: {project_path}. Exiting.")
+        exit(1)
+
+    logger.info(f"Found {len(java_files)} Java files to scan.")
+
+    java_files = apply_file_path_filters(java_files)
+
+    batch_size = config.get('batch_size', 50)
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = []
+        for batch in [java_files[i:i + batch_size] for i in range(0, len(java_files), batch_size)]:
+            futures.append(executor.submit(scan_batch, batch))
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                logger.error(f"Batch generated an exception: {exc}")
+
+    generate_report(output_format, project_path)
+
+
+def apply_file_path_filters(java_files: List[Path]) -> List[Path]:
+    """Apply include/exclude filters to the list of Java files based on file paths."""
+    include_filters = config['file_path_filters'].get('include', [])
+    exclude_filters = config['file_path_filters'].get('exclude', [])
+
+    filtered_files = []
+    for java_file in java_files:
+        file_str = str(java_file)
+        if include_filters and not any(pattern in file_str for pattern in include_filters):
+            continue
+        if any(pattern in file_str for pattern in exclude_filters):
+            continue
+        filtered_files.append(java_file)
+
+    logger.info(f"After applying filters, {len(filtered_files)} Java files will be scanned.")
+    return filtered_files
+
+
+def scan_batch(file_batch: List[Path]):
+    """Scan a batch of Java files."""
+    for java_file in file_batch:
+        scan_file(java_file)
+
+
+def scan_file(java_file_path: Path):
+    """Scan a single Java file for services, annotations, and dependencies."""
+    try:
+        with open(java_file_path, 'r', encoding='utf-8') as file:
+            java_code = file.read()
+
+        tree = javalang.parse.parse(java_code)
+
+        for node in tree.types:
+            if isinstance(node, javalang.tree.ClassDeclaration):
+                scan_class(node, java_file_path)
+
+        imports = extract_imports(tree)
+        logger.info(f"Imports found in {java_file_path}: {imports}")
+
+    except Exception as e:
+        logger.error(f"Error parsing {java_file_path}: {e}")
+
+
+def scan_class(java_class, java_file_path: Path):
+    """Scan a Java class for advanced analysis: annotations, complexity, dependencies, and relationships."""
+    class_name = java_class.name
+    last_modified = os.path.getmtime(java_file_path)
+
+    if class_name in metadata_cache and metadata_cache[class_name]['last_modified'] >= last_modified:
+        logger.info(f"Skipping cached class {class_name}")
+        return
+
+    class_annotations = extract_annotations(java_class)
+    if not apply_annotation_filters(class_annotations):
+        logger.info(f"Class {class_name} filtered out by annotation filter")
+        return
+
+    metadata = {
+        'annotations': class_annotations,
+        'dependencies': [],
+        'inter_service_calls': [],
+        'fields': [],
+        'methods': [],
+        'relationships': [],
+        'file_path': str(java_file_path),
+        'last_modified': last_modified,
+        'component_type': detect_spring_component_type(java_class),
+        'complexity_metrics': calculate_complexity_metrics(java_class)
+    }
+
+    metadata['fields'] = extract_fields(java_class)
+    metadata['methods'] = extract_methods(java_class)
+
+    detect_service_injections(java_class, metadata)
+
+    metadata_cache[class_name] = metadata
+
+    scan_summary[class_name] = metadata
+    scan_summary[class_name]['relationships'] = detect_relationships(java_class, metadata)
+
+    logger.info(f"Class {class_name} scanned with metadata: {metadata}")
+
+
+def extract_imports(tree):
+    """Extract imports from the CompilationUnit."""
+    imports = []
+    if hasattr(tree, 'imports'):
+        for imp in tree.imports:
+            imports.append(imp.path)
+    return imports
+
+
+def detect_spring_component_type(java_class):
+    """Detect the Spring component type of the Java class based on its annotations."""
+    component_types = ["RestController", "Controller", "Service", "Repository", "Component"]
+
+    for annotation in java_class.annotations:
+        annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+        if annotation_name in component_types:
+            return annotation_name
+
+    return "Unknown"
+
+
+def calculate_complexity_metrics(java_class):
+    """Calculate complexity metrics such as cyclomatic complexity, class size, and depth of inheritance."""
+    complexity = {
+        'class_size': len(java_class.fields) + len(java_class.methods),
+        'method_complexity': {},
+        'inheritance_depth': calculate_inheritance_depth(java_class),
+    }
+
+    for method in java_class.methods:
+        complexity['method_complexity'][method.name] = calculate_cyclomatic_complexity(method)
+
+    return complexity
+
+
+def calculate_cyclomatic_complexity(method):
+    """Calculate the cyclomatic complexity of a method."""
+    complexity = 1
+    for node in method.body or []:
+        if isinstance(node, (javalang.tree.IfStatement, javalang.tree.ForStatement,
+                             javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+            complexity += 1
+    return complexity
+
+
+def calculate_inheritance_depth(java_class):
+    """Calculate the depth of inheritance for a class."""
+    depth = 0
+    current_class = java_class
+    while hasattr(current_class, 'extends') and current_class.extends:
+        depth += 1
+        current_class = current_class.extends
+    return depth
+
+
+def detect_service_injections(java_class, metadata):
+    """Detect field-level and constructor-based service injections."""
+    for field in java_class.fields:
+        if field.annotations:
+            for annotation in field.annotations:
+                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+                if annotation_name == "Autowired":
+                    injected_service = field.type.name if field.type and field.type.name else 'Unknown'
+                    metadata['inter_service_calls'].append(injected_service)
+                    logger.info(f"Autowired service found in {java_class.name}: {injected_service}")
+
+    for constructor in java_class.constructors:
+        for param in constructor.parameters:
+            for annotation in param.annotations:
+                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+                if annotation_name == "Autowired":
+                    injected_service = param.type.name if param.type and param.type.name else 'Unknown'
+                    metadata['inter_service_calls'].append(injected_service)
+                    logger.info(f"Autowired service found in constructor of {java_class.name}: {injected_service}")
+
+
+def extract_annotations(java_class):
+    """Extract annotations from a Java class."""
+    return [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+            java_class.annotations]
+
+
+def extract_fields(java_class):
+    """Extract fields and their metadata from a Java class."""
+    return [{
+        'names': [declarator.name for declarator in field.declarators],
+        'type': field.type.name if field.type and isinstance(field.type.name, str) else 'Unknown',
+        'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+                        field.annotations]
+    } for field in java_class.fields]
+
+
+def extract_methods(java_class):
+    """Extract methods from a Java class."""
+    return [{
+        'name': method.name,
+        'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name,
+                                                                                    str) else 'void',
+        'parameters': [{'name': param.name,
+                        'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'} for
+                       param in method.parameters],
+        'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+                        method.annotations]
+    } for method in java_class.methods]
+
+
+def apply_annotation_filters(annotations: List[str]) -> bool:
+    """Check if the class should be scanned based on annotation filters."""
+    filters = config['annotation_filters']
+    if not filters:
+        return True
+    return any(annotation in filters for annotation in annotations)
+
+
+def detect_relationships(java_class, metadata):
+    """Detect advanced relationships: inheritance, interfaces, method calls, cyclic dependencies, data flow."""
+    relationships = []
+
+    if hasattr(java_class, 'extends') and java_class.extends:
+        parent_class = java_class.extends.name if isinstance(java_class.extends.name,
+                                                             str) else java_class.extends.name.value
+        relationships.append({
+            'type': 'inherits',
+            'target': parent_class,
+            'relationship_type': 'inheritance'
+        })
+
+    if hasattr(java_class, 'implements') and java_class.implements:
+        for interface in java_class.implements:
+            interface_name = interface.name if isinstance(interface.name, str) else interface.name.value
+            relationships.append({
+                'type': 'implements',
+                'target': interface_name,
+                'relationship_type': 'interface_implementation'
+            })
+
+    method_call_relationships = detect_method_calls(java_class)
+    relationships.extend(method_call_relationships)
+
+    data_flow_relationships = detect_data_flow(java_class)
+    relationships.extend(data_flow_relationships)
+
+    return relationships
+
+
+def detect_method_calls(java_class):
+    """Detect method call relationships within and across services."""
+    relationships = []
+    for method in java_class.methods:
+        if method.body:
+            for node in method.body:
+                if isinstance(node, javalang.tree.MethodInvocation):
+                    relationships.append({
+                        'type': 'calls',
+                        'target': node.member,
+                        'relationship_type': 'method_call'
+                    })
+
+    return relationships
+
+
+def detect_data_flow(java_class):
+    """Detect data flow across services or between methods."""
+    relationships = []
+    for method in java_class.methods:
+        if method.body:
+            for node in method.body:
+                if isinstance(node, javalang.tree.MemberReference):
+                    relationships.append({
+                        'type': 'data_flow',
+                        'target': node.member,
+                        'relationship_type': 'data_access'
+                    })
+
+    return relationships
+
+
+def generate_report(output_format='json', project_path=None):
+    """Generate a report of the scan in the desired format (JSON, HTML)."""
+    logger.info("Generating scan report.")
+
+    if output_format == 'json':
+        summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.json'))
+        with open(summary_file, 'w') as f:
+            json.dump(scan_summary, f, indent=4)
+        logger.info(f"JSON scan summary written to {summary_file}")
+
+    elif output_format == 'html':
+        generate_html_report(project_path)
+
+
+def generate_html_report(project_path=None):
+    """Generate an HTML report from the scan summary."""
+    summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.html'))
+    with open(summary_file, 'w') as f:
+        f.write("<html><head><title>Scan Report</title></head><body>")
+        f.write("<h1>Scan Report</h1>")
+        for class_name, data in scan_summary.items():
+            f.write(f"<h2>{class_name}</h2>")
+            f.write(f"<p>File: {data['file_path']}</p>")
+            f.write(f"<p>Component Type: {data['component_type']}</p>")
+            f.write("<h3>Annotations</h3><ul>")
+            for annotation in data['annotations']:
+                f.write(f"<li>{annotation}</li>")
+            f.write("</ul>")
+            f.write("<h3>Dependencies</h3><ul>")
+            for dep in data['dependencies']:
+                f.write(f"<li>{dep}</li>")
+            f.write("</ul>")
+            f.write("<h3>Inter-Service Calls</h3><ul>")
+            for service in data['inter_service_calls']:
+                f.write(f"<li>{service}</li>")
+            f.write("</ul>")
+            f.write("<h3>Relationships</h3><ul>")
+            for rel in data['relationships']:
+                f.write(f"<li>{rel['type']} -> {rel['target']} ({rel['relationship_type']})</li>")
+            f.write("</ul>")
+        f.write("</body></html>")
+    logger.info(f"HTML scan summary written to {summary_file}")
+
+
+# Visualize the data using Streamlit
+
+def visualize_dependencies(scan_summary):
+    """Visualize the inter-service dependencies as a network graph."""
+    G = nx.DiGraph()
+
+    # Add nodes and edges based on relationships
+    for class_name, metadata in scan_summary.items():
+        G.add_node(class_name, label=metadata['component_type'])
+        for rel in metadata['relationships']:
+            G.add_edge(class_name, rel['target'], label=rel['relationship_type'])
+
+    # Create layout for visualization
+    pos = nx.spring_layout(G, k=0.5, iterations=50)
+
+    # Draw the graph using matplotlib
+    plt.figure(figsize=(12, 12))
+    nx.draw_networkx_nodes(G, pos, node_color="skyblue", node_size=3000)
+    nx.draw_networkx_edges(G, pos, arrowstyle="->", arrowsize=20, edge_color="gray")
+    nx.draw_networkx_labels(G, pos, font_size=12, font_family="sans-serif")
+
+    edge_labels = nx.get_edge_attributes(G, "label")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+    plt.title("Inter-Service Dependencies")
+    st.pyplot(plt.gcf())  # Render with Streamlit
+
+def scan_class(java_class, java_file_path: Path):
+    """Scan a Java class for advanced analysis: annotations, complexity, dependencies, and relationships."""
+    class_name = java_class.name
+    last_modified = os.path.getmtime(java_file_path)
+
+    if class_name in metadata_cache and metadata_cache[class_name]['last_modified'] >= last_modified:
+        logger.info(f"Skipping cached class {class_name}")
+        return
+
+    class_annotations = extract_annotations(java_class)
+    if not apply_annotation_filters(class_annotations):
+        logger.info(f"Class {class_name} filtered out by annotation filter")
+        return
+
+    # Extract bounded context, API endpoints, and domain information
+    bounded_context = detect_bounded_context(java_file_path)
+    api_endpoints = extract_api_endpoints(java_class)
+    domain = extract_domain_from_path(java_file_path)
+
+    metadata = {
+        'annotations': class_annotations,
+        'dependencies': [],
+        'inter_service_calls': [],
+        'fields': [],
+        'methods': [],
+        'relationships': [],
+        'file_path': str(java_file_path),
+        'last_modified': last_modified,
+        'component_type': detect_spring_component_type(java_class),
+        'bounded_context': bounded_context,  # Add bounded context to metadata
+        'api_endpoints': api_endpoints,  # Add API endpoints to metadata
+        'domain': domain,  # Add domain information to metadata
+        'complexity_metrics': calculate_complexity_metrics(java_class)
+    }
+
+    metadata['fields'] = extract_fields(java_class)
+    metadata['methods'] = extract_methods(java_class)
+
+    detect_service_injections(java_class, metadata)
+
+    # Cache metadata
+    metadata_cache[class_name] = metadata
+    scan_summary[class_name] = metadata
+    scan_summary[class_name]['relationships'] = detect_relationships(java_class, metadata)
+
+    logger.info(f"Class {class_name} scanned with metadata: {metadata}")
+
+
+def detect_bounded_context(java_file_path: Path) -> str:
+    """Detect bounded context based on the file path or class annotations."""
+    # Assuming bounded contexts are defined by directory structure or annotations
+    if "booking" in str(java_file_path).lower():
+        return "Booking Context"
+    elif "passenger" in str(java_file_path).lower():
+        return "Passenger Context"
+    # Add more logic for bounded contexts here
+    return "Unknown Context"
+
+
+def extract_api_endpoints(java_class) -> List[str]:
+    """Extract API endpoints from a Java class by scanning for annotations like @GetMapping."""
+    api_endpoints = []
+    for method in java_class.methods:
+        for annotation in method.annotations:
+            annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+            if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
+                # Assume the endpoint URL is in the annotation's element values
+                if annotation.element and annotation.element.values:
+                    endpoint = annotation.element.values[0].value
+                    api_endpoints.append(f"{annotation_name}: {endpoint}")
+    return api_endpoints
+
+
+def extract_domain_from_path(java_file_path: Path) -> str:
+    """Extract domain from the file path. This assumes domains are structured in directories."""
+    path_parts = str(java_file_path).split(os.sep)
+    if "booking" in path_parts:
+        return "Booking Domain"
+    elif "flight" in path_parts:
+        return "Flight Domain"
+    elif "passenger" in path_parts:
+        return "Passenger Domain"
+    # Add more domains as needed
+    return "Unknown Domain"
+
+
+
+def list_classes(scan_summary):
+    """Display a list of scanned classes and their metadata."""
+    class_list = []
+    for class_name, metadata in scan_summary.items():
+        class_list.append({
+            'Class Name': class_name,
+            'Component Type': metadata['component_type'],
+            'File Path': metadata['file_path'],
+            'Annotations': metadata['annotations'],
+            'Dependencies': metadata['dependencies']
+        })
+
+    st.write("### List of Scanned Classes")
+    st.dataframe(class_list)
+
+
+def visualize_inter_service_graph_pyvis(scan_summary):
+    """Create an interactive network graph using PyVis."""
+    net = Network(notebook=True, height="900px", width="100%", directed=True)
+
+    # Color nodes based on their bounded context or domain
+    context_color_map = {
+        "Booking Context": "lightblue",
+        "Passenger Context": "lightgreen",
+        "Flight Domain": "lightcoral",
+        "Booking Domain": "lightyellow",
+        "Unknown Context": "lightgrey"
+    }
+
+    for class_name, metadata in scan_summary.items():
+        # Get bounded context and color
+        bounded_context = metadata.get('bounded_context', "Unknown Context")
+        domain = metadata.get('domain', "Unknown Domain")
+        node_color = context_color_map.get(bounded_context, "lightgrey")
+
+        # Prepare tooltip with more information
+        tooltip = f"Context: {bounded_context}<br>Domain: {domain}<br>"
+        if 'api_endpoints' in metadata and metadata['api_endpoints']:
+            tooltip += "API Endpoints:<br>" + "<br>".join(metadata['api_endpoints'])
+        else:
+            tooltip += "No API Endpoints"
+
+        # Add the class node with color, size, and tooltip
+        net.add_node(class_name,
+                     label=class_name,
+                     title=tooltip,
+                     color=node_color,
+                     size=20,
+                     font={"size": 14})
+
+        for rel in metadata['relationships']:
+            target = rel['target']
+            # Ensure the target node exists before creating the edge
+            if target not in net.get_nodes():
+                net.add_node(target, label=target, size=15, font={"size": 12})
+
+            # Add the edge between the class and the target
+            net.add_edge(class_name, target, title=rel['relationship_type'])
+
+    # Adjust physics and layout settings
+    net.toggle_physics(True)
+    net.set_options("""
+    var options = {
+      "nodes": {
+        "shape": "dot",
+        "size": 16,
+        "font": {
+          "size": 12,
+          "color": "black"
+        },
+        "color": {
+          "border": "black"
+        }
+      },
+      "edges": {
+        "arrows": {
+          "to": {
+            "enabled": true
+          }
+        },
+        "smooth": {
+          "type": "dynamic"
+        }
+      },
+      "physics": {
+        "barnesHut": {
+          "gravitationalConstant": -5000,
+          "springLength": 300,
+          "springConstant": 0.05
+        },
+        "minVelocity": 0.75
+      },
+      "interaction": {
+        "hideEdgesOnDrag": true,
+        "hover": true,
+        "navigationButtons": true,
+        "keyboard": true
+      }
+    }
+    """)
+
+    # Generate the graph
+    net.show("dependency_graph.html")
+
+    # Display in Streamlit
+    HtmlFile = open("dependency_graph.html", 'r', encoding='utf-8')
+    source_code = HtmlFile.read()
+    st.components.v1.html(source_code, height=900, width=1000)
+
+
+def main():
+    """Main function to launch the Streamlit app."""
+    st.title("Java Project Dependency Scanner")
+
+    # Input for project path and output format
+    project_path = st.text_input("Enter the path to the Java project to scan:", value="")
+    output_format = st.selectbox("Select output format:", ['json', 'html'])
+
+    if st.button("Start Scan"):
+        if project_path:
+            # Load configuration
+            config_path = os.path.join(project_path, "config.yaml")
+            load_configuration(config_path)
+
+            # Start scanning the project
+            scan_project_async(project_path, output_format)
+
+            st.success("Project scanned successfully!")
+
+            # Visualize classes and dependencies
+            list_classes(scan_summary)
+            visualize_dependencies(scan_summary)
+            visualize_inter_service_graph_pyvis(scan_summary)
+
+
+if __name__ == "__main__":
+    main()
