@@ -162,3 +162,72 @@ public class RetrievalDTOProcessor implements ItemProcessor<RetrievalDTO, Retrie
     }
 }
 
+
+
+import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.time.DayOfWeek;
+import java.util.concurrent.atomic.AtomicInteger;
+
+@Component
+@Log4j2
+public class RetrievalDTOProcessor implements ItemProcessor<RetrievalDTO, RetrievalDTO> {
+
+    private static final AtomicInteger recordCounter = new AtomicInteger(0); // Record counter
+    private static final String DATE_FORMAT = "yyyyMMdd"; // Assuming dueDate is in this format
+
+    @Override
+    public RetrievalDTO process(RetrievalDTO item) throws Exception {
+        // Step 1: Filter records
+        if (!"COL".equals(item.getSubChannel()) || Double.parseDouble(item.getStatementBalance()) <= 0.0) {
+            log.info("Record with DetailRecordId {} is being filtered out due to subChannel or statement balance.", item.getDetailRecordId());
+            return null; // Skip invalid records
+        }
+
+        // Increment the record count for each valid record
+        int currentCount = recordCounter.incrementAndGet();
+        log.info("Processing valid record #{}", currentCount);
+
+        // Step 2: Calculate the hanging days
+        LocalDate dueDate = LocalDate.parse(item.getDueDate(), DateTimeFormatter.ofPattern(DATE_FORMAT));
+        LocalDate currentDate = LocalDate.now();
+        DayOfWeek dayOfWeek = currentDate.getDayOfWeek();
+        long hangingDays;
+
+        if (dayOfWeek == DayOfWeek.SUNDAY) {
+            // If today is Sunday, calculate hanging days based on a 6-day difference
+            hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(6), currentDate);
+            log.info("Hanging days for valid record #{} calculated as {} (Sunday adjustment).", currentCount, hangingDays);
+        } else {
+            // Otherwise, use a 5-day difference
+            hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(5), currentDate);
+            log.info("Hanging days for valid record #{} calculated as {} (Weekday adjustment).", currentCount, hangingDays);
+        }
+
+        // Step 3: Map fields to a new DTO
+        RetrievalDTO reportDTO = new RetrievalDTO();
+        reportDTO.setDetailRecordId("D");  // DetailRecordId is constant "D"
+        reportDTO.setHangingDays(hangingDays);
+        reportDTO.setPaymentType(item.getPaymentType());
+        reportDTO.setAccountNumber(item.getAccountNumber());
+        reportDTO.setConfirmationNumber(item.getConfirmationNumber());
+        reportDTO.setDueDate(item.getDueDate());
+        reportDTO.setMarketId(item.getMarketId());
+        reportDTO.setCreateTimestamp(item.getCreateTimestamp());
+
+        // Log that the record has been processed successfully
+        log.info("Valid record #{} processed successfully.", currentCount);
+
+        return reportDTO;
+    }
+
+    // Method to get the total processed valid record count
+    public static int getTotalRecordCount() {
+        return recordCounter.get();
+    }
+}
