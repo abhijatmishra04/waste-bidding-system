@@ -231,3 +231,52 @@ public class RetrievalDTOProcessor implements ItemProcessor<RetrievalDTO, Retrie
         return recordCounter.get();
     }
 }
+
+
+@Bean(name = "dayPlusOneWriter")
+@StepScope
+public FlatFileItemWriter<RetrievalDTO> dayPlusOneWriter() {
+    Log.info("dayPlusOneWriter ::: flatFileItemWriter() :: Thread Id: {}, Thread name: {}",
+            Thread.currentThread().getId(), Thread.currentThread().getName());
+
+    String threadParam = Thread.currentThread().getId() + "-" + Thread.currentThread().getName() + "-" + new Random().nextInt();
+
+    this.outputFlatFilePath = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.output.flat.file.path");
+    this.aggregatorFormat = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.aggregator.format");
+    this.flatfileWriterName = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.flatfile.writer.name");
+
+    FlatFileItemWriter<RetrievalDTO> itemWriter = new FlatFileItemWriter<>();
+    itemWriter.setName(flatfileWriterName);
+
+    String fullFilePath = outputFlatFilePath + "/" + threadParam + "dayPlusOneWriter.txt";
+    itemWriter.setResource(new FileSystemResource(fullFilePath));
+
+    // Set the header
+    itemWriter.setHeaderCallback(writer -> {
+        writer.write("LIST OF CREDIT ASSISTANCE PTUI CC AUTOPAY PAYMENTS THAT ARE...\n");
+        writer.write("TRAN REF ID    | CC-ACCOUNT NUMBER     | PAYMENT TYPE | DUE DATE   | HANGING DAYS | MARKET ID | CREATE TIMESTAMP\n");
+        writer.write("---------------------------------------------------------------------------------------------------------------\n");
+    });
+
+    // Set the footer callback to write the total record count
+    itemWriter.setFooterCallback(writer -> {
+        int totalRecordCount = RetrievalDTOProcessor.getTotalRecordCount(); // Get the total valid record count from the processor
+        writer.write("T TOTAL RECORD COUNT " + String.format("%015d", totalRecordCount) + "\n");
+        log.info("Footer added with total valid record count: {}", totalRecordCount);
+    });
+
+    // Set the LineAggregator for formatting the records
+    FormatterLineAggregator<RetrievalDTO> formatterAggregator = new FormatterLineAggregator<>();
+    BeanWrapperFieldExtractor<RetrievalDTO> extractor = new BeanWrapperFieldExtractor<>();
+    extractor.setNames(RetrievalDTO.outputFields());
+    formatterAggregator.setFieldExtractor(extractor);
+    formatterAggregator.setFormat(aggregatorFormat);
+    itemWriter.setLineAggregator(formatterAggregator);
+
+    Log.info("dayPlusOneWriter ::: flatFileItemWriter() ::: writer Object ::: {}", itemWriter);
+
+    return itemWriter;
+}
