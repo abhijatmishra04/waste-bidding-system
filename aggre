@@ -24,3 +24,65 @@ public class RetrievalDTO {
 }
 
 formatterAggregator.setFormat("%-10s%-20s%-5s%-10s%-10s%-4s%-26s");
+
+
+@Bean(name = "dayPlusOneWriter")
+@StepScope
+public FlatFileItemWriter<RetrievalDTO> dayPlusOneWriter() {
+    Log.info("dayPlusOneWriter ::: flatFileItemWriter() :: Thread Id: {}, Thread name: {}",
+            Thread.currentThread().getId(), Thread.currentThread().getName());
+
+    String threadParam = Thread.currentThread().getId() + "-" + Thread.currentThread().getName() + "-" + new Random().nextInt();
+
+    this.outputFlatFilePath = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.output.flat.file.path");
+    this.aggregatorFormat = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.aggregator.format");
+    this.flatfileWriterName = dynamicConfigPropRepository
+            .findPropertyValueByPropertyName("collectionletters.flatfile.writer.name");
+
+    FlatFileItemWriter<RetrievalDTO> itemWriter = new FlatFileItemWriter<>();
+
+    // Counter to keep track of records
+    AtomicInteger recordCount = new AtomicInteger();
+
+    itemWriter.setHeaderCallback(new FlatFileHeaderCallback() {
+        @Override
+        public void writeHeader(Writer header) throws IOException {
+            header.write(SdpRespConstants.HANGING_HEADER1);
+            Log.info("dayPlusOneWriter ::: flatFileItemWriter() ::: Headers are set :::" + header);
+        }
+    });
+
+    itemWriter.setFooterCallback(new FlatFileFooterCallback() {
+        @Override
+        public void writeFooter(Writer footer) throws IOException {
+            // Write the record count in the trailer/footer
+            footer.write(SdpRespConstants.SST_REC_ID_TLR + SdpRespConstants.SPACES_172);
+            footer.write(String.format("Total Record Count: %d", recordCount.get()));
+            Log.info("dayPlusOneWriter ::: flatFileItemWriter() ::: Footers are set :::" + footer);
+        }
+    });
+
+    itemWriter.setName(flatfileWriterName);
+    itemWriter.setResource(new FileSystemResource(outputFlatFilePath + "/" + threadParam + "dayPlusOneWriter.txt"));
+
+    FormatterLineAggregator<RetrievalDTO> formatterAggregator = new FormatterLineAggregator<>();
+    BeanWrapperFieldExtractor<RetrievalDTO> extractor = new BeanWrapperFieldExtractor<>();
+    extractor.setNames(RetrievalDTO.outputFields());
+    formatterAggregator.setFieldExtractor(extractor);
+    formatterAggregator.setFormat(aggregatorFormat);
+    itemWriter.setLineAggregator(formatterAggregator);
+
+    // Increment record count on each record write
+    itemWriter.setAfterWriteListener(new ItemWriteListener<RetrievalDTO>() {
+        @Override
+        public void afterWrite(List<? extends RetrievalDTO> items) {
+            recordCount.addAndGet(items.size());
+        }
+    });
+
+    Log.info("dayPlusOneWriter ::: flatFileItemWriter() ::: writer Object ::: {}", itemWriter);
+
+    return itemWriter;
+}
