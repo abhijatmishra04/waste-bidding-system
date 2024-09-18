@@ -1,0 +1,26 @@
+@Data
+public class RetrievalDTO {
+
+    private String transactionReferenceId; // RETR-STB-TRAN-REF-ID  -> TRAN REF ID
+    private String accountNumber;          // RETR-STB-ACCOUNT-NUMBER -> CC-ACCOUNT NUMBER
+    private String paymentType;            // RETR-STB-PAYMENT-TYPE -> PAYMENT TYPE
+    private String dueDate;                // RETR-STB-DUE-DATE -> DUE DATE
+    private Long HangingDays;              // RETR-STB-HANGING-DAYS -> HANGING DAYS
+    private String marketId;               // RETR-STB-MARKET-ID -> MARKET ID
+    private String createTimestamp;        // RETR-STB-CREATE-TIMESTAMP -> CREATE TIMESTAMP
+
+    // This method returns only the fields present in the screenshot to be mapped to the output file.
+    public static String[] outputFields() {
+        return new String[] {
+            "transactionReferenceId", // Maps to TRAN REF ID in the flat file
+            "accountNumber",          // Maps to CC-ACCOUNT NUMBER in the flat file
+            "paymentType",            // Maps to PAYMENT TYPE in the flat file
+            "dueDate",                // Maps to DUE DATE in the flat file
+            "HangingDays",            // Maps to HANGING DAYS in the flat file
+            "marketId",               // Maps to MARKET ID in the flat file
+            "createTimestamp"         // Maps to CREATE TIMESTAMP in the flat file
+        };
+    }
+}
+
+formatterAggregator.setFormat("%-10s%-20s%-5s%-10s%-10s%-4s%-26s");
