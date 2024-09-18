@@ -284,3 +284,119 @@ public FlatFileItemWriter<RetrievalDTO> dayPlusOneWriter() {
   int totalRecordCount = RetrievalDTOProcessor.getTotalRecordCount(); // Get the total valid record count from the processor
         writer.write("T TOTAL RECORD COUNT " + String.format("%015d", totalRecordCount) + "\n");
         log.info("Footer added with total valid record count: {}", totalRecordCount);
+
+
+
+
+
+import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+@Log4j2
+@Component
+public class SdpRespJobListener implements JobExecutionListener {
+
+    @Autowired
+    protected M2MDynamicConfigPropertiesRepository dynamicConfigPropertiesRepository;
+
+    @Autowired
+    private FileWriterService exceptionWriter;
+
+    @Autowired
+    private SDPExceptionHandlerService exceptionHandler;
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        log.trace("SdpRespJobListener ::: beforeJob ::: Entry");
+
+        // Get ExecutionContext
+        ExecutionContext context = jobExecution.getExecutionContext();
+
+        try {
+            // Example: Initialize some file properties if needed
+            exceptionWriter.initFileProperties();
+            exceptionWriter.writeHeader();
+        } catch (IOException e) {
+            log.error("SdpRespJobListener ::: beforeJob :: Exception in creating exception file", e);
+            jobExecution.setExitStatus(new ExitStatus("FAILED", "Exception File Creation Issue"));
+        }
+
+        // Fetch and add necessary file paths and names for the aggregation tasklet
+        String outputDirectory = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName("collectionletters.output.flat.file.path");
+
+        // File names for the files to aggregate
+        String dayPlusOneFileName = "dayPlusOneWriter.txt";
+        String moreThan7DaysFileName = "moreThan7DaysWriter.txt";
+        String moreThan25DaysFileName = "moreThan25DaysWriter.txt";
+
+        // Add properties to the ExecutionContext
+        context.putString("outputDirectory", outputDirectory);
+        context.putString("dayPlusOneFileName", dayPlusOneFileName);
+        context.putString("moreThan7DaysFileName", moreThan7DaysFileName);
+        context.putString("moreThan25DaysFileName", moreThan25DaysFileName);
+
+        // Additional context properties as per the existing logic
+        String customerType = jobExecution.getJobParameters().getString(SdpRespConstants.JOB_TYPE);
+        String bacardiFilePath = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName(SdpRespConstants.BACARDI_FILE_DIRECTORY_PATH);
+        String requestFilePath = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName(SdpRespConstants.SDP_REQUEST_FILE_DIRECTORY_PATH);
+        String jobID = jobExecution.getJobId().toString();
+        context.putString(SdpRespConstants.JOB_ID, jobID);
+        context.putString(SdpRespConstants.BACARDI_RESPONSE_DIRECTORY_PATH, bacardiFilePath);
+        context.putString(SdpRespConstants.SDP_REQUEST_DIRECTORY_PATH, requestFilePath);
+
+        // Job-specific logic for file prefixes
+        if (SdpRespConstants.CONSUMER.equalsIgnoreCase(customerType)) {
+            context.putString(SdpRespConstants.BACARDI_RESPONSE_FILE_PREFIX,
+                    dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(SdpRespConstants.BACARDI_CONSUMER_FILE_PREFIX));
+            context.putString(SdpRespConstants.SDP_REQUEST_FILE_PREFIX,
+                    SdpRespConstants.CONSUMER_SDPREQUEST_FILE_PREFIX);
+        } else {
+            context.putString(SdpRespConstants.BACARDI_RESPONSE_FILE_PREFIX,
+                    dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(SdpRespConstants.BACARDI_SMB_FILE_PREFIX));
+            context.putString(SdpRespConstants.SDP_REQUEST_FILE_PREFIX,
+                    SdpRespConstants.SMB_SDPREQUEST_FILE_PREFIX);
+        }
+
+        log.trace("SdpRespJobListener ::: beforeJob ::: Exit");
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        log.trace("SdpRespJobListener ::: afterJob ::: Entry");
+
+        // Check job completion status and retrieve execution context details
+        if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
+            ExecutionContext context = jobExecution.getExecutionContext();
+            int readCount = context.getInt(SdpRespConstants.READ_COUNT, 0);
+            int writeCount = context.getInt(SdpRespConstants.WRITE_COUNT, 0);
+            int skipCount = context.getInt(SdpRespConstants.SKIP_COUNT, 0);
+
+            log.debug("SdpRespJobListener ::: afterJob :: Records Read: {}, Records Skipped: {}, Records Written: {}",
+                    readCount, skipCount, writeCount);
+
+            // Archive file logic or unlock file, if needed
+            String filePrefix = jobExecution.getExecutionContext().getString(SdpRespConstants.BACARDI_RESPONSE_FILE_PREFIX);
+            String directoryPath = jobExecution.getExecutionContext().getString(SdpRespConstants.BACARDI_RESPONSE_DIRECTORY_PATH);
+            LocalDate date = LocalDate.now();
+            if (date.getDayOfWeek().equals(DayOfWeek.MONDAY)) {
+                date = date.minusDays(1);
+            }
+
+            FileUtils.unlockFile(directoryPath, filePrefix, SdpRespConstants.LOCK_FILE_EXTENSION, date);
+            FileUtils.archiveFile(directoryPath, filePrefix, SdpRespConstants.INPUT_FILE_EXTENSION, date);
+
+        } else {
+            // Error handling if the job fails
+            log.error("SdpRespJobListener ::: afterJob :: Job failed with status: {}", jobExecution.getStatus());
+        }
+
+        log.trace("SdpRespJobListener ::: afterJob ::: Exit");
+    }
+}
