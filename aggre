@@ -280,3 +280,7 @@ public FlatFileItemWriter<RetrievalDTO> dayPlusOneWriter() {
 
     return itemWriter;
 }
+
+  int totalRecordCount = RetrievalDTOProcessor.getTotalRecordCount(); // Get the total valid record count from the processor
+        writer.write("T TOTAL RECORD COUNT " + String.format("%015d", totalRecordCount) + "\n");
+        log.info("Footer added with total valid record count: {}", totalRecordCount);
