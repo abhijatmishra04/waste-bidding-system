@@ -607,3 +607,72 @@ public void testLineMapper() throws Exception {
         assertNotNull(reader);
         // You can mock the resource or check if the resource is set correctly
     }
+
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.batch.item.file.transform.FieldSet;
+
+import com.bofa.ept.sst.batch.dto.RetrievalDTO;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+@RunWith(MockitoJUnitRunner.class)
+public class RetrievalDTOItemReaderTest {
+
+    @InjectMocks
+    private RetrievalDTOItemReader retrievalDTOItemReader;
+
+    @Mock
+    private FieldSet fieldSet;  // Mock the FieldSet
+
+    @Before
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+
+        // Mock the FieldSet values for each field
+        when(fieldSet.readString("detailRecordId")).thenReturn("1001");
+        when(fieldSet.readString("accountNumber")).thenReturn("ACC123");
+        when(fieldSet.readString("referenceKey")).thenReturn("REF456");
+        when(fieldSet.readString("systemId")).thenReturn("SYS789");
+        when(fieldSet.readString("sstKey")).thenReturn("SST001");
+        when(fieldSet.readString("confirmationNumber")).thenReturn("CONFIRM987");
+        when(fieldSet.readString("transactionReferenceId")).thenReturn("TX123");
+        when(fieldSet.readString("paymentType")).thenReturn("CREDIT");
+        when(fieldSet.readString("xdays")).thenReturn("30");
+        when(fieldSet.readString("dueDate")).thenReturn("2024-01-01");
+        when(fieldSet.readString("marketId")).thenReturn("MARKET001");
+        when(fieldSet.readString("createTimestamp")).thenReturn("2024-01-01T12:00:00");
+        when(fieldSet.readString("subChannel")).thenReturn("SUB001");
+        when(fieldSet.readString("statementBalance")).thenReturn("5000.00");
+    }
+
+    @Test
+    public void testFieldSetMapper() throws Exception {
+        // Call the fieldSetMapper method to map the FieldSet to a RetrievalDTO
+        RetrievalDTO dto = retrievalDTOItemReader.fieldSetMapper().mapFieldSet(fieldSet);
+
+        // Validate that the DTO has the correct values
+        assertNotNull(dto);
+        assertEquals("1001", dto.getDetailRecordId());
+        assertEquals("ACC123", dto.getAccountNumber());
+        assertEquals("REF456", dto.getReferenceKey());
+        assertEquals("SYS789", dto.getSystemId());
+        assertEquals("SST001", dto.getSstKey());
+        assertEquals("CONFIRM987", dto.getConfirmationNumber());
+        assertEquals("TX123", dto.getTransactionReferenceId());
+        assertEquals("CREDIT", dto.getPaymentType());
+        assertEquals("30", dto.getXdays());
+        assertEquals("2024-01-01", dto.getDueDate());
+        assertEquals("MARKET001", dto.getMarketId());
+        assertEquals("2024-01-01T12:00:00", dto.getCreateTimestamp());
+        assertEquals("SUB001", dto.getSubChannel());
+        assertEquals("5000.00", dto.getStatementBalance());
+    }
+}
