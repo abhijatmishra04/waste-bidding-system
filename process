@@ -126,3 +126,112 @@ public class RetrievalDTOProcessorTest {
         assertEquals(2, RetrievalDTOProcessor.getTotalRecordCount());
     }
 }
+
+
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.support.ClassifierCompositeItemWriter;
+
+import com.bofa.ept.sst.batch.dto.RetrievalDTO;
+
+@RunWith(MockitoJUnitRunner.class)
+public class HangingReportClassifierWriterTest {
+
+    @InjectMocks
+    private HangingReportClassifierWriter hangingReportClassifierWriter;
+
+    @Mock
+    private HangingReportWriter1 hangingReportWriter1;
+
+    @Mock
+    private ItemWriter<RetrievalDTO> mockItemWriter;  // Mock ItemWriter to simulate different routes
+
+    private RetrievalDTO retrievalDTO;
+
+    @Before
+    public void setUp() {
+        // Initialize mocks
+        MockitoAnnotations.initMocks(this);
+
+        // Create a dummy RetrievalDTO instance
+        retrievalDTO = new RetrievalDTO();
+
+        // Use lenient() to ignore unused stubbings in some tests
+        lenient().when(hangingReportWriter1.dayPlusOneWriter()).thenReturn(mockItemWriter);
+        lenient().when(hangingReportWriter1.moreThan7DaysWriter()).thenReturn(mockItemWriter);
+        lenient().when(hangingReportWriter1.moreThan25DaysWriter()).thenReturn(mockItemWriter);
+    }
+
+    @Test
+    public void testClassifier_dayPlusOneWriter() throws Exception {
+        // Set hangingDays to 1 in the DTO
+        retrievalDTO.setHangingDays(1L);
+
+        // Get the composite writer
+        ClassifierCompositeItemWriter<RetrievalDTO> writer = hangingReportClassifierWriter.HangingReportFileClassifier();
+
+        // Classify the DTO and check that it routes to dayPlusOneWriter
+        ItemWriter<RetrievalDTO> classifiedWriter = writer.getClassifier().classify(retrievalDTO);
+        assertNotNull(classifiedWriter);
+        assertEquals(mockItemWriter, classifiedWriter);
+
+        // Verify interaction with dayPlusOneWriter
+        verify(hangingReportWriter1).dayPlusOneWriter();
+    }
+
+    @Test
+    public void testClassifier_moreThan7DaysWriter() throws Exception {
+        // Set hangingDays to 10 in the DTO
+        retrievalDTO.setHangingDays(10L);
+
+        // Get the composite writer
+        ClassifierCompositeItemWriter<RetrievalDTO> writer = hangingReportClassifierWriter.HangingReportFileClassifier();
+
+        // Classify the DTO and check that it routes to moreThan7DaysWriter
+        ItemWriter<RetrievalDTO> classifiedWriter = writer.getClassifier().classify(retrievalDTO);
+        assertNotNull(classifiedWriter);
+        assertEquals(mockItemWriter, classifiedWriter);
+
+        // Verify interaction with moreThan7DaysWriter
+        verify(hangingReportWriter1).moreThan7DaysWriter();
+    }
+
+    @Test
+    public void testClassifier_moreThan25DaysWriter() throws Exception {
+        // Set hangingDays to 26 in the DTO
+        retrievalDTO.setHangingDays(26L);
+
+        // Get the composite writer
+        ClassifierCompositeItemWriter<RetrievalDTO> writer = hangingReportClassifierWriter.HangingReportFileClassifier();
+
+        // Classify the DTO and check that it routes to moreThan25DaysWriter
+        ItemWriter<RetrievalDTO> classifiedWriter = writer.getClassifier().classify(retrievalDTO);
+        assertNotNull(classifiedWriter);
+        assertEquals(mockItemWriter, classifiedWriter);
+
+        // Verify interaction with moreThan25DaysWriter
+        verify(hangingReportWriter1).moreThan25DaysWriter();
+    }
+
+    @Test
+    public void testClassifier_noWriter() throws Exception {
+        // Set hangingDays to a value that doesn't match any writer (e.g., 0)
+        retrievalDTO.setHangingDays(0L);
+
+        // Get the composite writer
+        ClassifierCompositeItemWriter<RetrievalDTO> writer = hangingReportClassifierWriter.HangingReportFileClassifier();
+
+        // Classify the DTO and check that it routes to null (no writer)
+        ItemWriter<RetrievalDTO> classifiedWriter = writer.getClassifier().classify(retrievalDTO);
+        assertNull(classifiedWriter);
+    }
+}
