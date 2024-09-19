@@ -736,3 +736,134 @@ public class RetrievalDTOItemReaderTest {
     }
 }
 
+
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.runners.MockitoJUnitRunner;
+import com.bofa.ept.sst.batch.dto.RetrievalDTO;
+import org.springframework.batch.item.ItemProcessor;
+
+@RunWith(MockitoJUnitRunner.class)
+public class RetrievalDTOProcessorTest {
+
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    @InjectMocks
+    private RetrievalDTOProcessor processor;
+
+    @Mock
+    private RetrievalDTO item;  // Mocked DTO to simulate input
+
+    @Before
+    public void setUp() {
+        // Initialize Mockito
+        MockitoAnnotations.initMocks(this);
+    }
+
+    @Test
+    public void testProcess_filteredOutBySubChannel() throws Exception {
+        // Mock subChannel and statementBalance
+        when(item.getSubChannel()).thenReturn("NOT_COL");
+        when(item.getStatementBalance()).thenReturn("500.00");
+
+        // Call the process method
+        RetrievalDTO result = processor.process(item);
+
+        // Since subChannel is not "COL", the result should be null (filtered out)
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_filteredOutByStatementBalance() throws Exception {
+        // Mock subChannel and statementBalance
+        when(item.getSubChannel()).thenReturn("COL");
+        when(item.getStatementBalance()).thenReturn("0.0");
+
+        // Call the process method
+        RetrievalDTO result = processor.process(item);
+
+        // Since statementBalance is <= 0, the result should be null (filtered out)
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_validRecordWeekday() throws Exception {
+        // Mock a valid input with subChannel = "COL" and statementBalance > 0
+        when(item.getSubChannel()).thenReturn("COL");
+        when(item.getStatementBalance()).thenReturn("1000.00");
+        when(item.getDueDate()).thenReturn("20240925"); // September 25, 2024 (a Wednesday)
+        when(item.getPaymentType()).thenReturn("CREDIT");
+        when(item.getAccountNumber()).thenReturn("ACC123");
+        when(item.getConfirmationNumber()).thenReturn("CONFIRM456");
+        when(item.getMarketId()).thenReturn("MARKET789");
+        when(item.getCreateTimestamp()).thenReturn("20240101T120000");
+
+        // Call the process method
+        RetrievalDTO result = processor.process(item);
+
+        // Assert that the result is not null (valid record)
+        assertNotNull(result);
+
+        // Assert the hanging days are calculated for a weekday
+        assertEquals(5, result.getHangingDays());
+
+        // Assert the other values are mapped correctly
+        assertEquals("D", result.getDetailRecordId());
+        assertEquals("CREDIT", result.getPaymentType());
+        assertEquals("ACC123", result.getAccountNumber());
+        assertEquals("CONFIRM456", result.getConfirmationNumber());
+        assertEquals("20240925", result.getDueDate());
+        assertEquals("MARKET789", result.getMarketId());
+        assertEquals("20240101T120000", result.getCreateTimestamp());
+    }
+
+    @Test
+    public void testProcess_validRecordSunday() throws Exception {
+        // Mock a valid input with subChannel = "COL" and statementBalance > 0
+        when(item.getSubChannel()).thenReturn("COL");
+        when(item.getStatementBalance()).thenReturn("1000.00");
+        when(item.getDueDate()).thenReturn("20240922"); // September 22, 2024 (a Sunday)
+        when(item.getPaymentType()).thenReturn("CREDIT");
+        when(item.getAccountNumber()).thenReturn("ACC123");
+        when(item.getConfirmationNumber()).thenReturn("CONFIRM456");
+        when(item.getMarketId()).thenReturn("MARKET789");
+        when(item.getCreateTimestamp()).thenReturn("20240101T120000");
+
+        // Call the process method
+        RetrievalDTO result = processor.process(item);
+
+        // Assert that the result is not null (valid record)
+        assertNotNull(result);
+
+        // Assert the hanging days are calculated for a Sunday
+        assertEquals(6, result.getHangingDays()); // Sunday has an adjustment of 6 days
+
+        // Assert the other values are mapped correctly
+        assertEquals("D", result.getDetailRecordId());
+        assertEquals("CREDIT", result.getPaymentType());
+        assertEquals("ACC123", result.getAccountNumber());
+        assertEquals("CONFIRM456", result.getConfirmationNumber());
+        assertEquals("20240922", result.getDueDate());
+        assertEquals("MARKET789", result.getMarketId());
+        assertEquals("20240101T120000", result.getCreateTimestamp());
+    }
+
+    @Test
+    public void testGetTotalRecordCount() {
+        // Process a couple of valid records to increment the counter
+        processor.process(item);
+        processor.process(item);
+
+        // Check that the record count matches the number of processed records
+        assertEquals(2, RetrievalDTOProcessor.getTotalRecordCount());
+    }
+}
+
