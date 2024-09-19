@@ -576,3 +576,18 @@ public class RetrievalDTOItemReaderTest {
         assertEquals(30, ranges[2].getMax());
     }
 }
+
+
+
+@Test
+public void testLineMapper() throws Exception {
+    // Cast the returned value from LineMapper to DefaultLineMapper
+    DefaultLineMapper<RetrievalDTO> lineMapper = (DefaultLineMapper<RetrievalDTO>) retrievalDTOItemReader.lineMapper();
+    
+    assertNotNull(lineMapper);
+    assertTrue(lineMapper.getLineTokenizer() instanceof FixedLengthTokenizer);
+
+    FixedLengthTokenizer tokenizer = (FixedLengthTokenizer) lineMapper.getLineTokenizer();
+    assertArrayEquals(fieldNames, tokenizer.getNames());
+    assertEquals(3, tokenizer.getColumns().length);  // assuming 3 columns
+}
