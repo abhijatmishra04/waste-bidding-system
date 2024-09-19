@@ -338,3 +338,145 @@ public class HangingReportClassifierWriterTest {
         verify(hangingReportWriter1, never()).moreThan25DaysWriter();
     }
 }
+
+
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.item.file.FlatFileItemWriter;
+import org.springframework.batch.item.file.transform.FormatterLineAggregator;
+import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
+import org.springframework.core.io.FileSystemResource;
+import java.io.Writer;
+import java.util.Random;
+
+public class HangingReportWriter1Test {
+
+    @InjectMocks
+    private HangingReportWriter1 hangingReportWriter1;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Mock
+    private FlatFileItemWriter<RetrievalDTO> mockFlatFileWriter;
+
+    @Mock
+    private Writer mockWriter;
+
+    private final String expectedOutputFilePath = "/output/file/path";
+    private final String expectedAggregatorFormat = "aggregator_format";
+    private final String expectedWriterName = "writer_name";
+    private final String hangingHeader1 = "HANGING_HEADER1";
+    private final String hangingHeader2 = "HANGING_HEADER2";
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+
+        // Mocking the dynamicConfigPropRepository to return specific values
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.output.flat.file.path"))
+            .thenReturn(expectedOutputFilePath);
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.aggregator.format"))
+            .thenReturn(expectedAggregatorFormat);
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.flatfile.writer.name"))
+            .thenReturn(expectedWriterName);
+    }
+
+    // Test for the "dayPlusOneWriter" bean
+    @Test
+    public void testDayPlusOneWriter() throws Exception {
+        // Invoke the dayPlusOneWriter method
+        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.dayPlusOneWriter();
+
+        // Verifying that the correct file path and file name are set
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
+
+        // Ensure the correct file path is set with thread-specific parameter
+        assertTrue(writer.getResource().getFilename().contains("dayPlusOneWriter.txt"));
+        
+        // Verify header callback writes correct content
+        writer.setHeaderCallback(header -> assertEquals(hangingHeader1, header));
+
+        // Verify footer callback writes total record count
+        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
+
+        // Ensure the correct format is applied to the line aggregator
+        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
+        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
+    }
+
+    // Test for the "moreThan7DaysWriter" bean
+    @Test
+    public void testMoreThan7DaysWriter() throws Exception {
+        // Invoke the moreThan7DaysWriter method
+        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.moreThan7DaysWriter();
+
+        // Verifying that the correct file path and file name are set
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
+
+        // Ensure the correct file path is set with thread-specific parameter
+        assertTrue(writer.getResource().getFilename().contains("moreThan7DaysWriter.txt"));
+        
+        // Verify header callback writes correct content
+        writer.setHeaderCallback(header -> assertEquals(hangingHeader2, header));
+
+        // Verify footer callback writes total record count
+        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
+
+        // Ensure the correct format is applied to the line aggregator
+        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
+        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
+    }
+
+    // Test for the "moreThan25DaysWriter" bean
+    @Test
+    public void testMoreThan25DaysWriter() throws Exception {
+        // Invoke the moreThan25DaysWriter method
+        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.moreThan25DaysWriter();
+
+        // Verifying that the correct file path and file name are set
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
+        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
+
+        // Ensure the correct file path is set with thread-specific parameter
+        assertTrue(writer.getResource().getFilename().contains("moreThan25DaysWriter.txt"));
+        
+        // Verify header callback writes correct content
+        writer.setHeaderCallback(header -> assertEquals(hangingHeader2, header));
+
+        // Verify footer callback writes total record count
+        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
+
+        // Ensure the correct format is applied to the line aggregator
+        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
+        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
+    }
+
+    // Testing the formatter extractor setup
+    @Test
+    public void testBeanWrapperFieldExtractorSetup() throws Exception {
+        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.dayPlusOneWriter();
+
+        BeanWrapperFieldExtractor<RetrievalDTO> fieldExtractor = new BeanWrapperFieldExtractor<>();
+        fieldExtractor.setNames(new String[] {"field1", "field2", "field3"});  // Assuming these fields in the DTO
+
+        // Mocking a RetrievalDTO object and setting values
+        RetrievalDTO mockDTO = mock(RetrievalDTO.class);
+        when(mockDTO.getField1()).thenReturn("Value1");
+        when(mockDTO.getField2()).thenReturn("Value2");
+        when(mockDTO.getField3()).thenReturn("Value3");
+
+        String[] extractedFields = fieldExtractor.extract(mockDTO);
+        assertArrayEquals(new String[] {"Value1", "Value2", "Value3"}, extractedFields);
+    }
+}
