@@ -480,3 +480,12 @@ public class HangingReportFileAggregator {
         }
     }
 }
+
+
+
+ExecutionContext context = jobExecution.getExecutionContext();
+String directoryPath = context.getString("sdphanging.output.flat.file.path");
+if (directoryPath == null || directoryPath.isEmpty()) {
+    log.error("Hanging report file path is missing or empty in ExecutionContext.");
+    throw new IllegalArgumentException("File path not available in ExecutionContext.");
+}
