@@ -676,3 +676,63 @@ public class RetrievalDTOItemReaderTest {
         assertEquals("5000.00", dto.getStatementBalance());
     }
 }
+
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+@RunWith(MockitoJUnitRunner.class)
+public class RetrievalDTOItemReaderTest {
+
+    @InjectMocks
+    private RetrievalDTOItemReader retrievalDTOItemReader;
+
+    @Mock
+    private Resource resource; // Mock the file resource
+
+    @Mock
+    private String inputFilePath; // Mock the input file path
+
+    @Before
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+        
+        // Set a mock input file path for testing
+        inputFilePath = "/dummy/path/to/file.txt";
+    }
+
+    @Test
+    public void testGetFlatFileItemReader() throws Exception {
+        // Call the method to get the FlatFileItemReader instance
+        FlatFileItemReader<RetrievalDTO> reader = retrievalDTOItemReader.getFlatFileItemReader();
+
+        // Validate the reader is not null
+        assertNotNull(reader);
+
+        // Verify that the correct resource is set on the reader
+        Resource actualResource = reader.getResource();
+        assertNotNull(actualResource);
+        assertTrue(actualResource instanceof FileSystemResource);
+
+        // Check if the correct file path was set on the resource
+        assertEquals(inputFilePath, ((FileSystemResource) actualResource).getPath());
+
+        // Verify the name of the reader
+        assertEquals("RetrievalDTOItemReader", reader.getName());
+
+        // Verify that the LineMapper is set correctly
+        assertNotNull(reader.getLineMapper());
+    }
+}
+
