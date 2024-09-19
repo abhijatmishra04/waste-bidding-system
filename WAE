@@ -291,3 +291,265 @@ def generate_enhanced_json_report(output_format='json', project_path=None):
         with open(summary_file, 'w') as f:
             json.dump(scan_summary, f, indent=4)
         logger.info(f"Enhanced JSON scan summary written to {summary_file}")
+
+
+
+
+
+import os
+import json
+import logging
+import networkx as nx
+import numpy as np
+from pathlib import Path
+from collections import defaultdict
+from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.decomposition import LatentDirichletAllocation as LDA
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import faiss
+import d3
+import plotly.express as px
+
+# Logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Metadata cache and scan summary
+metadata_cache = {}
+scan_summary = defaultdict(lambda: defaultdict(list))
+
+# Pre-trained models: CodeBERT, GraphCodeBERT, Codex, etc.
+code_model = SentenceTransformer('microsoft/codebert-base')  # You can replace with more advanced models like Codex
+
+# Named Entity Recognition (NER) model for domain-specific terms
+ner_tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-large-cased-finetuned-conll03-english")
+ner_model = AutoModelForTokenClassification.from_pretrained("dbmdz/bert-large-cased-finetuned-conll03-english")
+ner_pipeline = pipeline("ner", model=ner_model, tokenizer=ner_tokenizer)
+
+# Multi-modal embeddings for code and comments
+multi_modal_embedding_model = SentenceTransformer('microsoft/codebert-base')
+
+# FAISS for semantic search
+faiss_index = faiss.IndexFlatL2(768)  # Assuming 768-dimensional embeddings from SentenceTransformer
+
+# GNN for class and method dependencies (using a placeholder function for now)
+def run_gnn_on_code_graph(graph):
+    """Run a Graph Neural Network (GNN) on the code dependency graph."""
+    # Placeholder function: In reality, this would involve a GNN implementation such as PyG (PyTorch Geometric)
+    return nx.betweenness_centrality(graph)
+
+### Core Functions ###
+
+def load_configuration(config_path: str):
+    """Load configuration from YAML."""
+    if not os.path.exists(config_path):
+        logger.error(f"Configuration file not found at {config_path}. Exiting.")
+        exit(1)
+    with open(config_path, 'r') as config_file:
+        config = yaml.safe_load(config_file)
+        logger.info(f"Successfully loaded configuration from {config_path}")
+    return config
+
+def preprocess_method_name(method_name):
+    """Preprocess method name for better NLP and embedding generation."""
+    return ''.join(['_' + i.lower() if i.isupper() else i for i in method_name]).lstrip('_')
+
+def infer_business_logic(method_name, parameters, annotations, class_context):
+    """Use NLP to infer business logic from a method's context."""
+    input_text = f"Class context: {class_context}. Method: {method_name}. Parameters: {parameters}. Annotations: {annotations}."
+    result = code_model.encode(input_text)  # Use CodeBERT or Codex to infer business logic
+    return result[0]['label'], result[0]['score']
+
+def create_method_embedding(method_name, parameters, annotations, class_context):
+    """Generate multi-modal embeddings for method name, code, and context using a pre-trained code model."""
+    input_text = f"Method: {method_name}. Parameters: {', '.join([p['name'] + ':' + p['type'] for p in parameters])}. Annotations: {', '.join(annotations)}. Class context: {class_context}."
+    embedding = multi_modal_embedding_model.encode(input_text)
+    faiss_index.add(np.array([embedding]))  # Add to FAISS for semantic search
+    return embedding
+
+def cluster_methods_hierarchical(embeddings, num_clusters=5):
+    """Cluster methods into functional groups using hierarchical clustering."""
+    clustering_model = AgglomerativeClustering(n_clusters=num_clusters)
+    return clustering_model.fit_predict(embeddings)
+
+def extract_business_entities(text):
+    """Extract business-specific entities from text using NER."""
+    ner_results = ner_pipeline(text)
+    entities = [result['word'] for result in ner_results if result['entity'] in ['I-ORG', 'I-MISC']]
+    return entities
+
+### Dynamic Bounded Context and Domain Detection ###
+
+def detect_dynamic_bounded_context(file_path, java_class, class_name):
+    """Detect bounded context dynamically from file path, class name, and method names."""
+    context_from_path = detect_bounded_context_from_path(file_path)
+    context_from_class = detect_context_from_class_name_or_methods(java_class, class_name)
+    return context_from_class or context_from_path or "Unknown Context"
+
+def detect_dynamic_business_domain(file_path, java_class, class_name):
+    """Detect the business domain based on file path, class names, and methods."""
+    domain_from_path = detect_domain_from_path(file_path)
+    domain_from_class = detect_domain_from_class_name_or_methods(java_class, class_name)
+    return domain_from_class or domain_from_path or "Unknown Domain"
+
+def detect_bounded_context_from_path(file_path):
+    """Infer bounded context from the file path structure."""
+    path_parts = str(file_path).lower().split(os.sep)
+    for term in business_terms:
+        if term in path_parts:
+            return f"{term.capitalize()} Context"
+    return None
+
+def detect_context_from_class_name_or_methods(java_class, class_name):
+    """Infer bounded context from class names and method names using NER."""
+    class_text = class_name + ' '.join([method.name for method in java_class.methods])
+    entities = extract_business_entities(class_text)
+    business_terms.update(entities)  # Learn new business terms dynamically
+    if entities:
+        return f"{entities[0].capitalize()} Context"
+    return None
+
+def detect_domain_from_path(file_path):
+    """Infer the business domain from the file path structure."""
+    path_parts = str(file_path).lower().split(os.sep)
+    for term in business_terms:
+        if term in path_parts:
+            return f"{term.capitalize()} Domain"
+    return None
+
+def detect_domain_from_class_name_or_methods(java_class, class_name):
+    """Infer the business domain from class and method names using NER."""
+    class_text = class_name + ' '.join([method.name for method in java_class.methods])
+    entities = extract_business_entities(class_text)
+    business_terms.update(entities)  # Learn new terms
+    if entities:
+        return f"{entities[0].capitalize()} Domain"
+    return None
+
+### Method Extraction with Code and Contextual Embeddings ###
+
+def extract_methods_with_nlp(java_class, class_context):
+    """Extract methods from Java classes, analyze with NLP, and generate embeddings."""
+    methods_with_nlp = []
+    for method in java_class.methods:
+        method_name = method.name
+        parameters = [{'name': param.name, 'type': param.type.name if param.type else 'Unknown'} for param in method.parameters]
+        annotations = [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in method.annotations]
+
+        # NLP inference and embedding generation
+        inferred_purpose, confidence_score = infer_business_logic(method_name, parameters, annotations, class_context)
+        embedding = create_method_embedding(method_name, parameters, annotations, class_context)
+
+        method_data = {
+            'name': method_name,
+            'return_type': method.return_type.name if method.return_type else 'void',
+            'parameters': parameters,
+            'annotations': annotations,
+            'complexity': calculate_cyclomatic_complexity(method),
+            'api_endpoint': extract_api_endpoint_from_method(method),
+            'nlp_inference': {
+                'inferred_purpose': inferred_purpose,
+                'confidence_score': confidence_score
+            },
+            'embedding': embedding.tolist()  # Convert embedding to list for JSON serialization
+        }
+        methods_with_nlp.append(method_data)
+    return methods_with_nlp
+
+def calculate_cyclomatic_complexity(method):
+    """Calculate the cyclomatic complexity for a method."""
+    complexity = 1
+    if method.body:
+        for node in method.body:
+            if isinstance(node, (javalang.tree.IfStatement, javalang.tree.ForStatement,
+                                 javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+                complexity += 1
+    return complexity
+
+def extract_api_endpoints(java_class):
+    """Extract API endpoints from Java classes (e.g., @GetMapping)."""
+    api_endpoints = []
+    for method in java_class.methods:
+        for annotation in method.annotations:
+            annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+            if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
+                if annotation.element and annotation.element.values:
+                    api_endpoints.append(f"{annotation_name}: {annotation.element.values[0].value}")
+    return api_endpoints
+
+def extract_api_endpoint_from_method(method):
+    """Extract API endpoint details from method annotations."""
+    for annotation in method.annotations:
+        annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+        if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
+            if annotation.element and annotation.element.values:
+                return annotation.element.values[0].value
+    return None
+
+### JSON Report Generation with GNN Integration ###
+
+def enhanced_method_metadata(method, embedding, cluster_label):
+    """Generate metadata for each method with embeddings, NLP results, and clustering."""
+    return {
+        'name': method['name'],
+        'return_type': method['return_type'],
+        'parameters': method['parameters'],
+        'annotations': method['annotations'],
+        'complexity': method['complexity'],
+        'api_endpoint': method['api_endpoint'],
+        'nlp_inference': method['nlp_inference'],
+        'embedding': embedding,  # Embedding data as list
+        'cluster_label': cluster_label
+    }
+
+def generate_enhanced_json_report(output_format='json', project_path=None):
+    """Generate enhanced JSON report with embeddings, clustering, and graph-based analysis."""
+    logger.info("Generating enhanced JSON scan report.")
+
+    # Create embeddings for each method
+    all_embeddings = []
+    for class_name, class_data in scan_summary.items():
+        for method in class_data['methods']:
+            embedding = method['embedding']
+            all_embeddings.append(embedding)
+
+    # Cluster methods
+    cluster_labels = cluster_methods_hierarchical(np.array(all_embeddings))
+
+    # Enrich methods with clustering data
+    idx = 0
+    for class_name, class_data in scan_summary.items():
+        enriched_methods = []
+        for method in class_data['methods']:
+            cluster_label = cluster_labels[idx]
+            enriched_methods.append(enhanced_method_metadata(method, method['embedding'], cluster_label))
+            idx += 1
+        class_data['methods'] = enriched_methods
+
+    # Output the JSON report
+    if output_format == 'json':
+        summary_file = os.path.join(project_path, config.get('output_file', 'enhanced_scan_summary.json'))
+        with open(summary_file, 'w') as f:
+            json.dump(scan_summary, f, indent=4)
+        logger.info(f"Enhanced JSON scan summary written to {summary_file}")
+
+### Interactive Visualization with D3.js and Plotly ###
+
+def visualize_contexts_and_domains(scan_summary):
+    """Visualize bounded contexts and domains using D3.js or Plotly Dash."""
+    # Example visualization using Plotly
+    contexts = [data['bounded_context'] for class_name, data in scan_summary.items()]
+    domains = [data['domain'] for class_name, data in scan_summary.items()]
+    
+    fig = px.scatter(x=contexts, y=domains, title="Bounded Contexts and Domains")
+    fig.show()
+
+### Semantic Search with FAISS ###
+
+def search_methods(query, method_data, top_k=5):
+    """Perform semantic search on methods using FAISS and return top-k results."""
+    query_embedding = code_model.encode(query)
+    distances, indices = faiss_index.search(np.array([query_embedding]), top_k)
+    return [method_data[i] for i in indices[0]]
