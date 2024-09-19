@@ -1,0 +1,293 @@
+import os
+import json
+import logging
+import networkx as nx
+import numpy as np
+from pathlib import Path
+from collections import defaultdict
+from sentence_transformers import SentenceTransformer
+from transformers import BertForSequenceClassification, pipeline
+from transformers import AutoTokenizer, AutoModelForTokenClassification
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+from matplotlib import pyplot as plt
+
+# Logging configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Metadata cache and scan summary
+metadata_cache = {}
+scan_summary = defaultdict(lambda: defaultdict(list))
+
+# Load a fine-tuned BERT model for NLP inference
+fine_tuned_model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=10)
+nlp_pipeline = pipeline("text-classification", model=fine_tuned_model)
+
+# Load a pre-trained NER model for entity extraction (business terms)
+ner_tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-large-cased-finetuned-conll03-english")
+ner_model = AutoModelForTokenClassification.from_pretrained("dbmdz/bert-large-cased-finetuned-conll03-english")
+ner_pipeline = pipeline("ner", model=ner_model, tokenizer=ner_tokenizer)
+
+# Load a sentence transformer model for embeddings and search
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Common business terms used for detecting domains and contexts, initially empty
+# Tool will dynamically learn domain terms
+business_terms = set()
+
+### Core Utility Functions ###
+
+def load_configuration(config_path: str):
+    """Load configuration from YAML."""
+    if not os.path.exists(config_path):
+        logger.error(f"Configuration file not found at {config_path}. Exiting.")
+        exit(1)
+
+    with open(config_path, 'r') as config_file:
+        config = yaml.safe_load(config_file)
+        logger.info(f"Successfully loaded configuration from {config_path}")
+    return config
+
+def preprocess_method_name(method_name):
+    """Preprocess method name to improve NLP understanding."""
+    return ''.join(['_' + i.lower() if i.isupper() else i for i in method_name]).lstrip('_')
+
+def infer_business_logic(method_name, parameters, annotations, class_context):
+    """Use NLP to infer business logic behind a method."""
+    input_text = f"Class context: {class_context}. Method: {method_name}. Parameters: {parameters}. Annotations: {annotations}."
+    result = nlp_pipeline(input_text)
+    return result[0]['label'], result[0]['score']
+
+def create_method_embedding(method_name, parameters, annotations, class_context):
+    """Generate embeddings for method names and context using a sentence transformer."""
+    input_text = f"Method: {method_name}. Parameters: {', '.join([p['name'] + ':' + p['type'] for p in parameters])}. Annotations: {', '.join(annotations)}. Class context: {class_context}."
+    return embedding_model.encode(input_text)
+
+def cluster_methods_hierarchical(embeddings, num_clusters=5):
+    """Cluster methods into hierarchical groups using embeddings."""
+    clustering_model = AgglomerativeClustering(n_clusters=num_clusters)
+    return clustering_model.fit_predict(embeddings)
+
+### NER for Domain-Specific Term Extraction ###
+
+def extract_business_entities(text):
+    """Use Named Entity Recognition (NER) to extract business entities from text."""
+    ner_results = ner_pipeline(text)
+    entities = [result['word'] for result in ner_results if result['entity'] in ['I-ORG', 'I-MISC']]
+    return entities
+
+def scan_class_with_nlp(java_class, java_file_path, config):
+    """Scan a Java class for analysis including method inference using NLP and embeddings."""
+    class_name = java_class.name
+    last_modified = os.path.getmtime(java_file_path)
+
+    if class_name in metadata_cache and metadata_cache[class_name]['last_modified'] >= last_modified:
+        logger.info(f"Skipping cached class {class_name}")
+        return
+
+    # Extract class context
+    class_annotations = extract_annotations(java_class)
+    if not apply_annotation_filters(class_annotations, config):
+        logger.info(f"Class {class_name} filtered out by annotation filter")
+        return
+
+    # Detect dynamic bounded context and business domain
+    bounded_context = detect_dynamic_bounded_context(java_file_path, java_class, class_name)
+    domain = detect_dynamic_business_domain(java_file_path, java_class, class_name)
+    
+    api_endpoints = extract_api_endpoints(java_class)
+    class_context = f"Class: {class_name}, Bounded Context: {bounded_context}, Domain: {domain}"
+
+    methods_with_nlp = extract_methods_with_nlp(java_class, class_context)
+
+    # Cache metadata
+    metadata = {
+        'annotations': class_annotations,
+        'bounded_context': bounded_context,
+        'domain': domain,
+        'api_endpoints': api_endpoints,
+        'methods': methods_with_nlp,
+        'file_path': str(java_file_path),
+        'last_modified': last_modified,
+    }
+    metadata_cache[class_name] = metadata
+    scan_summary[class_name] = metadata
+
+    logger.info(f"Class {class_name} scanned with NLP-based method analysis.")
+
+### Dynamic Bounded Context and Business Domain Detection ###
+
+def detect_dynamic_bounded_context(file_path, java_class, class_name):
+    """Dynamically detect bounded context based on file path, class name, and method names."""
+    # Extract path-based context (if folders represent bounded contexts)
+    context_from_path = detect_bounded_context_from_path(file_path)
+    
+    # Analyze class name and method names for potential domain-specific terms
+    context_from_class = detect_context_from_class_name_or_methods(java_class, class_name)
+    
+    # If both exist, prioritize the context detected from the class name or methods
+    return context_from_class or context_from_path or "Unknown Context"
+
+def detect_dynamic_business_domain(file_path, java_class, class_name):
+    """Dynamically detect the business domain based on class, method names, and file path structure."""
+    # Extract path-based domain (if directories represent domains)
+    domain_from_path = detect_domain_from_path(file_path)
+    
+    # Analyze class name and method names for domain-specific terms
+    domain_from_class = detect_domain_from_class_name_or_methods(java_class, class_name)
+    
+    # If both exist, prioritize the domain detected from the class name or methods
+    return domain_from_class or domain_from_path or "Unknown Domain"
+
+def detect_bounded_context_from_path(file_path):
+    """Infer bounded context from file path structure."""
+    path_parts = str(file_path).lower().split(os.sep)
+    for term in business_terms:
+        if term in path_parts:
+            return f"{term.capitalize()} Context"
+    return None
+
+def detect_context_from_class_name_or_methods(java_class, class_name):
+    """Infer bounded context based on class name and method names."""
+    class_text = class_name + ' '.join([method.name for method in java_class.methods])
+    
+    # Use NER to detect any entities in the class or method names
+    entities = extract_business_entities(class_text)
+    
+    # Add new terms to dynamic business terms set
+    business_terms.update(entities)
+    
+    if entities:
+        return f"{entities[0].capitalize()} Context"  # Prioritize first detected entity
+    return None
+
+def detect_domain_from_path(file_path):
+    """Infer business domain from the file path structure."""
+    path_parts = str(file_path).lower().split(os.sep)
+    for term in business_terms:
+        if term in path_parts:
+            return f"{term.capitalize()} Domain"
+    return None
+
+def detect_domain_from_class_name_or_methods(java_class, class_name):
+    """Infer business domain based on class name and method names."""
+    class_text = class_name + ' '.join([method.name for method in java_class.methods])
+    
+    # Use NER to detect any entities in the class or method names
+    entities = extract_business_entities(class_text)
+    
+    # Add new terms to dynamic business terms set
+    business_terms.update(entities)
+    
+    if entities:
+        return f"{entities[0].capitalize()} Domain"  # Prioritize first detected entity
+    return None
+
+### Method Extraction and NLP Inference ###
+
+def extract_methods_with_nlp(java_class, class_context):
+    """Extract methods from a Java class, analyze with NLP, and generate embeddings."""
+    methods_with_nlp = []
+    for method in java_class.methods:
+        method_name = method.name
+        parameters = [{'name': param.name, 'type': param.type.name if param.type else 'Unknown'} for param in method.parameters]
+        annotations = [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in method.annotations]
+        
+        # NLP Inference and Embedding
+        inferred_purpose, confidence_score = infer_business_logic(method_name, parameters, annotations, class_context)
+        embedding = create_method_embedding(method_name, parameters, annotations, class_context)
+
+        method_data = {
+            'name': method_name,
+            'return_type': method.return_type.name if method.return_type else 'void',
+            'parameters': parameters,
+            'annotations': annotations,
+            'complexity': calculate_cyclomatic_complexity(method),
+            'api_endpoint': extract_api_endpoint_from_method(method),
+            'nlp_inference': {
+                'inferred_purpose': inferred_purpose,
+                'confidence_score': confidence_score
+            },
+            'embedding': embedding.tolist()  # Convert embedding to list for JSON serialization
+        }
+        methods_with_nlp.append(method_data)
+    return methods_with_nlp
+
+def calculate_cyclomatic_complexity(method):
+    """Calculate cyclomatic complexity for a method."""
+    complexity = 1
+    if method.body:
+        for node in method.body:
+            if isinstance(node, (javalang.tree.IfStatement, javalang.tree.ForStatement,
+                                 javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+                complexity += 1
+    return complexity
+
+def extract_api_endpoints(java_class):
+    """Extract API endpoints from a Java class (e.g., @GetMapping)."""
+    api_endpoints = []
+    for method in java_class.methods:
+        for annotation in method.annotations:
+            annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+            if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
+                if annotation.element and annotation.element.values:
+                    api_endpoints.append(f"{annotation_name}: {annotation.element.values[0].value}")
+    return api_endpoints
+
+def extract_api_endpoint_from_method(method):
+    """Extract API endpoint details from a method based on annotations."""
+    for annotation in method.annotations:
+        annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+        if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
+            if annotation.element and annotation.element.values:
+                return annotation.element.values[0].value
+    return None
+
+### JSON Report Generation and Clustering ###
+
+def enhanced_method_metadata(method, embedding, cluster_label):
+    """Generate metadata for each method with embeddings and clustering results."""
+    return {
+        'name': method['name'],
+        'return_type': method['return_type'],
+        'parameters': method['parameters'],
+        'annotations': method['annotations'],
+        'complexity': method['complexity'],
+        'api_endpoint': method['api_endpoint'],
+        'nlp_inference': method['nlp_inference'],
+        'embedding': embedding,  # Embedding data as list
+        'cluster_label': cluster_label
+    }
+
+def generate_enhanced_json_report(output_format='json', project_path=None):
+    """Generate enhanced JSON report with embeddings, clustering, and graph analysis."""
+    logger.info("Generating enhanced JSON scan report.")
+
+    # Create embeddings for each method
+    all_embeddings = []
+    for class_name, class_data in scan_summary.items():
+        for method in class_data['methods']:
+            embedding = method['embedding']
+            all_embeddings.append(embedding)
+
+    # Cluster methods
+    cluster_labels = cluster_methods_hierarchical(np.array(all_embeddings))
+
+    # Enrich methods with clustering data
+    idx = 0
+    for class_name, class_data in scan_summary.items():
+        enriched_methods = []
+        for method in class_data['methods']:
+            cluster_label = cluster_labels[idx]
+            enriched_methods.append(enhanced_method_metadata(method, method['embedding'], cluster_label))
+            idx += 1
+        class_data['methods'] = enriched_methods
+
+    # Output the JSON report
+    if output_format == 'json':
+        summary_file = os.path.join(project_path, config.get('output_file', 'enhanced_scan_summary.json'))
+        with open(summary_file, 'w') as f:
+            json.dump(scan_summary, f, indent=4)
+        logger.info(f"Enhanced JSON scan summary written to {summary_file}")
