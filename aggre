@@ -596,3 +596,14 @@ public void testLineMapper() throws Exception {
     assertArrayEquals(fieldNames, tokenizer.getIncludedFieldNames()); // Correct method
     assertEquals(3, tokenizer.getIncludedFields().length);  // Correct method for column length
 }
+
+
+ @Test
+    public void testGetFlatFileItemReader() throws Exception {
+        // Mock the FileSystemResource to avoid relying on the actual file system
+        Resource mockResource = new FileSystemResource(inputFilePath);
+        FlatFileItemReader<RetrievalDTO> reader = retrievalDTOItemReader.getFlatFileItemReader();
+
+        assertNotNull(reader);
+        // You can mock the resource or check if the resource is set correctly
+    }
