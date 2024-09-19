@@ -407,85 +407,142 @@ public class SdpRespJobListener extends JobExecutionListenerSupport {
 }
 
 
-
-
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.stereotype.Component;
-import lombok.extern.slf4j.Slf4j;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.List;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-@Component
-@Slf4j // Lombok annotation for Log4j2 logging
-public class HangingReportFileAggregator {
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
 
-    public void aggregateFiles(StepExecution stepExecution) throws IOException {
-        JobExecution jobExecution = stepExecution.getJobExecution();
-        ExecutionContext context = jobExecution.getExecutionContext();
+public class HangingReportFileAggregatorTest {
 
-        // Fetch the output directory path from the ExecutionContext
-        String directoryPath = context.getString("sdphanging.output.flat.file.path");
-        if (directoryPath == null || directoryPath.isEmpty()) {
-            log.error("Hanging report file path is missing or empty in ExecutionContext.");
-            throw new IllegalArgumentException("File path not available in ExecutionContext.");
-        }
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
 
-        // Define input files based on the writers' outputs
-        String dayPlusOneWriterFile = directoryPath + "/dayPlusOneWriter.txt";
-        String moreThan7DaysWriterFile = directoryPath + "/moreThan7DaysWriter.txt";
-        String moreThan25DaysWriterFile = directoryPath + "/moreThan25DaysWriter.txt";
+    @Mock
+    private StepExecution stepExecution;
 
-        // Define the output file (hanging report)
-        String outputFilePath = directoryPath + "/hangingReport.txt";
+    @Mock
+    private JobExecution jobExecution;
 
-        log.info("Aggregating files into: {}", outputFilePath);
+    @Mock
+    private ExecutionContext executionContext;
 
-        // Aggregating files into the output
-        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(outputFilePath), StandardOpenOption.CREATE)) {
-            // Process each file and append its content to the output file
-            List<String> filesToAggregate = List.of(dayPlusOneWriterFile, moreThan7DaysWriterFile, moreThan25DaysWriterFile);
-            for (String filePath : filesToAggregate) {
-                appendFileContent(filePath, writer);
-            }
+    @InjectMocks
+    private HangingReportFileAggregator hangingReportFileAggregator;
 
-            log.info("File aggregation complete. Output written to {}", outputFilePath);
-        } catch (IOException e) {
-            log.error("Error occurred during file aggregation: {}", e.getMessage());
-            throw e;
-        }
+    private File dayPlusOneWriterFile;
+    private File moreThan7DaysWriterFile;
+    private File moreThan25DaysWriterFile;
+    private File hangingReportFile;
+
+    @Before
+    public void setUp() throws IOException {
+        MockitoAnnotations.initMocks(this);
+
+        // Create temporary files for testing
+        dayPlusOneWriterFile = tempFolder.newFile("dayPlusOneWriter.txt");
+        moreThan7DaysWriterFile = tempFolder.newFile("moreThan7DaysWriter.txt");
+        moreThan25DaysWriterFile = tempFolder.newFile("moreThan25DaysWriter.txt");
+        hangingReportFile = tempFolder.newFile("hangingReport.txt");
+
+        // Write some dummy data to the files
+        writeToFile(dayPlusOneWriterFile.toPath(), "Day +1 Content");
+        writeToFile(moreThan7DaysWriterFile.toPath(), "More than 7 Days Content");
+        writeToFile(moreThan25DaysWriterFile.toPath(), "More than 25 Days Content");
+
+        // Set up mocks
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        when(executionContext.getString("sdphanging.output.flat.file.path")).thenReturn(tempFolder.getRoot().getAbsolutePath());
     }
 
-    private void appendFileContent(String inputFilePath, BufferedWriter writer) throws IOException {
-        Path path = Paths.get(inputFilePath);
+    @Test
+    public void testAggregateFiles_Success() throws IOException {
+        // Call the method under test
+        hangingReportFileAggregator.aggregateFiles(stepExecution);
 
-        // Check if the file exists before attempting to read
-        if (Files.exists(path)) {
-            try (BufferedReader reader = Files.newBufferedReader(path)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    writer.write(line);
-                    writer.newLine();
-                }
-                writer.flush();  // Ensure data is written to output file
-            } catch (IOException e) {
-                log.error("Error reading file {}: {}", inputFilePath, e.getMessage());
-                throw e;
-            }
-        } else {
-            log.warn("Input file {} does not exist. Skipping.", inputFilePath);
+        // Verify the contents of the output (hanging report)
+        Path hangingReportPath = tempFolder.getRoot().toPath().resolve("hangingReport.txt");
+        assertTrue("Hanging report should exist", Files.exists(hangingReportPath));
+
+        String content = new String(Files.readAllBytes(hangingReportPath));
+        assertTrue(content.contains("Day +1 Content"));
+        assertTrue(content.contains("More than 7 Days Content"));
+        assertTrue(content.contains("More than 25 Days Content"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAggregateFiles_MissingFilePathInContext() throws IOException {
+        // Set the ExecutionContext to return null for the file path
+        when(executionContext.getString("sdphanging.output.flat.file.path")).thenReturn(null);
+
+        // Call the method under test, expect an exception
+        hangingReportFileAggregator.aggregateFiles(stepExecution);
+    }
+
+    @Test
+    public void testAggregateFiles_SkipNonExistentFiles() throws IOException {
+        // Delete the dayPlusOneWriter file to simulate missing file
+        dayPlusOneWriterFile.delete();
+
+        // Call the method under test
+        hangingReportFileAggregator.aggregateFiles(stepExecution);
+
+        // Verify that the output was created without the deleted file's content
+        Path hangingReportPath = tempFolder.getRoot().toPath().resolve("hangingReport.txt");
+        assertTrue("Hanging report should exist", Files.exists(hangingReportPath));
+
+        String content = new String(Files.readAllBytes(hangingReportPath));
+        assertFalse("Content from missing file should not be in output", content.contains("Day +1 Content"));
+        assertTrue(content.contains("More than 7 Days Content"));
+        assertTrue(content.contains("More than 25 Days Content"));
+    }
+
+    @Test
+    public void testAppendFileContent_Success() throws IOException {
+        // Prepare content and call the appendFileContent directly
+        Path newFilePath = tempFolder.newFile("newFile.txt").toPath();
+        writeToFile(newFilePath, "This is new content");
+
+        try (BufferedWriter writer = Files.newBufferedWriter(hangingReportFile.toPath())) {
+            hangingReportFileAggregator.appendFileContent(newFilePath.toString(), writer);
+        }
+
+        String content = new String(Files.readAllBytes(hangingReportFile.toPath()));
+        assertTrue(content.contains("This is new content"));
+    }
+
+    @Test
+    public void testAppendFileContent_FileDoesNotExist() throws IOException {
+        // Call the public appendFileContent method directly on a non-existent file
+        try (BufferedWriter writer = Files.newBufferedWriter(hangingReportFile.toPath())) {
+            hangingReportFileAggregator.appendFileContent("nonExistentFile.txt", writer);
+        }
+
+        // No exception should occur, and the file should be empty
+        String content = new String(Files.readAllBytes(hangingReportFile.toPath()));
+        assertTrue("No content should be written when file doesn't exist", content.isEmpty());
+    }
+
+    // Helper method to write to files
+    private void writeToFile(Path file, String content) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(file)) {
+            writer.write(content);
         }
     }
 }
 
-
-
-ExecutionContext context = jobExecution.getExecutionContext();
-String directoryPath = context.getString("sdphanging.output.flat.file.path");
-if (directoryPath == null || directoryPath.isEmpty()) {
-    log.error("Hanging report file path is missing or empty in ExecutionContext.");
-    throw new IllegalArgumentException("File path not available in ExecutionContext.");
-}
