@@ -1,0 +1,88 @@
+import os
+import re
+import csv
+
+def load_field_mappings_from_csv(csv_path):
+    """Loads field mappings from a CSV file."""
+    mappings = {}
+    try:
+        with open(csv_path, mode='r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.reader(csvfile)
+            next(reader)  # Skip the header row
+            for row in reader:
+                if len(row) >= 4:  # Ensure there are enough columns
+                    original_field = row[0]  # Original field name from Column A
+                    new_field = row[3]  # New field name from Column D
+                    mappings[original_field] = new_field
+    except Exception as e:
+        print(f"Error loading CSV: {e}")
+    return mappings
+
+def sophisticated_replace_field_names(sql, mappings):
+    """Replace field names in SQL queries, including maintaining any table or alias prefix."""
+    changes = []
+    original_sql = sql  # Store the original SQL for comparison
+    for old_name, new_name in mappings.items():
+        pattern = rf'(\b\w+\.)?{old_name}\b'
+        new_sql = re.sub(pattern, lambda m: f"{m.group(1) if m.group(1) else ''}{new_name}", sql)
+        if new_sql != sql:
+            changes.append((old_name, new_name, new_sql.count(new_name), new_sql))
+            sql = new_sql  # Update SQL for possible further replacements
+    if changes:
+        return sql, changes, original_sql
+    return sql, [], None
+
+def extract_modify_reintegrate(java_code, mappings):
+    """Extracts, modifies, and reintegrates SQL within Java code."""
+    sql_pattern = r'(?:"(?:[^"\\]|\\.)*?"\s*\+?\s*)+'
+    parts = re.finditer(sql_pattern, java_code, re.DOTALL)
+    changes = []
+    modified_java_code = java_code
+    original_queries = []
+    for part in parts:
+        modified_sql, part_changes, original_query = sophisticated_replace_field_names(part.group(0), mappings)
+        modified_java_code = modified_java_code.replace(part.group(0), modified_sql)
+        changes.extend(part_changes)
+        if original_query:
+            original_queries.append(original_query)
+    return modified_java_code, changes, original_queries
+
+def log_changes(file_name, changes, log_directory):
+    """Log changes made to each file along with the specific SQL queries modified."""
+    if not os.path.exists(log_directory):
+        os.makedirs(log_directory)
+    log_path = os.path.join(log_directory, 'changes_log.txt')
+    with open(log_path, 'a', encoding='utf-8') as log_file:
+        log_file.write(f'Changes in {file_name}:\n')
+        for old, new, count, query in changes:
+            log_file.write(f"Replaced {count} occurrences of '{old}' with '{new}' in the query:\n{query}\n\n")
+        log_file.write('\n')
+
+def process_java_files(directory_path, mappings, log_directory):
+    """Process all Java files in a directory, logging changes and the queries where they occurred."""
+    for filename in os.listdir(directory_path):
+        if filename.endswith('.java'):
+            file_path = os.path.join(directory_path, filename)
+            with open(file_path, 'r', encoding='utf-8') as file:
+                java_code = file.read()
+            modified_java_code, changes, original_queries = extract_modify_reintegrate(java_code, mappings)
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(modified_java_code)
+            if changes:
+                log_changes(filename, changes, log_directory)
+                print(f"Processed and logged changes for {filename}")
+            else:
+                print(f"No changes were made to {filename}")
+
+def main():
+    directory_path = input("Enter the directory path containing Java files: ")
+    log_directory = input("Enter the log directory path: ")
+    csv_path = input("Enter the path to the CSV file with field mappings: ")
+    if not os.path.exists(directory_path):
+        print("Directory does not exist. Please check the path.")
+        return
+    field_mappings = load_field_mappings_from_csv(csv_path)
+    process_java_files(directory_path, field_mappings, log_directory)
+
+if __name__ == "__main__":
+    main()
