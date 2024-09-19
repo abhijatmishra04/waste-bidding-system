@@ -340,143 +340,145 @@ public class HangingReportClassifierWriterTest {
 }
 
 
-import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.file.FlatFileItemWriter;
-import org.springframework.batch.item.file.transform.FormatterLineAggregator;
-import org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor;
-import org.springframework.core.io.FileSystemResource;
-import java.io.Writer;
-import java.util.Random;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.listener.JobExecutionListenerSupport;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.stereotype.Component;
 
-public class HangingReportWriter1Test {
+import java.io.IOException;
 
-    @InjectMocks
-    private HangingReportWriter1 hangingReportWriter1;
+@Component
+public class SdpRespJobListener extends JobExecutionListenerSupport {
 
-    @Mock
-    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        Log.trace("SdpRespJobListener ::: beforeJob ::: Entry");
 
-    @Mock
-    private FlatFileItemWriter<RetrievalDTO> mockFlatFileWriter;
+        ExecutionContext context = jobExecution.getExecutionContext(); // Fetch the ExecutionContext
 
-    @Mock
-    private Writer mockWriter;
+        try {
+            exceptionWriter.initFileProperties();
+            exceptionWriter.writeHeader();
+        } catch (IOException e) {
+            Log.error("SdpRespJobListener ::: beforeJob ::: Exception in creating exception file");
+            jobExecution.setExitStatus(new ExitStatus("FAILED", "Exception File Creation Issue"));
+        }
 
-    private final String expectedOutputFilePath = "/output/file/path";
-    private final String expectedAggregatorFormat = "aggregator_format";
-    private final String expectedWriterName = "writer_name";
-    private final String hangingHeader1 = "HANGING_HEADER1";
-    private final String hangingHeader2 = "HANGING_HEADER2";
+        String customerType = jobExecution.getJobParameters().getString(SdpRespConstants.JOB_TYPE);
 
-    @Before
-    public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        // Fetch paths dynamically from DynamicConfigPropertiesRepository
+        String bacardiFilePath = dynamicConfigPropertiesRepository
+            .findPropertyValueByPropertyName(SdpRespConstants.BACARDI_FILE_DIRECTORY_PATH);
+        String requestFilePath = dynamicConfigPropertiesRepository
+            .findPropertyValueByPropertyName(SdpRespConstants.SDP_REQUEST_DIRECTORY_PATH);
 
-        // Mocking the dynamicConfigPropRepository to return specific values
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.output.flat.file.path"))
-            .thenReturn(expectedOutputFilePath);
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.aggregator.format"))
-            .thenReturn(expectedAggregatorFormat);
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sdphanging.flatfile.writer.name"))
-            .thenReturn(expectedWriterName);
+        String jobID = jobExecution.getJobId().toString();
+        context.putString(SdpRespConstants.JOB_ID, jobID);
+
+        context.putString(SdpRespConstants.BACARDI_RESPONSE_DIRECTORY_PATH, bacardiFilePath);
+        context.putString(SdpRespConstants.SDP_REQUEST_DIRECTORY_PATH, requestFilePath);
+
+        if (SdpRespConstants.CONSUMER.equalsIgnoreCase(customerType)) {
+            context.putString(SdpRespConstants.BACARDI_RESPONSE_FILE_PREFIX, 
+                dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(SdpRespConstants.BACARDI_CONSUMER_FILE_PREFIX));
+            context.putString(SdpRespConstants.SDP_REQUEST_FILE_PREFIX, 
+                SdpRespConstants.CONSUMER_SDPREQUEST_FILE_PREFIX);
+        } else {
+            context.putString(SdpRespConstants.BACARDI_RESPONSE_FILE_PREFIX, 
+                dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(SdpRespConstants.BACARDI_SMB_FILE_PREFIX));
+            context.putString(SdpRespConstants.SDP_REQUEST_FILE_PREFIX, 
+                SdpRespConstants.SMB_SDPREQUEST_FILE_PREFIX);
+        }
+
+        // Set the output file path dynamically for the hanging report
+        String hangingReportFilePath = dynamicConfigPropertiesRepository
+            .findPropertyValueByPropertyName("sdphanging.output.flat.file.path"); // Replace with the actual config key
+
+        if (hangingReportFilePath != null) {
+            context.putString("sdphanging.output.flat.file.path", hangingReportFilePath);  // Set the execution context
+            Log.info("Hanging report file path set in ExecutionContext: {}", hangingReportFilePath);
+        } else {
+            Log.error("Failed to fetch the hanging report file path from DynamicConfigPropertiesRepository.");
+            jobExecution.setExitStatus(new ExitStatus("FAILED", "Missing Hanging Report File Path"));
+        }
+
+        Log.trace("SdpRespJobListener ::: beforeJob ::: Exit");
+    }
+}
+
+
+
+
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.stereotype.Component;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.*;
+import java.nio.file.*;
+import java.util.List;
+
+@Component
+public class HangingReportFileAggregator {
+
+    private static final Logger logger = LogManager.getLogger(HangingReportFileAggregator.class);
+
+    public void aggregateFiles(StepExecution stepExecution) throws IOException {
+        JobExecution jobExecution = stepExecution.getJobExecution();
+        ExecutionContext context = jobExecution.getExecutionContext();
+
+        // Fetch the output directory path from the ExecutionContext
+        String directoryPath = context.getString("sdphanging.output.flat.file.path");
+        if (directoryPath == null || directoryPath.isEmpty()) {
+            logger.error("Hanging report file path is missing or empty in ExecutionContext.");
+            throw new IllegalArgumentException("File path not available in ExecutionContext.");
+        }
+
+        // Define input files based on the writers' outputs
+        String dayPlusOneWriterFile = directoryPath + "/dayPlusOneWriter.txt";
+        String moreThan7DaysWriterFile = directoryPath + "/moreThan7DaysWriter.txt";
+        String moreThan25DaysWriterFile = directoryPath + "/moreThan25DaysWriter.txt";
+
+        // Define the output file (hanging report)
+        String outputFilePath = directoryPath + "/hangingReport.txt";
+
+        logger.info("Aggregating files into: {}", outputFilePath);
+
+        // Aggregating files into the output
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(outputFilePath), StandardOpenOption.CREATE)) {
+            // Process each file and append its content to the output file
+            List<String> filesToAggregate = List.of(dayPlusOneWriterFile, moreThan7DaysWriterFile, moreThan25DaysWriterFile);
+            for (String filePath : filesToAggregate) {
+                appendFileContent(filePath, writer);
+            }
+
+            logger.info("File aggregation complete. Output written to {}", outputFilePath);
+        } catch (IOException e) {
+            logger.error("Error occurred during file aggregation: {}", e.getMessage());
+            throw e;
+        }
     }
 
-    // Test for the "dayPlusOneWriter" bean
-    @Test
-    public void testDayPlusOneWriter() throws Exception {
-        // Invoke the dayPlusOneWriter method
-        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.dayPlusOneWriter();
+    private void appendFileContent(String inputFilePath, BufferedWriter writer) throws IOException {
+        Path path = Paths.get(inputFilePath);
 
-        // Verifying that the correct file path and file name are set
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
-
-        // Ensure the correct file path is set with thread-specific parameter
-        assertTrue(writer.getResource().getFilename().contains("dayPlusOneWriter.txt"));
-        
-        // Verify header callback writes correct content
-        writer.setHeaderCallback(header -> assertEquals(hangingHeader1, header));
-
-        // Verify footer callback writes total record count
-        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
-
-        // Ensure the correct format is applied to the line aggregator
-        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
-        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
-    }
-
-    // Test for the "moreThan7DaysWriter" bean
-    @Test
-    public void testMoreThan7DaysWriter() throws Exception {
-        // Invoke the moreThan7DaysWriter method
-        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.moreThan7DaysWriter();
-
-        // Verifying that the correct file path and file name are set
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
-
-        // Ensure the correct file path is set with thread-specific parameter
-        assertTrue(writer.getResource().getFilename().contains("moreThan7DaysWriter.txt"));
-        
-        // Verify header callback writes correct content
-        writer.setHeaderCallback(header -> assertEquals(hangingHeader2, header));
-
-        // Verify footer callback writes total record count
-        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
-
-        // Ensure the correct format is applied to the line aggregator
-        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
-        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
-    }
-
-    // Test for the "moreThan25DaysWriter" bean
-    @Test
-    public void testMoreThan25DaysWriter() throws Exception {
-        // Invoke the moreThan25DaysWriter method
-        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.moreThan25DaysWriter();
-
-        // Verifying that the correct file path and file name are set
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.output.flat.file.path");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.aggregator.format");
-        verify(dynamicConfigPropRepository).findPropertyValueByPropertyName("sdphanging.flatfile.writer.name");
-
-        // Ensure the correct file path is set with thread-specific parameter
-        assertTrue(writer.getResource().getFilename().contains("moreThan25DaysWriter.txt"));
-        
-        // Verify header callback writes correct content
-        writer.setHeaderCallback(header -> assertEquals(hangingHeader2, header));
-
-        // Verify footer callback writes total record count
-        writer.setFooterCallback(footer -> assertTrue(footer.toString().contains("TOTAL RECORD COUNT")));
-
-        // Ensure the correct format is applied to the line aggregator
-        FormatterLineAggregator<RetrievalDTO> lineAggregator = new FormatterLineAggregator<>();
-        assertEquals(expectedAggregatorFormat, lineAggregator.getFormat());
-    }
-
-    // Testing the formatter extractor setup
-    @Test
-    public void testBeanWrapperFieldExtractorSetup() throws Exception {
-        FlatFileItemWriter<RetrievalDTO> writer = hangingReportWriter1.dayPlusOneWriter();
-
-        BeanWrapperFieldExtractor<RetrievalDTO> fieldExtractor = new BeanWrapperFieldExtractor<>();
-        fieldExtractor.setNames(new String[] {"field1", "field2", "field3"});  // Assuming these fields in the DTO
-
-        // Mocking a RetrievalDTO object and setting values
-        RetrievalDTO mockDTO = mock(RetrievalDTO.class);
-        when(mockDTO.getField1()).thenReturn("Value1");
-        when(mockDTO.getField2()).thenReturn("Value2");
-        when(mockDTO.getField3()).thenReturn("Value3");
-
-        String[] extractedFields = fieldExtractor.extract(mockDTO);
-        assertArrayEquals(new String[] {"Value1", "Value2", "Value3"}, extractedFields);
+        // Check if the file exists before attempting to read
+        if (Files.exists(path)) {
+            try (BufferedReader reader = Files.newBufferedReader(path)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+                writer.flush();  // Ensure data is written to output file
+            } catch (IOException e) {
+                logger.error("Error reading file {}: {}", inputFilePath, e.getMessage());
+                throw e;
+            }
+        } else {
+            logger.warn("Input file {} does not exist. Skipping.", inputFilePath);
+        }
     }
 }
