@@ -413,17 +413,15 @@ import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.stereotype.Component;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.*;
 import java.nio.file.*;
 import java.util.List;
 
 @Component
+@Slf4j // Lombok annotation for Log4j2 logging
 public class HangingReportFileAggregator {
-
-    private static final Logger logger = LogManager.getLogger(HangingReportFileAggregator.class);
 
     public void aggregateFiles(StepExecution stepExecution) throws IOException {
         JobExecution jobExecution = stepExecution.getJobExecution();
@@ -432,7 +430,7 @@ public class HangingReportFileAggregator {
         // Fetch the output directory path from the ExecutionContext
         String directoryPath = context.getString("sdphanging.output.flat.file.path");
         if (directoryPath == null || directoryPath.isEmpty()) {
-            logger.error("Hanging report file path is missing or empty in ExecutionContext.");
+            log.error("Hanging report file path is missing or empty in ExecutionContext.");
             throw new IllegalArgumentException("File path not available in ExecutionContext.");
         }
 
@@ -444,7 +442,7 @@ public class HangingReportFileAggregator {
         // Define the output file (hanging report)
         String outputFilePath = directoryPath + "/hangingReport.txt";
 
-        logger.info("Aggregating files into: {}", outputFilePath);
+        log.info("Aggregating files into: {}", outputFilePath);
 
         // Aggregating files into the output
         try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(outputFilePath), StandardOpenOption.CREATE)) {
@@ -454,9 +452,9 @@ public class HangingReportFileAggregator {
                 appendFileContent(filePath, writer);
             }
 
-            logger.info("File aggregation complete. Output written to {}", outputFilePath);
+            log.info("File aggregation complete. Output written to {}", outputFilePath);
         } catch (IOException e) {
-            logger.error("Error occurred during file aggregation: {}", e.getMessage());
+            log.error("Error occurred during file aggregation: {}", e.getMessage());
             throw e;
         }
     }
@@ -474,11 +472,11 @@ public class HangingReportFileAggregator {
                 }
                 writer.flush();  // Ensure data is written to output file
             } catch (IOException e) {
-                logger.error("Error reading file {}: {}", inputFilePath, e.getMessage());
+                log.error("Error reading file {}: {}", inputFilePath, e.getMessage());
                 throw e;
             }
         } else {
-            logger.warn("Input file {} does not exist. Skipping.", inputFilePath);
+            log.warn("Input file {} does not exist. Skipping.", inputFilePath);
         }
     }
 }
