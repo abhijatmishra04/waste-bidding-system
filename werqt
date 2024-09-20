@@ -263,3 +263,9 @@ Scan individual classes for services, APIs, and dependencies.
 Register the plugin and tool window in plugin.xml.
 Optionally, add manual actions for triggering the scan.
 This approach ensures that your plugin integrates seamlessly with IntelliJ, providing a robust and interactive experience for users to scan their projects.
+
+
+
+
+
+https://drive.google.com/drive/folders/1chDeQwakN9qb_ybff0v3tf47-ih_GBX8
