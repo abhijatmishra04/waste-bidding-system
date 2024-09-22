@@ -1,0 +1,110 @@
+package com.bofa.ept.sst.batch.constants;
+
+public class BatchConstants {
+
+    // Email addresses
+    public static final String MAIL_FROM = "sst.prod@BOFA.COM";
+    public static final String[] RECEIVERS = {
+        "DG.SBeSB_L3@BOFA.COM",
+        "dg.sst_dev@bofa.com",
+        "dg.ca_payments_platform@bofa.com"
+    };
+
+    // Email subject
+    public static final String EMAIL_SUBJECT = "SecMail:SST - SDP FILE: Hanging Records alert from SST";
+
+    // Email body
+    public static final String EMAIL_BODY = """
+        Hi Team,
+        
+        Please find the attached report file for SDP file processing and listed out the hanging records on next start on date.
+        
+        FILENAME   : ESBP.SST.PROD.CONSMB.SDP.REP(0)
+        JOB NAME   : ESB3SDPR
+        
+        Regards,
+        SST Team
+        
+        Note: This is system generated mail. Please do not reply to this mail.
+    """;
+
+    // File constants
+    public static final String ATTACHMENT_FILE_NAME = "SDP_HANGING_REPORT.TXT";
+    public static final String FILE_PATH_PREFIX = "path/to/files/";
+    
+    // Email server properties
+    public static final String MAIL_HOST = "mail.bankofamerica.com";
+    public static final int MAIL_PORT = 25;
+    public static final String MAIL_USERNAME = "sst.prod@BOFA.COM";
+    public static final String MAIL_PASSWORD = "YourPasswordHere";  // This should be securely stored
+}
+
+
+
+
+
+public void sendMail() {
+    try {
+        JavaMailSenderImpl javaMailSender = emailConfig.getJavaMailSender();
+        MimeMessage mime = javaMailSender.createMimeMessage();
+        MimeMessageHelper message = new MimeMessageHelper(mime, true, "UTF-8");
+        
+        message.setFrom(BatchConstants.MAIL_FROM);  // Use constant for "from" address
+        message.setTo(BatchConstants.RECEIVERS);   // Use constant for "to" addresses
+        message.setSubject(BatchConstants.EMAIL_SUBJECT);  // Use constant for the subject
+        
+        // Set the email body from constant
+        message.setText(BatchConstants.EMAIL_BODY);
+
+        // Get the current date and generate the file path for the attachment
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        String currDate = simpleDateFormat.format(Calendar.getInstance().getTime());
+
+        // Generate the full file path for the attachment
+        String generateFilePath = BatchConstants.FILE_PATH_PREFIX + BatchConstants.ATTACHMENT_FILE_NAME;
+
+        // Attach the file
+        message.addAttachment(BatchConstants.ATTACHMENT_FILE_NAME, new FileSystemResource(generateFilePath));
+        
+        // Send the email
+        javaMailSender.send(mime);
+        
+        Log.info("ReportingEmailNotificationService ::: sendMail() ::: mail sent successfully!!!");
+        
+    } catch (Exception exception) {
+        Log.error("EmailNotificationService ::: sendMail() ::: Exception occurred while sending mail", exception.getMessage());
+    }
+}
+
+
+
+
+
+
+@Configuration
+public class EmailConfig {
+
+    @Autowired
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Bean
+    public JavaMailSenderImpl javaMailSender() {
+        JavaMailSenderImpl javaMailSender = new JavaMailSenderImpl();
+        Properties prop = new Properties();
+
+        // Set email properties
+        prop.put("mail.smtp.auth", true);
+        prop.put("smtp.starttls.enable", true);
+        
+        javaMailSender.setJavaMailProperties(prop);
+
+        // Set email server details from constants
+        javaMailSender.setHost(BatchConstants.MAIL_HOST);
+        javaMailSender.setPort(BatchConstants.MAIL_PORT);
+        
+        javaMailSender.setUsername(BatchConstants.MAIL_USERNAME);
+        javaMailSender.setPassword(BatchConstants.MAIL_PASSWORD);
+
+        return javaMailSender;
+    }
+}
