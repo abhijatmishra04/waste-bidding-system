@@ -1,119 +1,132 @@
-package com.bofa.ept.sst.batch.constants;
-
-public class BatchConstants {
-
-    // Email addresses
-    public static final String MAIL_FROM = "sst.prod@BOFA.COM";
-    public static final String[] RECEIVERS = {
-        "DG.SBeSB_L3@BOFA.COM",
-        "dg.sst_dev@bofa.com",
-        "dg.ca_payments_platform@bofa.com"
-    };
-
-    // Email subject
-    public static final String EMAIL_SUBJECT = "SecMail:SST - SDP FILE: Hanging Records alert from SST";
-
-    // Email body
-    public static final String EMAIL_BODY = """
-        Hi Team,
-        
-        Please find the attached report file for SDP file processing and listed out the hanging records on next start on date.
-        
-        FILENAME   : ESBP.SST.PROD.CONSMB.SDP.REP(0)
-        JOB NAME   : ESB3SDPR
-        
-        Regards,
-        SST Team
-        
-        Note: This is system generated mail. Please do not reply to this mail.
-    """;
-
-    // File constants
-    public static final String ATTACHMENT_FILE_NAME = "SDP_HANGING_REPORT.TXT";
-    public static final String FILE_PATH_PREFIX = "path/to/files/";
-    
-    // Email server properties
-    public static final String MAIL_HOST = "mail.bankofamerica.com";
-    public static final int MAIL_PORT = 25;
-    public static final String MAIL_USERNAME = "sst.prod@BOFA.COM";
-    public static final String MAIL_PASSWORD = "YourPasswordHere";  // This should be securely stored
-}
 
 
 
 
 
-public void sendMail() {
-    try {
-        JavaMailSenderImpl javaMailSender = emailConfig.getJavaMailSender();
-        MimeMessage mime = javaMailSender.createMimeMessage();
-        MimeMessageHelper message = new MimeMessageHelper(mime, true, "UTF-8");
-        
-        message.setFrom(BatchConstants.MAIL_FROM);  // Use constant for "from" address
-        message.setTo(BatchConstants.RECEIVERS);   // Use constant for "to" addresses
-        message.setSubject(BatchConstants.EMAIL_SUBJECT);  // Use constant for the subject
-        
-        // Set the email body from constant
-        message.setText(BatchConstants.EMAIL_BODY);
+package com.bofa.ept.sst.batch.core.impl;
 
-        // Get the current date and generate the file path for the attachment
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");
-        String currDate = simpleDateFormat.format(Calendar.getInstance().getTime());
+import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j2.Log4j2;
+import org.springframework.batch.item.file.FlatFileItemReader;
+import org.springframework.batch.item.file.mapping.DefaultLineMapper;
+import org.springframework.batch.item.file.transform.FixedLengthTokenizer;
+import org.springframework.batch.item.file.mapping.FieldSetMapper;
+import org.springframework.batch.item.file.LineMapper;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 
-        // Generate the full file path for the attachment
-        String generateFilePath = BatchConstants.FILE_PATH_PREFIX + BatchConstants.ATTACHMENT_FILE_NAME;
+import java.util.Map;
 
-        // Attach the file
-        message.addAttachment(BatchConstants.ATTACHMENT_FILE_NAME, new FileSystemResource(generateFilePath));
-        
-        // Send the email
-        javaMailSender.send(mime);
-        
-        Log.info("ReportingEmailNotificationService ::: sendMail() ::: mail sent successfully!!!");
-        
-    } catch (Exception exception) {
-        Log.error("EmailNotificationService ::: sendMail() ::: Exception occurred while sending mail", exception.getMessage());
-    }
-}
-
-
-
-
-
-
+@Log4j2
 @Configuration
-public class EmailConfig {
+@RequiredArgsConstructor
+public class RetrievalDTOItemReader {
 
-    @Autowired
-    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+    @Value("${sdp.hanging.batch.file.input.fieldNames}")
+    private String[] fieldNames;
 
+    @Value("#{${sdp.hanging.batch.file.input.fieldRanges}}")
+    private Map<Integer, Integer> fieldRanges;
+
+    @Value("${sdp.hanging.batch.file.input.path}")
+    private String inputFilePath;
+
+    /**
+     * Bean for FlatFileItemReader to read data from the file
+     * 
+     * @return FlatFileItemReader<RetrievalDTO>
+     * @throws Exception
+     */
     @Bean
-    public JavaMailSenderImpl javaMailSender() {
-        JavaMailSenderImpl javaMailSender = new JavaMailSenderImpl();
-        Properties prop = new Properties();
+    public FlatFileItemReader<RetrievalDTO> getFlatFileItemReader() throws Exception {
+        log.info("Initializing FlatFileItemReader for input file: {}", inputFilePath);
 
-        // Set email properties
-        prop.put("mail.smtp.auth", true);
-        prop.put("smtp.starttls.enable", true);
+        FlatFileItemReader<RetrievalDTO> itemReader = new FlatFileItemReader<>();
+        Resource resource = new FileSystemResource(inputFilePath);
+
+        itemReader.setResource(resource);
+        itemReader.setName("RetrievalDTOItemReader");
+        itemReader.setLineMapper(lineMapper());
+
+        log.debug("FlatFileItemReader initialized with resource: {}", resource.getFilename());
+        return itemReader;
+    }
+
+    /**
+     * Maps the file data to the DTO (RetrievalDTO)
+     * 
+     * @return LineMapper<RetrievalDTO>
+     * @throws Exception
+     */
+    public LineMapper<RetrievalDTO> lineMapper() throws Exception {
+        log.info("Creating LineMapper for the file.");
         
-        javaMailSender.setJavaMailProperties(prop);
+        DefaultLineMapper<RetrievalDTO> lineMapper = new DefaultLineMapper<>();
+        FixedLengthTokenizer tokenizer = new FixedLengthTokenizer();
 
-        // Set email server details from constants
-        javaMailSender.setHost(BatchConstants.MAIL_HOST);
-        javaMailSender.setPort(BatchConstants.MAIL_PORT);
+        log.debug("Setting field ranges and field names for FixedLengthTokenizer.");
+        tokenizer.setColumns(getRanges());
+        tokenizer.setNames(fieldNames);
+
+        lineMapper.setLineTokenizer(tokenizer);
+        lineMapper.setFieldSetMapper(fieldSetMapper());
+
+        log.info("LineMapper created successfully.");
+        return lineMapper;
+    }
+
+    /**
+     * Sets the field mapping for RetrievalDTO
+     * 
+     * @return FieldSetMapper<RetrievalDTO>
+     */
+    public FieldSetMapper<RetrievalDTO> fieldSetMapper() {
+        log.info("Setting up FieldSetMapper for RetrievalDTO.");
         
-        javaMailSender.setUsername(BatchConstants.MAIL_USERNAME);
-        javaMailSender.setPassword(BatchConstants.MAIL_PASSWORD);
+        return field -> {
+            RetrievalDTO dto = new RetrievalDTO();
 
-        return javaMailSender;
+            dto.setDetailRecordId(field.readString("detailRecordId").trim());
+            dto.setAccountNumber(field.readString("accountNumber").trim());
+            dto.setReferenceKey(field.readString("referenceKey").trim());
+            dto.setSystemId(field.readString("systemId").trim());
+            dto.setSstKey(field.readString("sstKey").trim());
+            dto.setConfirmationNumber(field.readString("confirmationNumber").trim());
+            dto.setTransactionReferenceId(field.readString("transactionReferenceId").trim());
+            dto.setPaymentType(field.readString("paymentType").trim());
+            dto.setXdays(field.readString("xdays").trim());
+            dto.setDueDate(field.readString("dueDate").trim());
+            dto.setMarketId(field.readString("marketId").trim());
+            dto.setCreateTimestamp(field.readString("createTimestamp").trim());
+            dto.setSubChannel(field.readString("subChannel").trim());
+            dto.setStatementBalance(field.readString("statementBalance").trim());
+
+            log.debug("Mapped field values to RetrievalDTO: {}", dto);
+            return dto;
+        };
+    }
+
+    /**
+     * Converts the map of ranges into Range[] for FixedLengthTokenizer
+     * 
+     * @return Range[]
+     * @throws Exception
+     */
+    public Range[] getRanges() throws Exception {
+        log.info("Converting field ranges into Range[] for tokenizer.");
+        
+        Range[] ranges = new Range[fieldRanges.size()];
+        int index = 0;
+
+        for (Map.Entry<Integer, Integer> entry : fieldRanges.entrySet()) {
+            ranges[index++] = new Range(entry.getKey(), entry.getValue());
+            log.debug("Range added: start={}, end={}", entry.getKey(), entry.getValue());
+        }
+
+        log.info("All ranges converted successfully.");
+        return ranges;
     }
 }
-
-
-
-
-%-12s%-22s%-14s%-10s%-64s%-10s%-28s
-
-sdp.response.file.input.field.ranges={1:1, 2:22, 23:31, 32:32, 33:41, 42:51, 52:63, 64:65, 66:67, 68:75, 76:78, 79:104, 105:168, 169:188, 189:189}
-sdp.response.file.input.field.names=detailRecordId,accountNumber,referenceKey,systemId,sstKey,confirmationNumber,transactionReferenceId,paymentType,xdays,dueDate,marketId,createTimestamp,subChannel,statementBalance,filler
-
