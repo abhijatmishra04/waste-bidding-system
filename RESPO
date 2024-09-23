@@ -113,3 +113,7 @@ public class EmailConfig {
 
 
 %-12s%-22s%-14s%-10s%-64s%-10s%-28s
+
+sdp.response.file.input.field.ranges={1:1, 2:22, 23:31, 32:32, 33:41, 42:51, 52:63, 64:65, 66:67, 68:75, 76:78, 79:104, 105:168, 169:188, 189:189}
+sdp.response.file.input.field.names=detailRecordId,accountNumber,referenceKey,systemId,sstKey,confirmationNumber,transactionReferenceId,paymentType,xdays,dueDate,marketId,createTimestamp,subChannel,statementBalance,filler
+
