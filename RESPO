@@ -108,3 +108,8 @@ public class EmailConfig {
         return javaMailSender;
     }
 }
+
+
+
+
+%-12s%-22s%-14s%-10s%-64s%-10s%-28s
