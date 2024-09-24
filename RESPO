@@ -1,132 +1,14 @@
-
-
-
-
-
-package com.bofa.ept.sst.batch.core.impl;
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j2.Log4j2;
-import org.springframework.batch.item.file.FlatFileItemReader;
-import org.springframework.batch.item.file.mapping.DefaultLineMapper;
-import org.springframework.batch.item.file.transform.FixedLengthTokenizer;
-import org.springframework.batch.item.file.mapping.FieldSetMapper;
-import org.springframework.batch.item.file.LineMapper;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
-
-import java.util.Map;
-
-@Log4j2
-@Configuration
-@RequiredArgsConstructor
-public class RetrievalDTOItemReader {
-
-    @Value("${sdp.hanging.batch.file.input.fieldNames}")
-    private String[] fieldNames;
-
-    @Value("#{${sdp.hanging.batch.file.input.fieldRanges}}")
-    private Map<Integer, Integer> fieldRanges;
-
-    @Value("${sdp.hanging.batch.file.input.path}")
-    private String inputFilePath;
-
-    /**
-     * Bean for FlatFileItemReader to read data from the file
-     * 
-     * @return FlatFileItemReader<RetrievalDTO>
-     * @throws Exception
-     */
-    @Bean
-    public FlatFileItemReader<RetrievalDTO> getFlatFileItemReader() throws Exception {
-        log.info("Initializing FlatFileItemReader for input file: {}", inputFilePath);
-
-        FlatFileItemReader<RetrievalDTO> itemReader = new FlatFileItemReader<>();
-        Resource resource = new FileSystemResource(inputFilePath);
-
-        itemReader.setResource(resource);
-        itemReader.setName("RetrievalDTOItemReader");
-        itemReader.setLineMapper(lineMapper());
-
-        log.debug("FlatFileItemReader initialized with resource: {}", resource.getFilename());
-        return itemReader;
-    }
-
-    /**
-     * Maps the file data to the DTO (RetrievalDTO)
-     * 
-     * @return LineMapper<RetrievalDTO>
-     * @throws Exception
-     */
-    public LineMapper<RetrievalDTO> lineMapper() throws Exception {
-        log.info("Creating LineMapper for the file.");
-        
-        DefaultLineMapper<RetrievalDTO> lineMapper = new DefaultLineMapper<>();
-        FixedLengthTokenizer tokenizer = new FixedLengthTokenizer();
-
-        log.debug("Setting field ranges and field names for FixedLengthTokenizer.");
-        tokenizer.setColumns(getRanges());
-        tokenizer.setNames(fieldNames);
-
-        lineMapper.setLineTokenizer(tokenizer);
-        lineMapper.setFieldSetMapper(fieldSetMapper());
-
-        log.info("LineMapper created successfully.");
-        return lineMapper;
-    }
-
-    /**
-     * Sets the field mapping for RetrievalDTO
-     * 
-     * @return FieldSetMapper<RetrievalDTO>
-     */
-    public FieldSetMapper<RetrievalDTO> fieldSetMapper() {
-        log.info("Setting up FieldSetMapper for RetrievalDTO.");
-        
-        return field -> {
-            RetrievalDTO dto = new RetrievalDTO();
-
-            dto.setDetailRecordId(field.readString("detailRecordId").trim());
-            dto.setAccountNumber(field.readString("accountNumber").trim());
-            dto.setReferenceKey(field.readString("referenceKey").trim());
-            dto.setSystemId(field.readString("systemId").trim());
-            dto.setSstKey(field.readString("sstKey").trim());
-            dto.setConfirmationNumber(field.readString("confirmationNumber").trim());
-            dto.setTransactionReferenceId(field.readString("transactionReferenceId").trim());
-            dto.setPaymentType(field.readString("paymentType").trim());
-            dto.setXdays(field.readString("xdays").trim());
-            dto.setDueDate(field.readString("dueDate").trim());
-            dto.setMarketId(field.readString("marketId").trim());
-            dto.setCreateTimestamp(field.readString("createTimestamp").trim());
-            dto.setSubChannel(field.readString("subChannel").trim());
-            dto.setStatementBalance(field.readString("statementBalance").trim());
-
-            log.debug("Mapped field values to RetrievalDTO: {}", dto);
-            return dto;
-        };
-    }
-
-    /**
-     * Converts the map of ranges into Range[] for FixedLengthTokenizer
-     * 
-     * @return Range[]
-     * @throws Exception
-     */
-    public Range[] getRanges() throws Exception {
-        log.info("Converting field ranges into Range[] for tokenizer.");
-        
-        Range[] ranges = new Range[fieldRanges.size()];
-        int index = 0;
-
-        for (Map.Entry<Integer, Integer> entry : fieldRanges.entrySet()) {
-            ranges[index++] = new Range(entry.getKey(), entry.getValue());
-            log.debug("Range added: start={}, end={}", entry.getKey(), entry.getValue());
-        }
-
-        log.info("All ranges converted successfully.");
-        return ranges;
-    }
+@Bean(name = SdpRespConstants.SDP_RESPONSE_JOB)
+public Job sdpResponseJob() throws FlatFileParseException, FileNotFoundException, IOException, SQLException, Exception {
+    return jobBuilderFactory.get(SdpRespConstants.SDP_RESPONSE_JOB)
+        .incrementer(new RunIdIncrementer())
+        .start(hangingReport())  // Start with the hangingReport step
+        .on(SdpRespConstants.COMPLETED)
+        .to(FileAggregatorStep())  // After completion, go to FileAggregatorStep
+        .on(SdpRespConstants.COMPLETED)
+        .end()  // Mark the job as complete after FileAggregatorStep
+        .on(SdpRespConstants.FAILED).end()  // If any step fails, end the job
+        .build()
+        .listener(jobListener)  // Add job listener if needed
+        .build();
 }
