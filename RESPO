@@ -1,103 +1,45 @@
-@Bean
-public FieldSetMapper<RetrievalIDTO> fieldSetMapper() {
-    Log.info("Setting up FieldSetMapper for RetrievalIDTO.");
+Log.info("Processing valid record #{}", currentCount);
 
-    return field -> {
-        RetrievalIDTO dto = new RetrievalIDTO();
+LocalDate dueDate = LocalDate.parse(item.getDueDate(), DateTimeFormatter.ofPattern("yyyyMMdd"));
+LocalDate currentDate = LocalDate.now();
+DayOfWeek dayOfWeek = currentDate.getDayOfWeek();
+long hangingDays;
 
-        try {
-            dto.setDetailRecordId(field.readString("detailRecordId").trim());
-            Log.debug("detailRecordId: {}", dto.getDetailRecordId());
-        } catch (Exception e) {
-            Log.error("Error reading 'detailRecordId': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setAccountNumber(field.readString("accountNumber").trim());
-            Log.debug("accountNumber: {}", dto.getAccountNumber());
-        } catch (Exception e) {
-            Log.error("Error reading 'accountNumber': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setSystemId(field.readString("systemId").trim());
-            Log.debug("systemId: {}", dto.getSystemId());
-        } catch (Exception e) {
-            Log.error("Error reading 'systemId': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setSstKey(field.readString("sstKey").trim());
-            Log.debug("sstKey: {}", dto.getSstKey());
-        } catch (Exception e) {
-            Log.error("Error reading 'sstKey': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setConfirmationNumber(field.readString("confirmationNumber").trim());
-            Log.debug("confirmationNumber: {}", dto.getConfirmationNumber());
-        } catch (Exception e) {
-            Log.error("Error reading 'confirmationNumber': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setTransactionReferenceId(field.readString("transactionReferenceId").trim());
-            Log.debug("transactionReferenceId: {}", dto.getTransactionReferenceId());
-        } catch (Exception e) {
-            Log.error("Error reading 'transactionReferenceId': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setPaymentType(field.readString("paymentType").trim());
-            Log.debug("paymentType: {}", dto.getPaymentType());
-        } catch (Exception e) {
-            Log.error("Error reading 'paymentType': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setXdays(field.readString("xdays").trim());
-            Log.debug("xdays: {}", dto.getXdays());
-        } catch (Exception e) {
-            Log.error("Error reading 'xdays': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setDueDate(field.readString("dueDate").trim());
-            Log.debug("dueDate: {}", dto.getDueDate());
-        } catch (Exception e) {
-            Log.error("Error reading 'dueDate': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setMarketId(field.readString("marketId").trim());
-            Log.debug("marketId: {}", dto.getMarketId());
-        } catch (Exception e) {
-            Log.error("Error reading 'marketId': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setCreateTimestamp(field.readString("createTimestamp").trim());
-            Log.debug("createTimestamp: {}", dto.getCreateTimestamp());
-        } catch (Exception e) {
-            Log.error("Error reading 'createTimestamp': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setSubChannel(field.readString("subChannel").trim());
-            Log.debug("subChannel: {}", dto.getSubChannel());
-        } catch (Exception e) {
-            Log.error("Error reading 'subChannel': {}", e.getMessage(), e);
-        }
-
-        try {
-            dto.setStatementBalance(field.readString("statementBalance").trim());
-            Log.debug("statementBalance: {}", dto.getStatementBalance());
-        } catch (Exception e) {
-            Log.error("Error reading 'statementBalance': {}", e.getMessage(), e);
-        }
-
-        Log.debug("Mapped field values to RetrievalIDTO: {}", dto);
-
-        return dto;
-    };
+if (dayOfWeek == DayOfWeek.SUNDAY) {
+    hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(6), currentDate);
+    Log.info("Hanging days for valid record #{} calculated as {} (Sunday adjustment)", currentCount, hangingDays);
+} else {
+    hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(5), currentDate);
+    Log.info("Hanging days for valid record #{} calculated as {} (Weekday adjustment)", currentCount, hangingDays);
 }
+
+// Map the paymentType value (1, 2, 3) to the correct string value
+String paymentType;
+switch (item.getPaymentType()) {
+    case "1":
+        paymentType = "MIN";
+        break;
+    case "2":
+        paymentType = "STMT_BAL";
+        break;
+    case "3":
+        paymentType = "CONST_RECUR";
+        break;
+    default:
+        paymentType = "UNKNOWN"; // Fallback for unexpected values
+        Log.warn("Unexpected payment type {} found for record #{}", item.getPaymentType(), currentCount);
+        break;
+}
+
+RetrievalIDTO reportDTO = new RetrievalIDTO();
+reportDTO.setHangingDays(hangingDays);
+reportDTO.setPaymentType(paymentType); // Set the mapped string value (MIN, STMT_BAL, CONST_RECUR)
+reportDTO.setAccountNumber(item.getAccountNumber());
+reportDTO.setConfirmationNumber(item.getConfirmationNumber());
+reportDTO.setDueDate(item.getDueDate());
+reportDTO.setMarketId(item.getMarketId());
+reportDTO.setCreateTimestamp(item.getCreateTimestamp());
+
+Log.info("Valid record #{} processed successfully", currentCount);
+
+return reportDTO;
