@@ -1,14 +1,103 @@
-@Bean(name = SdpRespConstants.SDP_RESPONSE_JOB)
-public Job sdpResponseJob() throws FlatFileParseException, FileNotFoundException, IOException, SQLException, Exception {
-    return jobBuilderFactory.get(SdpRespConstants.SDP_RESPONSE_JOB)
-        .incrementer(new RunIdIncrementer())
-        .start(hangingReport())  // Start with the hangingReport step
-        .on(SdpRespConstants.COMPLETED)
-        .to(FileAggregatorStep())  // After completion, go to FileAggregatorStep
-        .on(SdpRespConstants.COMPLETED)
-        .end()  // Mark the job as complete after FileAggregatorStep
-        .on(SdpRespConstants.FAILED).end()  // If any step fails, end the job
-        .build()
-        .listener(jobListener)  // Add job listener if needed
-        .build();
+@Bean
+public FieldSetMapper<RetrievalIDTO> fieldSetMapper() {
+    Log.info("Setting up FieldSetMapper for RetrievalIDTO.");
+
+    return field -> {
+        RetrievalIDTO dto = new RetrievalIDTO();
+
+        try {
+            dto.setDetailRecordId(field.readString("detailRecordId").trim());
+            Log.debug("detailRecordId: {}", dto.getDetailRecordId());
+        } catch (Exception e) {
+            Log.error("Error reading 'detailRecordId': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setAccountNumber(field.readString("accountNumber").trim());
+            Log.debug("accountNumber: {}", dto.getAccountNumber());
+        } catch (Exception e) {
+            Log.error("Error reading 'accountNumber': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setSystemId(field.readString("systemId").trim());
+            Log.debug("systemId: {}", dto.getSystemId());
+        } catch (Exception e) {
+            Log.error("Error reading 'systemId': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setSstKey(field.readString("sstKey").trim());
+            Log.debug("sstKey: {}", dto.getSstKey());
+        } catch (Exception e) {
+            Log.error("Error reading 'sstKey': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setConfirmationNumber(field.readString("confirmationNumber").trim());
+            Log.debug("confirmationNumber: {}", dto.getConfirmationNumber());
+        } catch (Exception e) {
+            Log.error("Error reading 'confirmationNumber': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setTransactionReferenceId(field.readString("transactionReferenceId").trim());
+            Log.debug("transactionReferenceId: {}", dto.getTransactionReferenceId());
+        } catch (Exception e) {
+            Log.error("Error reading 'transactionReferenceId': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setPaymentType(field.readString("paymentType").trim());
+            Log.debug("paymentType: {}", dto.getPaymentType());
+        } catch (Exception e) {
+            Log.error("Error reading 'paymentType': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setXdays(field.readString("xdays").trim());
+            Log.debug("xdays: {}", dto.getXdays());
+        } catch (Exception e) {
+            Log.error("Error reading 'xdays': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setDueDate(field.readString("dueDate").trim());
+            Log.debug("dueDate: {}", dto.getDueDate());
+        } catch (Exception e) {
+            Log.error("Error reading 'dueDate': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setMarketId(field.readString("marketId").trim());
+            Log.debug("marketId: {}", dto.getMarketId());
+        } catch (Exception e) {
+            Log.error("Error reading 'marketId': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setCreateTimestamp(field.readString("createTimestamp").trim());
+            Log.debug("createTimestamp: {}", dto.getCreateTimestamp());
+        } catch (Exception e) {
+            Log.error("Error reading 'createTimestamp': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setSubChannel(field.readString("subChannel").trim());
+            Log.debug("subChannel: {}", dto.getSubChannel());
+        } catch (Exception e) {
+            Log.error("Error reading 'subChannel': {}", e.getMessage(), e);
+        }
+
+        try {
+            dto.setStatementBalance(field.readString("statementBalance").trim());
+            Log.debug("statementBalance: {}", dto.getStatementBalance());
+        } catch (Exception e) {
+            Log.error("Error reading 'statementBalance': {}", e.getMessage(), e);
+        }
+
+        Log.debug("Mapped field values to RetrievalIDTO: {}", dto);
+
+        return dto;
+    };
 }
