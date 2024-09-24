@@ -1,45 +1,48 @@
-Log.info("Processing valid record #{}", currentCount);
+@Override
+public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+    ExecutionContext context = stepContribution.getStepExecution().getJobExecution().getExecutionContext();
 
-LocalDate dueDate = LocalDate.parse(item.getDueDate(), DateTimeFormatter.ofPattern("yyyyMMdd"));
-LocalDate currentDate = LocalDate.now();
-DayOfWeek dayOfWeek = currentDate.getDayOfWeek();
-long hangingDays;
+    String directoryPath = context.getString("sdpHanging.output.flat.file.path");
+    if (directoryPath == null || directoryPath.isEmpty()) {
+        Log.error("Hanging report file path is missing or empty in ExecutionContext.");
+        throw new IllegalArgumentException("File path not available in ExecutionContext.");
+    }
 
-if (dayOfWeek == DayOfWeek.SUNDAY) {
-    hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(6), currentDate);
-    Log.info("Hanging days for valid record #{} calculated as {} (Sunday adjustment)", currentCount, hangingDays);
-} else {
-    hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(5), currentDate);
-    Log.info("Hanging days for valid record #{} calculated as {} (Weekday adjustment)", currentCount, hangingDays);
+    // Define the substrings to search for in the filenames
+    String dayPlusOneWriterKey = "dayPlusOneWriter.txt";
+    String moreThan7DaysWriterKey = "moreThan7DaysWriter.txt";
+    String moreThan25DaysWriterKey = "moreThan25DaysWriter.txt";
+
+    String outputFilePath = directoryPath + SdpRespConstants.ATTACHMENT_FILE_NAME;
+
+    Log.info("Aggregating files into: {}", outputFilePath);
+
+    // Get all files in the directory
+    try (Stream<Path> paths = Files.list(Paths.get(directoryPath))) {
+        List<String> filesToAggregate = paths
+            .filter(Files::isRegularFile)  // Ensure it's a file
+            .map(Path::toString)           // Convert Path to String
+            .filter(filePath -> filePath.contains(dayPlusOneWriterKey) || filePath.contains(moreThan7DaysWriterKey) || filePath.contains(moreThan25DaysWriterKey))  // Filter by key
+            .collect(Collectors.toList()); // Collect matching files
+
+        if (filesToAggregate.isEmpty()) {
+            Log.warn("No files found that match the required file names.");
+            return RepeatStatus.FINISHED;
+        }
+
+        // Append content from each matching file to the output file
+        for (String filePath : filesToAggregate) {
+            appendFileContent(filePath, outputFilePath);
+        }
+
+        Log.info("File aggregation complete. Output written to {}", outputFilePath);
+
+        // After aggregation, send email
+        hangingReportEmailNotificationService.sendMail(outputFilePath);
+    } catch (IOException e) {
+        Log.error("Error while aggregating files: {}", e.getMessage(), e);
+        throw e;
+    }
+
+    return RepeatStatus.FINISHED;
 }
-
-// Map the paymentType value (1, 2, 3) to the correct string value
-String paymentType;
-switch (item.getPaymentType()) {
-    case "1":
-        paymentType = "MIN";
-        break;
-    case "2":
-        paymentType = "STMT_BAL";
-        break;
-    case "3":
-        paymentType = "CONST_RECUR";
-        break;
-    default:
-        paymentType = "UNKNOWN"; // Fallback for unexpected values
-        Log.warn("Unexpected payment type {} found for record #{}", item.getPaymentType(), currentCount);
-        break;
-}
-
-RetrievalIDTO reportDTO = new RetrievalIDTO();
-reportDTO.setHangingDays(hangingDays);
-reportDTO.setPaymentType(paymentType); // Set the mapped string value (MIN, STMT_BAL, CONST_RECUR)
-reportDTO.setAccountNumber(item.getAccountNumber());
-reportDTO.setConfirmationNumber(item.getConfirmationNumber());
-reportDTO.setDueDate(item.getDueDate());
-reportDTO.setMarketId(item.getMarketId());
-reportDTO.setCreateTimestamp(item.getCreateTimestamp());
-
-Log.info("Valid record #{} processed successfully", currentCount);
-
-return reportDTO;
