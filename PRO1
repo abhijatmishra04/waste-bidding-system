@@ -1,269 +1,409 @@
-import lombok.Data;
+import os
+import javalang
+import yaml
+import logging
+import json
+import streamlit as st
+import networkx as nx
+from pathlib import Path
+from collections import defaultdict
+from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from matplotlib import pyplot as plt
+from pyvis.network import Network
 
-@Data
-public class RetrievalDTO {
+# Token Limit for Prompt
+MAX_TOKENS = 8000
 
-    private String detailRecordId;          // RETR-STB-DTL-REC-ID
-    private String accountNumber;           // RETR-STB-ACCOUNT-NBR
-    private String referenceKey;            // RETR-STB-REFERENCE-KEY
-    private String systemId;                // RETR-STB-SYSTEM-ID
-    private String sstKey;                  // RETR-STB-SST-KEY
-    private String confirmationNumber;      // RETR-STB-CONF-NUM
-    private String transactionReferenceId;  // RETR-STB-TRAN-REF-ID
-    private String paymentType;             // RETR-STB-PAYMENT-TYPE
-    private String xdays;                   // RETR-STB-XDAYS
-    private String dueDate;                 // RETR-STB-DUE-DATE
-    private String marketId;                // RETR-STB-MARKET-ID
-    private String createTimestamp;         // RETR-STB-CREATE-TIMESTAMP
-    private String subChannel;              // RETR-STB-SUB-CHANNEL
-    private String statementBalance;        // RETR-STB-STMT-BAL
-}
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Metadata cache to avoid re-processing unchanged files
+metadata_cache = {}
+
+# Configuration loaded from YAML
+config = {}
+scan_summary = defaultdict(lambda: defaultdict(list))
 
 
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.stereotype.Component;
+def count_tokens(text: str) -> int:
+    """Estimate token count by assuming average 4 characters per token."""
+    return len(text) // 4
 
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 
-@Component
-@Log4j2
-public class RetrievalDTOProcessor implements ItemProcessor<RetrievalDTO, ProcessedReportDTO> {
+def load_configuration(config_path: str):
+    """Load configuration from YAML at the given path."""
+    global config
+    if not os.path.exists(config_path):
+        st.warning(f"Configuration file not found at {config_path}. Proceeding with default configuration.")
+        config = {}  # Use default configuration
+        return
 
-    private static final String DATE_FORMAT = "yyyyMMdd";  // Assuming dueDate is in this format
+    try:
+        with open(config_path, 'r') as config_file:
+            config = yaml.safe_load(config_file)
+            logger.info(f"Successfully loaded configuration from {config_path}")
+    except Exception as e:
+        logger.error(f"Error loading configuration from {config_path}: {e}")
+        st.error(f"Error loading configuration: {e}")
+        exit(1)
 
-    @Override
-    public ProcessedReportDTO process(RetrievalDTO item) throws Exception {
-        
-        // Step 1: Filter records by conditions
-        if (!"COL".equals(item.getSubChannel()) || 
-            Double.parseDouble(item.getStatementBalance()) <= 0.0) {
-            return null;  // Skip this record if conditions not met
-        }
+    config.setdefault('annotation_filters', [])
+    config.setdefault('dependency_filters', {'include': [], 'exclude': []})
+    config.setdefault('file_path_filters', {'include': [], 'exclude': []})
 
-        // Step 2: Calculate the hanging days
-        LocalDate dueDate = LocalDate.parse(item.getDueDate(), DateTimeFormatter.ofPattern(DATE_FORMAT));
-        LocalDate currentDate = LocalDate.now();
 
-        DayOfWeek dayOfWeek = currentDate.getDayOfWeek();
-        long hangingDays;
+def apply_file_path_filters(java_files: List[Path]) -> List[Path]:
+    """Apply include/exclude filters to the list of Java files based on file paths."""
+    include_filters = config.get('file_path_filters', {}).get('include', [])
+    exclude_filters = config.get('file_path_filters', {}).get('exclude', [])
 
-        if (dayOfWeek == DayOfWeek.SUNDAY) {
-            // Sunday: hanging days = Current Date - (Due Date - 6 days)
-            hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(6), currentDate);
-        } else {
-            // Monday to Saturday: hanging days = Current Date - (Due Date - 5 days)
-            hangingDays = ChronoUnit.DAYS.between(dueDate.minusDays(5), currentDate);
-        }
+    filtered_files = []
+    for java_file in java_files:
+        file_str = str(java_file)
+        if include_filters and not any(pattern in file_str for pattern in include_filters):
+            continue
+        if any(pattern in file_str for pattern in exclude_filters):
+            continue
+        filtered_files.append(java_file)
 
-        // Step 3: Categorize the record
-        String hangingCategory;
-        if (hangingDays == 1) {
-            hangingCategory = "GIVEN DAY + 1 DAY Section";
-        } else if (hangingDays >= 7 && hangingDays < 25) {
-            hangingCategory = "MORE THAN 7 DAYS Section";
-        } else if (hangingDays >= 25) {
-            hangingCategory = "MORE THAN 25 DAYS Section";
-        } else {
-            return null;  // Record does not fit into any category, skip
-        }
+    logger.info(f"After applying filters, {len(filtered_files)} Java files will be scanned.")
+    return filtered_files
 
-        // Step 4: Prepare Report DTO
-        ProcessedReportDTO reportDTO = new ProcessedReportDTO();
-        
-        // Use original DTO values for detailRecordId and paymentType
-        reportDTO.setDetailRecordId(item.getDetailRecordId());
-        reportDTO.setHangingDays(hangingDays);
-        reportDTO.setCategory(hangingCategory);
-        reportDTO.setPaymentType(getPaymentTypeDescription(item.getPaymentType()));
 
-        return reportDTO;  // This will be passed to the writer
+def scan_project_async(project_path: str):
+    """Scan the Java project asynchronously with filtering options."""
+    logger.info(f"Starting to scan project at {project_path}")
+    st.info(f"Starting scan for {project_path}")
+
+    if not os.path.exists(project_path):
+        logger.error(f"Project path {project_path} does not exist.")
+        st.error(f"Project path {project_path} does not exist.")
+        return
+
+    java_files = list(Path(project_path).rglob("*.java"))
+
+    if not java_files:
+        logger.error(f"No Java files found in the directory: {project_path}. Exiting.")
+        st.error(f"No Java files found in the directory: {project_path}.")
+        return
+
+    logger.info(f"Found {len(java_files)} Java files to scan.")
+    java_files = apply_file_path_filters(java_files)
+
+    batch_size = config.get('batch_size', 50)
+    progress_bar = st.progress(0)  # Streamlit progress bar
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = []
+        for i, batch in enumerate([java_files[i:i + batch_size] for i in range(0, len(java_files), batch_size)]):
+            futures.append(executor.submit(scan_batch, batch))
+            progress_bar.progress(i / len(java_files))
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                logger.error(f"Batch generated an exception: {exc}")
+                st.error(f"Batch generated an exception: {exc}")
+
+    progress_bar.progress(1.0)
+    st.success("Scan complete. Generating report...")
+    generate_report("json", project_path)
+
+
+def scan_batch(file_batch: List[Path]):
+    """Scan a batch of Java files."""
+    for java_file in file_batch:
+        scan_file(java_file)
+
+
+def scan_file(java_file_path: Path):
+    """Scan a single Java file for services, annotations, and dependencies."""
+    try:
+        with open(java_file_path, 'r', encoding='utf-8') as file:
+            java_code = file.read()
+
+        tree = javalang.parse.parse(java_code)
+
+        for node in tree.types:
+            if isinstance(node, javalang.tree.ClassDeclaration):
+                scan_class(node, java_file_path)
+
+        imports = extract_imports(tree)
+        logger.info(f"Imports found in {java_file_path}: {imports}")
+
+    except Exception as e:
+        logger.error(f"Error parsing {java_file_path}: {e}")
+        st.error(f"Error parsing {java_file_path}: {e}")
+
+
+def scan_class(java_class, java_file_path: Path):
+    """Scan a Java class for annotations, complexity, dependencies, and relationships."""
+    class_name = java_class.name
+    last_modified = os.path.getmtime(java_file_path)
+
+    if class_name in metadata_cache and metadata_cache[class_name]['last_modified'] >= last_modified:
+        logger.info(f"Skipping cached class {class_name}")
+        return
+
+    class_annotations = extract_annotations(java_class)
+    metadata = {
+        'annotations': class_annotations,
+        'dependencies': [],
+        'inter_service_calls': [],
+        'fields': [],
+        'methods': [],
+        'relationships': [],
+        'file_path': str(java_file_path),
+        'last_modified': last_modified,
+        'component_type': detect_spring_component_type(java_class)
     }
 
-    // This helper method maps the payment type to its description
-    private String getPaymentTypeDescription(String paymentType) {
-        switch (paymentType) {
-            case "1": return "MIN";
-            case "2": return "STMT_BAL";
-            case "3": return "CONST_RECUR";
-            default: return "UNKNOWN";
-        }
-    }
-}
+    metadata['fields'] = extract_fields(java_class)
+    metadata['methods'] = extract_methods(java_class)
+
+    detect_service_injections(java_class, metadata)
+
+    metadata_cache[class_name] = metadata
+    scan_summary[class_name] = metadata
+    scan_summary[class_name]['relationships'] = detect_relationships(java_class, metadata)
+
+    logger.info(f"Class {class_name} scanned with metadata: {metadata}")
 
 
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.item.file.FlatFileItemReader;
-import org.springframework.batch.item.file.mapping.DefaultLineMapper;
-import org.springframework.batch.item.file.mapping.FieldSetMapper;
-import org.springframework.batch.item.file.transform.FixedLengthTokenizer;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
-import org.springframework.batch.item.file.transform.Range;
-import org.springframework.batch.item.file.LineMapper;
-import java.text.SimpleDateFormat;
-import java.util.Map;
-
-@Configuration
-@RequiredArgsConstructor
-@Log4j2
-public class RetrievalDTOItemReader {
-
-    @Value("${accountType.batch.file.input.fieldNames}")
-    private String[] fieldNames;
-
-    @Value("#{${accountType.batch.file.input.fieldRanges}}")
-    private Map<Integer, Integer> fieldRanges;
-
-    /**
-     * Bean for FlatFileItemReader to read data from the file
-     * @param fromLine Starting line in the file
-     * @param toLine Ending line in the file
-     * @param totalLines Total number of lines in the file
-     * @return FlatFileItemReader<RetrievalDTO>
-     * @throws Exception
-     */
-    @Bean
-    public FlatFileItemReader<RetrievalDTO> getFlatFileItemReader(
-            @Value("#{stepExecutionContext['fromLine']}") Integer fromLine,
-            @Value("#{stepExecutionContext['toLine']}") Integer toLine,
-            @Value("#{stepExecutionContext['numberOfRecords']}") Integer totalLines) throws Exception {
-
-        FlatFileItemReader<RetrievalDTO> itemReader = new FlatFileItemReader<>();
-        
-        // Set the resource path for the file
-        Resource resource = new FileSystemResource("path/to/your/input/file.txt");
-        itemReader.setResource(resource);
-        itemReader.setName("RetrievalDTOItemReader");
-        
-        // Set the LineMapper (maps each line to a DTO)
-        itemReader.setLineMapper(lineMapper());
-
-        // Logic for skipping lines based on fromLine and toLine
-        if (fromLine == 1 && toLine.equals(totalLines)) {
-            itemReader.setLinesToSkip(fromLine);
-            itemReader.setMaxItemCount(toLine - fromLine);
-        } else if (fromLine == 1) {
-            itemReader.setLinesToSkip(fromLine);
-            itemReader.setMaxItemCount(toLine - fromLine);
-        } else if (toLine.equals(totalLines)) {
-            itemReader.setLinesToSkip(fromLine - 1);
-            itemReader.setMaxItemCount(toLine - fromLine);
-        } else {
-            itemReader.setLinesToSkip(fromLine - 1);
-            itemReader.setMaxItemCount(toLine - fromLine + 1);
-        }
-
-        return itemReader;
-    }
-
-    /**
-     * Maps the file data to the DTO (RetrievalDTO)
-     * @return LineMapper<RetrievalDTO>
-     * @throws Exception
-     */
-    private LineMapper<RetrievalDTO> lineMapper() throws Exception {
-        DefaultLineMapper<RetrievalDTO> lineMapper = new DefaultLineMapper<>();
-
-        // Tokenizer to define fixed-length columns
-        FixedLengthTokenizer tokenizer = new FixedLengthTokenizer();
-        tokenizer.setColumns(getRanges());
-        tokenizer.setNames(fieldNames);
-
-        lineMapper.setLineTokenizer(tokenizer);
-        lineMapper.setFieldSetMapper(fieldSetMapper());
-
-        return lineMapper;
-    }
-
-    /**
-     * Sets the field mapping for RetrievalDTO
-     * @return FieldSetMapper<RetrievalDTO>
-     */
-    private FieldSetMapper<RetrievalDTO> fieldSetMapper() {
-        return field -> {
-            RetrievalDTO dto = new RetrievalDTO();
-
-            // Set values for the DTO from the file input
-            dto.setDetailRecordId(field.readString("detailRecordId").trim());
-            dto.setAccountNumber(field.readString("accountNumber").trim());
-            dto.setReferenceKey(field.readString("referenceKey").trim());
-            dto.setSystemId(field.readString("systemId").trim());
-            dto.setSstKey(field.readString("sstKey").trim());
-            dto.setConfirmationNumber(field.readString("confirmationNumber").trim());
-            dto.setTransactionReferenceId(field.readString("transactionReferenceId").trim());
-            dto.setPaymentType(field.readString("paymentType").trim());
-            dto.setXdays(field.readString("xdays").trim());
-            dto.setDueDate(field.readString("dueDate").trim());
-            dto.setMarketId(field.readString("marketId").trim());
-            dto.setCreateTimestamp(field.readString("createTimestamp").trim());
-            dto.setSubChannel(field.readString("subChannel").trim());
-            dto.setStatementBalance(field.readString("statementBalance").trim());
-
-            return dto;
-        };
-    }
-
-    /**
-     * Converts the map of ranges into Range[] for FixedLengthTokenizer
-     * @return Range[]
-     * @throws Exception
-     */
-    private Range[] getRanges() throws Exception {
-        Range[] ranges = new Range[fieldRanges.size()];
-        int index = 0;
-        for (Map.Entry<Integer, Integer> entry : fieldRanges.entrySet()) {
-            ranges[index++] = new Range(entry.getKey(), entry.getValue());
-        }
-        return ranges;
-    }
-}
+def extract_imports(tree):
+    """Extract imports from the CompilationUnit."""
+    imports = []
+    if hasattr(tree, 'imports'):
+        for imp in tree.imports:
+            imports.append(imp.path)
+    return imports
 
 
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.item.support.ClassifierCompositeItemWriter;
-import org.springframework.classify.Classifier;
-
-public class HangingReportClassifierWriter extends ClassifierCompositeItemWriter<ProcessedRetrievalDTO> {
-
-    public HangingReportClassifierWriter(
-            ItemWriter<ProcessedRetrievalDTO> dayPlusOneWriter,
-            ItemWriter<ProcessedRetrievalDTO> moreThan7DaysWriter,
-            ItemWriter<ProcessedRetrievalDTO> moreThan25DaysWriter) {
-
-        // Set the classifier with the categorization logic
-        this.setClassifier(new Classifier<ProcessedRetrievalDTO, ItemWriter<? super ProcessedRetrievalDTO>>() {
-            @Override
-            public ItemWriter<? super ProcessedRetrievalDTO> classify(ProcessedRetrievalDTO item) {
-                // Step 3: Categorize the record based on hanging days
-                int hangingDays = item.getHangingDays();
-                String hangingCategory;
-                
-                if (hangingDays == 1) {
-                    hangingCategory = "GIVEN DAY + 1 DAY Section";
-                    return dayPlusOneWriter;  // Route to day + 1 writer
-                } else if (hangingDays >= 7 && hangingDays < 25) {
-                    hangingCategory = "MORE THAN 7 DAYS Section";
-                    return moreThan7DaysWriter;  // Route to 7-25 days writer
-                } else if (hangingDays >= 25) {
-                    hangingCategory = "MORE THAN 25 DAYS Section";
-                    return moreThan25DaysWriter;  // Route to 25+ days writer
-                } else {
-                    return null;  // No writer for records that don't meet the criteria
-                }
-            }
-        });
-    }
-}
+def extract_annotations(java_class):
+    """Extract annotations from a Java class."""
+    return [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+            java_class.annotations]
 
 
-file.input.fieldNames=detailRecordId,accountNumber,referenceKey,systemId,sstKey,confirmationNumber,transactionReferenceId,paymentType,xdays,dueDate,marketId,createTimestamp,subChannel,statementBalance
-file.input.fieldRanges=1-1,2-22,23-31,32-32,33-41,42-51,52-63,64-64,65-66,67-74,75-77,96-159,160-185,186-188
+def extract_fields(java_class):
+    """Extract fields and their metadata from a Java class."""
+    return [{
+        'names': [declarator.name for declarator in field.declarators],
+        'type': field.type.name if field.type and isinstance(field.type.name, str) else 'Unknown',
+        'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+                        field.annotations]
+    } for field in java_class.fields]
+
+
+def extract_methods(java_class):
+    """Extract methods from a Java class."""
+    return [{
+        'name': method.name,
+        'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'void',
+        'parameters': [{'name': param.name,
+                        'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'} for
+                       param in method.parameters],
+        'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
+                        method.annotations]
+    } for method in java_class.methods]
+
+
+def detect_service_injections(java_class, metadata):
+    """Detect field-level and constructor-based service injections."""
+    for field in java_class.fields:
+        if field.annotations:
+            for annotation in field.annotations:
+                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+                if annotation_name == "Autowired":
+                    injected_service = field.type.name if field.type and field.type.name else 'Unknown'
+                    metadata['inter_service_calls'].append(injected_service)
+                    logger.info(f"Autowired service found in {java_class.name}: {injected_service}")
+
+    for constructor in java_class.constructors:
+        for param in constructor.parameters:
+            for annotation in param.annotations:
+                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+                if annotation_name == "Autowired":
+                    injected_service = param.type.name if param.type and param.type.name else 'Unknown'
+                    metadata['inter_service_calls'].append(injected_service)
+                    logger.info(f"Autowired service found in constructor of {java_class.name}: {injected_service}")
+
+
+def detect_relationships(java_class, metadata):
+    """Detect relationships: inheritance, interfaces, method calls, cyclic dependencies, data flow."""
+    relationships = []
+
+    if hasattr(java_class, 'extends') and java_class.extends:
+        parent_class = java_class.extends.name if isinstance(java_class.extends.name,
+                                                             str) else java_class.extends.name.value
+        relationships.append({'type': 'inherits', 'target': parent_class, 'relationship_type': 'inheritance'})
+
+    if hasattr(java_class, 'implements') and java_class.implements:
+        for interface in java_class.implements:
+            interface_name = interface.name if isinstance(interface.name, str) else interface.name.value
+            relationships.append(
+                {'type': 'implements', 'target': interface_name, 'relationship_type': 'interface_implementation'})
+
+    method_call_relationships = detect_method_calls(java_class)
+    relationships.extend(method_call_relationships)
+
+    data_flow_relationships = detect_data_flow(java_class)
+    relationships.extend(data_flow_relationships)
+
+    return relationships
+
+
+def detect_method_calls(java_class):
+    """Detect method call relationships within and across services."""
+    relationships = []
+    for method in java_class.methods:
+        if method.body:
+            for node in method.body:
+                if isinstance(node, javalang.tree.MethodInvocation):
+                    relationships.append({'type': 'calls', 'target': node.member, 'relationship_type': 'method_call'})
+    return relationships
+
+
+def detect_data_flow(java_class):
+    """Detect data flow across services or between methods."""
+    relationships = []
+    for method in java_class.methods:
+        if method.body:
+            for node in method.body:
+                if isinstance(node, javalang.tree.MemberReference):
+                    relationships.append(
+                        {'type': 'data_flow', 'target': node.member, 'relationship_type': 'data_access'})
+    return relationships
+
+
+def detect_spring_component_type(java_class):
+    """Detect the Spring component type of the Java class based on its annotations."""
+    component_types = ["RestController", "Controller", "Service", "Repository", "Component"]
+
+    for annotation in java_class.annotations:
+        annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
+        if annotation_name in component_types:
+            return annotation_name
+
+    return "Unknown"
+
+
+def generate_report(output_format='json', project_path=None):
+    """Generate a report of the scan in the desired format (JSON, HTML)."""
+    logger.info("Generating scan report.")
+
+    if output_format == 'json':
+        summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.json'))
+        with open(summary_file, 'w') as f:
+            json.dump(scan_summary, f, indent=4)
+        logger.info(f"JSON scan summary written to {summary_file}")
+
+    # Generate the architecture prompt
+    generate_architecture_prompt(summary_file)
+
+
+def generate_architecture_prompt(json_file_path: str):
+    """Generate a prompt text file from the JSON summary of the Java project, respecting an 8000-token limit."""
+    if not os.path.exists(json_file_path):
+        raise FileNotFoundError(f"JSON file not found: {json_file_path}")
+
+    with open(json_file_path, 'r') as f:
+        scan_summary = json.load(f)
+
+    project_directory = os.path.dirname(json_file_path)
+    prompt_file_path = os.path.join(project_directory, 'architecture_prompt.txt')
+
+    total_token_count = 0  # To track token usage
+
+    with open(prompt_file_path, 'w') as prompt_file:
+        prompt_file.write("### Java Project Architecture Overview ###\n\n")
+        total_token_count += count_tokens("### Java Project Architecture Overview ###\n\n")
+
+        for class_name, metadata in scan_summary.items():
+            if total_token_count >= MAX_TOKENS:
+                prompt_file.write("\n...Output truncated to stay within token limit...\n")
+                break
+
+            prompt_file.write(f"Class: {class_name}\n")
+            total_token_count += count_tokens(f"Class: {class_name}\n")
+
+            prompt_file.write(f"File Path: {metadata['file_path']}\n")
+            total_token_count += count_tokens(f"File Path: {metadata['file_path']}\n")
+
+            prompt_file.write(f"Component Type: {metadata['component_type']}\n")
+            total_token_count += count_tokens(f"Component Type: {metadata['component_type']}\n")
+
+            if metadata['annotations']:
+                prompt_file.write(f"Annotations: {', '.join(metadata['annotations'])}\n")
+                total_token_count += count_tokens(f"Annotations: {', '.join(metadata['annotations'])}\n")
+            else:
+                prompt_file.write("Annotations: None\n")
+                total_token_count += count_tokens("Annotations: None\n")
+
+            prompt_file.write("Fields:\n")
+            for field in metadata['fields']:
+                field_names = ', '.join(field['names'])
+                prompt_file.write(
+                    f"  - {field_names} : {field['type']} (Annotations: {', '.join(field['annotations']) if field['annotations'] else 'None'})\n")
+                total_token_count += count_tokens(f"  - {field_names} : {field['type']}\n")
+
+            prompt_file.write("Methods:\n")
+            for method in metadata['methods']:
+                param_list = ', '.join([f"{param['type']} {param['name']}" for param in method['parameters']])
+                prompt_file.write(f"  - {method['return_type']} {method['name']}({param_list})\n")
+                total_token_count += count_tokens(f"  - {method['return_type']} {method['name']}\n")
+
+            prompt_file.write("Inter-Service Calls:\n")
+            if metadata['inter_service_calls']:
+                for service_call in metadata['inter_service_calls']:
+                    prompt_file.write(f"  - Calls service: {service_call}\n")
+                    total_token_count += count_tokens(f"  - Calls service: {service_call}\n")
+            else:
+                prompt_file.write("  - None\n")
+                total_token_count += count_tokens("  - None\n")
+
+            prompt_file.write("Relationships:\n")
+            if metadata['relationships']:
+                for rel in metadata['relationships']:
+                    prompt_file.write(f"  - {rel['type']} -> {rel['target']} ({rel['relationship_type']})\n")
+                    total_token_count += count_tokens(
+                        f"  - {rel['type']} -> {rel['target']} ({rel['relationship_type']})\n")
+            else:
+                prompt_file.write("  - None\n")
+                total_token_count += count_tokens("  - None\n")
+
+            prompt_file.write("\n")
+            total_token_count += count_tokens("\n")
+
+    logger.info(f"Architecture prompt saved to {prompt_file_path}. Output may be truncated to respect token limits.")
+    st.success(f"Architecture prompt saved to {prompt_file_path}")
+
+
+# Streamlit UI
+def main():
+    """Main function to launch the Streamlit app."""
+    st.title("Java Project Dependency Scanner and Architecture Prompt Generator")
+
+    # Input for project path
+    project_path = st.text_input("Enter the path to the Java project to scan:", value="")
+    output_format = st.selectbox("Select output format:", ['json', 'html'])
+
+    if st.button("Start Scan"):
+        if not os.path.exists(project_path):
+            st.error("Invalid project path. Please provide a valid path.")
+            return
+
+        # Load configuration (optional, fallback to defaults)
+        config_path = os.path.join(project_path, "config.yaml")
+        load_configuration(config_path)
+
+        # Start scanning the project
+        scan_project_async(project_path)
+
+        st.success("Project scanned and prompt generated successfully!")
+
+
+if __name__ == "__main__":
+    main()
