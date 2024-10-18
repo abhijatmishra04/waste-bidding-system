@@ -1,14 +1,53 @@
-@Bean(name = SdpRespConstants.SDP_RESPONSE_JOB)
-public Job sdpResponseJob() throws FlatFileParseException, FileNotFoundException, IOException, SQLException, Exception {
-    return jobBuilderFactory.get(SdpRespConstants.SDP_RESPONSE_JOB)
-        .incrementer(new RunIdIncrementer())
-        .start(hangingReport())  // Start with the hangingReport step
-        .on(SdpRespConstants.COMPLETED)
-        .to(FileAggregatorStep())  // After completion, go to FileAggregatorStep
-        .on(SdpRespConstants.COMPLETED)
-        .end()  // Mark the job as complete after FileAggregatorStep
-        .on(SdpRespConstants.FAILED).end()  // If any step fails, end the job
-        .build()
-        .listener(jobListener)  // Add job listener if needed
-        .build();
+import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.support.ClassifierCompositeItemWriter;
+import org.springframework.classify.Classifier;
+
+@Component
+public class HangingReportClassifierWriter {
+
+    @Autowired
+    private HangingReportWriter1 hangingreportwriter;
+
+    // Thread-safe counters for each writer
+    private final AtomicInteger dayPlusOneWriterCount = new AtomicInteger(0);
+    private final AtomicInteger moreThan7DaysWriterCount = new AtomicInteger(0);
+    private final AtomicInteger moreThan25DaysWriterCount = new AtomicInteger(0);
+
+    public ClassifierCompositeItemWriter<RetrievalDTO> HangingReportFileClassifier() {
+        ClassifierCompositeItemWriter<RetrievalDTO> compositeItemWriter = new ClassifierCompositeItemWriter<>();
+        Classifier<RetrievalDTO, ItemWriter<? super RetrievalDTO>> classifier = data -> {
+            Long hangingDays = data.getHangingDays();
+
+            // Route to appropriate writer based on hanging days and increment the respective counter
+            if (hangingDays >= 1 && hangingDays <= 7) {
+                dayPlusOneWriterCount.incrementAndGet();  // Increment count for dayPlusOneWriter
+                return hangingreportwriter.dayPlusOneWriter();
+            } else if (hangingDays > 7 && hangingDays < 25) {
+                moreThan7DaysWriterCount.incrementAndGet();  // Increment count for moreThan7DaysWriter
+                return hangingreportwriter.moreThan7DaysWriter();
+            } else if (hangingDays >= 25) {
+                moreThan25DaysWriterCount.incrementAndGet();  // Increment count for moreThan25DaysWriter
+                return hangingreportwriter.moreThan25DaysWriter();
+            } else {
+                return null;
+            }
+        };
+
+        compositeItemWriter.setClassifier(classifier);
+        return compositeItemWriter;
+    }
+
+    // Methods to retrieve the counts for each writer
+    public int getDayPlusOneWriterCount() {
+        return dayPlusOneWriterCount.get();
+    }
+
+    public int getMoreThan7DaysWriterCount() {
+        return moreThan7DaysWriterCount.get();
+    }
+
+    public int getMoreThan25DaysWriterCount() {
+        return moreThan25DaysWriterCount.get();
+    }
 }
