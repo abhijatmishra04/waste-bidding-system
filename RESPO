@@ -1,53 +1,35 @@
-import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.item.support.ClassifierCompositeItemWriter;
-import org.springframework.classify.Classifier;
-
-@Component
-public class HangingReportClassifierWriter {
-
-    @Autowired
-    private HangingReportWriter1 hangingreportwriter;
-
-    // Thread-safe counters for each writer
-    private final AtomicInteger dayPlusOneWriterCount = new AtomicInteger(0);
-    private final AtomicInteger moreThan7DaysWriterCount = new AtomicInteger(0);
-    private final AtomicInteger moreThan25DaysWriterCount = new AtomicInteger(0);
-
-    public ClassifierCompositeItemWriter<RetrievalDTO> HangingReportFileClassifier() {
-        ClassifierCompositeItemWriter<RetrievalDTO> compositeItemWriter = new ClassifierCompositeItemWriter<>();
-        Classifier<RetrievalDTO, ItemWriter<? super RetrievalDTO>> classifier = data -> {
-            Long hangingDays = data.getHangingDays();
-
-            // Route to appropriate writer based on hanging days and increment the respective counter
-            if (hangingDays >= 1 && hangingDays <= 7) {
-                dayPlusOneWriterCount.incrementAndGet();  // Increment count for dayPlusOneWriter
-                return hangingreportwriter.dayPlusOneWriter();
-            } else if (hangingDays > 7 && hangingDays < 25) {
-                moreThan7DaysWriterCount.incrementAndGet();  // Increment count for moreThan7DaysWriter
-                return hangingreportwriter.moreThan7DaysWriter();
-            } else if (hangingDays >= 25) {
-                moreThan25DaysWriterCount.incrementAndGet();  // Increment count for moreThan25DaysWriter
-                return hangingreportwriter.moreThan25DaysWriter();
-            } else {
-                return null;
+try (Stream<Path> paths = Files.list(Paths.get(directoryPath))) {
+    List<String> filesToAggregate = paths
+        .filter(Files::isRegularFile)
+        .filter(path -> {
+            try {
+                FileTime fileTime = Files.getLastModifiedTime(path);
+                LocalDate fileDate = fileTime.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+                return fileDate.equals(LocalDate.now()); // Only include files modified today
+            } catch (IOException e) {
+                Log.error("Error checking file modification time for " + path, e);
+                return false;
             }
-        };
-
-        compositeItemWriter.setClassifier(classifier);
-        return compositeItemWriter;
+        })
+        .map(Path::toString)
+        .filter(filePath -> filePath.contains(dayPlusOneWriterKey) 
+                            || filePath.contains(moreThan7DaysWriterKey) 
+                            || filePath.contains(moreThan25DaysWriterKey))
+        .collect(Collectors.toList());
+    
+    if (filesToAggregate.isEmpty()) {
+        Log.info("No files found that match the required file names and today's date.");
+        return RepeatStatus.FINISHED;
     }
 
-    // Methods to retrieve the counts for each writer
-    public int getDayPlusOneWriterCount() {
-        return dayPlusOneWriterCount.get();
+    for (String filePath : filesToAggregate) {
+        appendFileContent(filePath, outputFilePath);
     }
 
-    public int getMoreThan7DaysWriterCount() {
-        return moreThan7DaysWriterCount.get();
-    }
+    Log.info("File aggregation complete. Output written to {}", outputFilePath);
+    hangingReportEmailNotificationService.sendMail();
 
-    public int getMoreThan25DaysWriterCount() {
-        return moreThan25DaysWriterCount.get();
-    }
+} catch (IOException e) {
+    Log.info("Error while aggregating files: {}", e.getMessage(), e);
+    throw e;
 }
