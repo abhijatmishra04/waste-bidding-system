@@ -98,7 +98,6 @@ OR
 
 
 
-
 SELECT 
     ROW_NUMBER() OVER (ORDER BY smm.CR_ACC_ID) AS sequence_num,
     smm.SCHD_ID,
@@ -139,58 +138,57 @@ SELECT
     ab.LST_NM AS ab_lst_nm,
     amm.LST_NM AS amm_lst_nm
 FROM (
-    (SELECT smm.*
-     FROM (
-        SELECT 
-            smm.cr_acc_id, 
-            smm.dr_acc_id, 
-            smm.call_trac_id 
-        FROM sst_owner.schedule_m2m smm 
-        GROUP BY smm.cr_acc_id, smm.dr_acc_id, smm.call_trac_id 
-        HAVING COUNT(*) > 2
-    ) req
-    JOIN sst_owner.schedule_m2m smm 
-        ON smm.cr_acc_id = req.cr_acc_id 
-        AND smm.dr_acc_id = req.dr_acc_id 
-        AND smm.call_trac_id = req.call_trac_id
-    JOIN sst_owner.account_boa ab 
-        ON smm.DR_ACC_ID = ab.ACC_BOA_ID
-    JOIN sst_owner.account_m2m amm 
-        ON smm.CR_ACC_ID = amm.ACC_M2M_ID
-    JOIN customer c2 
-        ON c2.cust_id = smm.cust_id
-    WHERE TRUNC(smm.creat_ts) = TRUNC(SYSDATE - 1) 
-        AND smm.SUB_CHN IN ('RET', 'COL')
-        AND amm.PROD_CD IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-        AND smm.CHN_CD IN ('CCC', 'IVR') 
-        AND ab.PROD_CD IN ('EXT', 'PER', 'BUS', 'DCA'))
-    
-    UNION ALL
-    
-    (SELECT smm.*
-     FROM (
-        SELECT 
-            smm.cr_acc_id, 
-            smm.dr_acc_id, 
-            smm.creat_ts 
-        FROM sst_owner.schedule_m2m smm 
-        GROUP BY smm.cr_acc_id, smm.dr_acc_id, smm.creat_ts 
-        HAVING COUNT(*) > 2
-    ) req
-    JOIN sst_owner.schedule_m2m smm 
-        ON smm.cr_acc_id = req.cr_acc_id 
-        AND smm.dr_acc_id = req.dr_acc_id
-    JOIN sst_owner.account_boa ab 
-        ON smm.DR_ACC_ID = ab.ACC_BOA_ID
-    JOIN sst_owner.account_m2m amm 
-        ON smm.CR_ACC_ID = amm.ACC_M2M_ID
-    JOIN customer c2 
-        ON c2.cust_id = smm.cust_id
-    WHERE smm.XFER_REF_ID IS NULL 
-        AND TRUNC(smm.creat_ts) = TRUNC(SYSDATE - 1) 
-        AND smm.TRAN_ID_INT IN ('3000000001', '3000000002') 
-        AND amm.PROD_CD IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-        AND smm.CHN_CD IN ('CSR', 'VRU') 
-        AND ab.PROD_CD IN ('PER', 'BUS'))
-);
+    -- Subquery 1 with explicit columns
+    SELECT 
+        smm.SCHD_ID,
+        smm.CALL_TRAC_ID,
+        smm.DR_ACC_TYP,
+        smm.CR_ACC_TYP,
+        smm.CHN_CD,
+        smm.SUB_CHN,
+        smm.PMT_AM,
+        smm.NXT_TRAN_DT,
+        smm.LST_TRAN_DT,
+        smm.XFER_REF_ID,
+        smm.CLS_DT,
+        smm.ACS_ID,
+        smm.RCUR_AM_TYP,
+        smm.FRST_TRAN_DT,
+        smm.WARG_CD,
+        smm.GRAC_DY,
+        smm.ADD_ESC,
+        smm.DUE_DT,
+        smm.LAT_CHRG_AM,
+        smm.ADD_PPL,
+        smm.SCHD_STAT,
+        smm.PAYPLAN_FL,
+        smm.SCHD_FRQ_CD,
+        smm.RTE_NO,
+        smm.TRAN_ID_INT,
+        smm.XFER_MODE,
+        smm.cr_acc_id,
+        smm.dr_acc_id,
+        smm.call_trac_id,
+        smm.creat_ts,
+        smm.cust_id
+    FROM sst_owner.schedule_m2m smm
+    WHERE TRUNC(smm.creat_ts) = TRUNC(SYSDATE - 1)
+) smm
+JOIN sst_owner.account_boa ab 
+    ON smm.DR_ACC_ID = ab.ACC_BOA_ID
+JOIN sst_owner.account_m2m amm 
+    ON smm.CR_ACC_ID = amm.ACC_M2M_ID
+JOIN customer c2 
+    ON c2.cust_id = smm.cust_id
+WHERE 
+    (smm.SUB_CHN IN ('RET', 'COL') 
+     AND amm.PROD_CD IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
+     AND smm.CHN_CD IN ('CCC', 'IVR') 
+     AND ab.PROD_CD IN ('EXT', 'PER', 'BUS', 'DCA'))
+OR 
+    (smm.XFER_REF_ID IS NULL 
+     AND smm.TRAN_ID_INT IN ('3000000001', '3000000002') 
+     AND amm.PROD_CD IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
+     AND smm.CHN_CD IN ('CSR', 'VRU') 
+     AND ab.PROD_CD IN ('PER', 'BUS'));
 
