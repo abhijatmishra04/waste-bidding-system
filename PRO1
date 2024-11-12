@@ -2,23 +2,23 @@ SELECT
     ROW_NUMBER() OVER (ORDER BY smm.cr_acc_id) AS sequence_num,
     smm.schd_id,
     smm.call_trac_id,
-    ab.acc_no AS account_number,
-    amm.acc_no AS account_number,
-    ab.prod_cd AS product_code,
-    amm.prod_cd AS product_code,
+    smm.acc_no AS account_number,
+    smm.acc_no_amm AS account_number,
+    smm.prod_cd_ab AS product_code,
+    smm.prod_cd_amm AS product_code,
     smm.dr_acc_typ,
     smm.cr_acc_typ,
     smm.chn_cd AS chn,
     smm.sub_chn AS sub_chn,
     smm.pmt_am,
-    ab.ent_cd AS ent_cd,
-    amm.ent_cd AS ent_cd,
+    smm.ent_cd_ab AS ent_cd,
+    smm.ent_cd_amm AS ent_cd,
     smm.nxt_tran_dt,
     smm.lst_tran_dt,
     smm.xfer_ref_id,
     smm.cls_dt,
     smm.acs_id,
-    c2.pty_id,
+    smm.pty_id,
     smm.rcur_am_typ,
     smm.frst_tran_dt,
     smm.warg_cd,
@@ -30,16 +30,30 @@ SELECT
     smm.schd_stat,
     smm.payplan_fl,
     smm.schd_freq_cd,
-    amm.rte_no,
+    smm.rte_no,
     smm.tran_id_int,
     smm.xfer_mode,
-    ab.frst_nm AS frst_name,
-    amm.frst_nm AS frst_name,
-    ab.lst_nm AS lst_name,
-    amm.lst_nm AS lst_name
+    smm.frst_name_ab AS frst_name,
+    smm.frst_name_amm AS frst_name,
+    smm.lst_name_ab AS lst_name,
+    smm.lst_name_amm AS lst_name
 FROM (
+    -- Subquery 1
     (
-        SELECT smm.*
+        SELECT 
+            smm.*,
+            ab.acc_no,
+            amm.acc_no AS acc_no_amm,
+            ab.prod_cd AS prod_cd_ab,
+            amm.prod_cd AS prod_cd_amm,
+            ab.ent_cd AS ent_cd_ab,
+            amm.ent_cd AS ent_cd_amm,
+            amm.rte_no,
+            ab.frst_nm AS frst_name_ab,
+            amm.frst_nm AS frst_name_amm,
+            ab.lst_nm AS lst_name_ab,
+            amm.lst_nm AS lst_name_amm,
+            c2.pty_id
         FROM (
             SELECT 
                 smm.cr_acc_id, 
@@ -53,21 +67,37 @@ FROM (
             HAVING COUNT(*) > 2
         ) req
         JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.call_trac_id = req.call_trac_id) 
+            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.call_trac_id = req.call_trac_id)
         JOIN sst_owner.account_boa ab 
             ON smm.dr_acc_id = ab.acc_boa_id 
         INNER JOIN sst_owner.account_m2m amm 
             ON smm.cr_acc_id = amm.acc_m2m_id 
+        LEFT JOIN sst_owner.customer c2 
+            ON c2.cust_id = smm.cust_id
         WHERE 
-            TRUNC(smm.creat_ts) = TRUNC(SYSDATE - 1) 
+            smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
             AND smm.sub_chn IN ('RET', 'COL') 
             AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
             AND smm.chn_cd IN ('CCC', 'IVR') 
             AND ab.prod_cd IN ('EXT', 'PER', 'BUS', 'DCA')
     )
-    UNION
+    UNION ALL
+    -- Subquery 2
     (
-        SELECT smm.*
+        SELECT 
+            smm.*,
+            ab.acc_no,
+            amm.acc_no AS acc_no_amm,
+            ab.prod_cd AS prod_cd_ab,
+            amm.prod_cd AS prod_cd_amm,
+            ab.ent_cd AS ent_cd_ab,
+            amm.ent_cd AS ent_cd_amm,
+            amm.rte_no,
+            ab.frst_nm AS frst_name_ab,
+            amm.frst_nm AS frst_name_amm,
+            ab.lst_nm AS lst_name_ab,
+            amm.lst_nm AS lst_name_amm,
+            c2.pty_id
         FROM (
             SELECT 
                 smm.cr_acc_id, 
@@ -81,23 +111,19 @@ FROM (
             HAVING COUNT(*) > 2
         ) req
         JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.creat_ts = req.creat_ts) 
+            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.creat_ts = req.creat_ts)
         JOIN sst_owner.account_boa ab 
             ON smm.dr_acc_id = ab.acc_boa_id 
         INNER JOIN sst_owner.account_m2m amm 
             ON smm.cr_acc_id = amm.acc_m2m_id 
+        LEFT JOIN sst_owner.customer c2 
+            ON c2.cust_id = smm.cust_id
         WHERE 
             smm.xfer_ref_id IS NULL 
-            AND TRUNC(smm.creat_ts) = TRUNC(SYSDATE - 1) 
+            AND smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
             AND smm.tran_id_int IN ('300000001', '300000002') 
             AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
             AND smm.chn_cd IN ('CSR', 'VRU') 
             AND ab.prod_cd IN ('PER', 'BUS')
     )
-) smm
-JOIN sst_owner.account_boa ab 
-    ON smm.dr_acc_id = ab.acc_boa_id 
-JOIN sst_owner.account_m2m amm 
-    ON smm.cr_acc_id = amm.acc_m2m_id 
-LEFT JOIN sst_owner.customer c2 
-    ON c2.cust_id = smm.cust_id;
+) smm;
