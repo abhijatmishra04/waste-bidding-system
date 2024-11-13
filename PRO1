@@ -1,267 +1,57 @@
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY smm.cr_acc_id) AS sequence_num,
-    smm.schd_id,
-    smm.call_trac_id,
-    smm.acc_no AS account_number,
-    smm.acc_no_amm AS account_number,
-    smm.prod_cd_ab AS product_code,
-    smm.prod_cd_amm AS product_code,
-    smm.dr_acc_typ,
-    smm.cr_acc_typ,
-    smm.chn_cd AS chn,
-    smm.sub_chn AS sub_chn,
-    smm.pmt_am,
-    smm.ent_cd_ab AS ent_cd,
-    smm.ent_cd_amm AS ent_cd,
-    smm.nxt_tran_dt,
-    smm.lst_tran_dt,
-    smm.xfer_ref_id,
-    smm.cls_dt,
-    smm.acs_id,
-    smm.pty_id,
-    smm.rcur_am_typ,
-    smm.frst_tran_dt,
-    smm.warg_cd,
-    smm.grac_dy,
-    smm.add_esc,
-    smm.due_dt,
-    smm.lat_chrg_am,
-    smm.add_ppl,
-    smm.schd_stat,
-    smm.payplan_fl,
-    smm.schd_freq_cd,
-    smm.rte_no,
-    smm.tran_id_int,
-    smm.xfer_mode,
-    smm.frst_name_ab AS frst_name,
-    smm.frst_name_amm AS frst_name,
-    smm.lst_name_ab AS lst_name,
-    smm.lst_name_amm AS lst_name
-FROM (
-    -- Subquery 1
-    (
-        SELECT 
-            smm.*,
-            ab.acc_no,
-            amm.acc_no AS acc_no_amm,
-            ab.prod_cd AS prod_cd_ab,
-            amm.prod_cd AS prod_cd_amm,
-            ab.ent_cd AS ent_cd_ab,
-            amm.ent_cd AS ent_cd_amm,
-            amm.rte_no,
-            ab.frst_nm AS frst_name_ab,
-            amm.frst_nm AS frst_name_amm,
-            ab.lst_nm AS lst_name_ab,
-            amm.lst_nm AS lst_name_amm,
-            c2.pty_id
-        FROM (
-            SELECT 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.call_trac_id 
-            FROM sst_owner.schedule_m2m smm 
-            GROUP BY 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.call_trac_id 
-            HAVING COUNT(*) > 2
-        ) req
-        JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.call_trac_id = req.call_trac_id)
-        JOIN sst_owner.account_boa ab 
-            ON smm.dr_acc_id = ab.acc_boa_id 
-        INNER JOIN sst_owner.account_m2m amm 
-            ON smm.cr_acc_id = amm.acc_m2m_id 
-        LEFT JOIN sst_owner.customer c2 
-            ON c2.cust_id = smm.cust_id
-        WHERE 
-            smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
-            AND smm.sub_chn IN ('RET', 'COL') 
-            AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-            AND smm.chn_cd IN ('CCC', 'IVR') 
-            AND ab.prod_cd IN ('EXT', 'PER', 'BUS', 'DCA')
-    )
-    UNION ALL
-    -- Subquery 2
-    (
-        SELECT 
-            smm.*,
-            ab.acc_no,
-            amm.acc_no AS acc_no_amm,
-            ab.prod_cd AS prod_cd_ab,
-            amm.prod_cd AS prod_cd_amm,
-            ab.ent_cd AS ent_cd_ab,
-            amm.ent_cd AS ent_cd_amm,
-            amm.rte_no,
-            ab.frst_nm AS frst_name_ab,
-            amm.frst_nm AS frst_name_amm,
-            ab.lst_nm AS lst_name_ab,
-            amm.lst_nm AS lst_name_amm,
-            c2.pty_id
-        FROM (
-            SELECT 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.creat_ts 
-            FROM sst_owner.schedule_m2m smm 
-            GROUP BY 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.creat_ts 
-            HAVING COUNT(*) > 2
-        ) req
-        JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.creat_ts = req.creat_ts)
-        JOIN sst_owner.account_boa ab 
-            ON smm.dr_acc_id = ab.acc_boa_id 
-        INNER JOIN sst_owner.account_m2m amm 
-            ON smm.cr_acc_id = amm.acc_m2m_id 
-        LEFT JOIN sst_owner.customer c2 
-            ON c2.cust_id = smm.cust_id
-        WHERE 
-            smm.xfer_ref_id IS NULL 
-            AND smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
-            AND smm.tran_id_int IN ('300000001', '300000002') 
-            AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-            AND smm.chn_cd IN ('CSR', 'VRU') 
-            AND ab.prod_cd IN ('PER', 'BUS')
-    )
-) smm;
+@Bean
+public Job collectionLettersJob() {
+    return jobBuilderFactory.get("collectionLettersJob")
+        .incrementer(new RunIdIncrementer())
+        // Step 1: Start with NN3Step
+        .start(NN3Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN5Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Step 2: Move to NN5Step if previous step succeeded
+        .from(NN5Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN8Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Step 3: Move to NN8Step if previous step succeeded
+        .from(NN8Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN14Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Step 4: Move to NN14Step if previous step succeeded
+        .from(NN14Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN28Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Step 5: Move to NN28Step if previous step succeeded
+        .from(NN28Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN30Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Step 6: Move to NN30Step if previous step succeeded
+        .from(NN30Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(letterAggregatorStep())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        // Final Step: End the job if letterAggregatorStep completes successfully
+        .from(letterAggregatorStep())
+        .on(CollectionLettersBatchConstants.COMPLETED).end()
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .build();
+}
 
 
-
-
-
-
-
-
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY smm.cr_acc_id) AS sequence_num,
-    smm.schd_id,
-    smm.call_trac_id,
-    ab.acc_no AS from_account_number,
-    amm.acc_no AS to_account_number,
-    ab.prod_cd AS product_code,
-    amm.prod_cd AS product_code,
-    smm.dr_acc_typ AS fr_acc_typ,
-    smm.cr_acc_typ AS to_acc_typ,
-    smm.chn_cd AS chn,
-    smm.sub_chn AS sub_chn,
-    smm.pmt_am,
-    ab.ent_cd AS from_ent_cd,
-    amm.ent_cd AS to_ent_cd,
-    smm.nxt_tran_dt,
-    smm.lst_tran_dt,
-    smm.xfer_ref_id,
-    smm.cls_dt,
-    smm.acs_id,
-    c2.pty_id,
-    smm.rcur_am_typ,
-    smm.frst_tran_dt,
-    smm.warg_cd,
-    smm.grac_dy,
-    smm.add_esc,
-    smm.due_dt,
-    smm.lat_chrg_am,
-    smm.add_ppl,
-    smm.schd_stat,
-    smm.payplan_fl,
-    smm.schd_freq_cd,
-    amm.rte_no,
-    smm.tran_id_int,
-    smm.xfer_mode,
-    ab.frst_nm AS from_first_name,
-    amm.frst_nm AS to_first_name,
-    ab.lst_nm AS from_lst_name,
-    amm.lst_nm AS to_lst_name
-FROM (
-    (
-        -- Subquery 1: Retrieve data based on call_trac_id with necessary joins
-        SELECT 
-            smm.*, 
-            ab.acc_no, 
-            amm.acc_no, 
-            ab.prod_cd, 
-            amm.prod_cd, 
-            ab.ent_cd, 
-            amm.ent_cd, 
-            amm.rte_no, 
-            ab.frst_nm, 
-            amm.frst_nm, 
-            ab.lst_nm, 
-            amm.lst_nm,
-            c2.pty_id
-        FROM (
-            SELECT 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.call_trac_id 
-            FROM sst_owner.schedule_m2m smm 
-            GROUP BY 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.call_trac_id 
-            HAVING COUNT(*) > 2
-        ) req
-        JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.call_trac_id = req.call_trac_id)
-        JOIN sst_owner.account_boa ab 
-            ON smm.dr_acc_id = ab.acc_boa_id 
-        INNER JOIN sst_owner.account_m2m amm 
-            ON smm.cr_acc_id = amm.acc_m2m_id 
-        LEFT JOIN sst_owner.customer c2 
-            ON c2.cust_id = smm.cust_id
-        WHERE 
-            smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
-            AND smm.sub_chn IN ('RET', 'COL') 
-            AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-            AND smm.chn_cd IN ('CCC', 'IVR') 
-            AND ab.prod_cd IN ('EXT', 'PER', 'BUS', 'DCA')
-    )
-    UNION ALL
-    (
-        -- Subquery 2: Retrieve data based on creat_ts with necessary joins
-        SELECT 
-            smm.*, 
-            ab.acc_no, 
-            amm.acc_no, 
-            ab.prod_cd, 
-            amm.prod_cd, 
-            ab.ent_cd, 
-            amm.ent_cd, 
-            amm.rte_no, 
-            ab.frst_nm, 
-            amm.frst_nm, 
-            ab.lst_nm, 
-            amm.lst_nm,
-            c2.pty_id
-        FROM (
-            SELECT 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.creat_ts 
-            FROM sst_owner.schedule_m2m smm 
-            GROUP BY 
-                smm.cr_acc_id, 
-                smm.dr_acc_id, 
-                smm.creat_ts 
-            HAVING COUNT(*) > 2
-        ) req
-        JOIN sst_owner.schedule_m2m smm 
-            ON (smm.cr_acc_id = req.cr_acc_id AND smm.dr_acc_id = req.dr_acc_id AND smm.creat_ts = req.creat_ts)
-        JOIN sst_owner.account_boa ab 
-            ON smm.dr_acc_id = ab.acc_boa_id 
-        INNER JOIN sst_owner.account_m2m amm 
-            ON smm.cr_acc_id = amm.acc_m2m_id 
-        LEFT JOIN sst_owner.customer c2 
-            ON c2.cust_id = smm.cust_id
-        WHERE 
-            smm.xfer_ref_id IS NULL 
-            AND smm.creat_ts BETWEEN TRUNC(SYSDATE - 1) AND TRUNC(SYSDATE)
-            AND smm.tran_id_int IN ('300000001', '300000002') 
-            AND amm.prod_cd IN ('CCA', 'ALI', 'ALS', 'PER', 'BUS') 
-            AND smm.chn_cd IN ('CSR', 'VRU') 
-            AND ab.prod_cd IN ('PER', 'BUS')
-    )
-) smm;
-
+@Bean
+public Job weekendJob() {
+    return jobBuilderFactory.get("weekendJob")
+        .incrementer(new RunIdIncrementer())
+        .start(NN3Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN5Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .from(NN5Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN28Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .from(NN28Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(NN30Step())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .from(NN30Step())
+        .on(CollectionLettersBatchConstants.COMPLETED).to(letterAggregatorStep())
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .from(letterAggregatorStep())
+        .on(CollectionLettersBatchConstants.COMPLETED).end()
+        .on(CollectionLettersBatchConstants.FAILED).fail()
+        .build();
+}
