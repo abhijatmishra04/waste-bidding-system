@@ -29,9 +29,9 @@ public Job collectionLettersJob() {
         // Final Step: End the job if letterAggregatorStep completes successfully
         .from(letterAggregatorStep())
         .on(CollectionLettersBatchConstants.COMPLETED).end()
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .build();
+        .build(); // Add this build() method to finalize the job
 }
+
 
 
 @Bean
