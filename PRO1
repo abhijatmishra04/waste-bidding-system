@@ -1,57 +1,18 @@
-@Bean
-public Job collectionLettersJob() {
-    return jobBuilderFactory.get("collectionLettersJob")
-        .incrementer(new RunIdIncrementer())
-        // Step 1: Start with NN3Step
-        .start(NN3Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN5Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Step 2: Move to NN5Step if previous step succeeded
-        .from(NN5Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN8Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Step 3: Move to NN8Step if previous step succeeded
-        .from(NN8Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN14Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Step 4: Move to NN14Step if previous step succeeded
-        .from(NN14Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN28Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Step 5: Move to NN28Step if previous step succeeded
-        .from(NN28Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN30Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Step 6: Move to NN30Step if previous step succeeded
-        .from(NN30Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(letterAggregatorStep())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        // Final Step: End the job if letterAggregatorStep completes successfully
-        .from(letterAggregatorStep())
-        .on(CollectionLettersBatchConstants.COMPLETED).end()
-        .build(); // Add this build() method to finalize the job
-}
+I would like to express my sincere gratitude for your continuous guidance and support over the past year. Below are some key areas where your mentorship has made a significant impact on my growth:
 
+Technical Skills Development:
+Your insights and feedback greatly enhanced my technical abilities, especially while working on various internal projects at Infosys. Your advice was instrumental in helping me overcome challenges and deliver successful outcomes.
 
+Guidance on Internal Projects:
+You provided me with direction and support on several projects, including [mention specific projects if applicable]. Your expertise helped me improve my approach to problem-solving and boosted my confidence in handling complex tasks.
 
-@Bean
-public Job weekendJob() {
-    return jobBuilderFactory.get("weekendJob")
-        .incrementer(new RunIdIncrementer())
-        .start(NN3Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN5Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .from(NN5Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN28Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .from(NN28Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(NN30Step())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .from(NN30Step())
-        .on(CollectionLettersBatchConstants.COMPLETED).to(letterAggregatorStep())
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .from(letterAggregatorStep())
-        .on(CollectionLettersBatchConstants.COMPLETED).end()
-        .on(CollectionLettersBatchConstants.FAILED).fail()
-        .build();
-}
+Research Paper Publication:
+Your encouragement was a major factor in motivating me to publish my research paper. Your advice during the research and writing process was invaluable, helping me achieve a significant milestone in my academic and professional journey.
+
+Career Guidance on Onsite Opportunities:
+Your willingness to address my queries regarding potential onsite assignments was incredibly helpful. You provided clarity on the processes and helped me set realistic expectations for future opportunities.
+
+Overall Mentorship and Support:
+Your consistent availability, constructive feedback, and willingness to guide me through various challenges have been instrumental in my professional growth. I truly appreciate the time and effort you invested in my development.
+
+Once again, thank you for all your support and guidance. I am truly grateful for everything you have done, and I look forward to continuing to learn from you.
