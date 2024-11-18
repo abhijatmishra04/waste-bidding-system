@@ -1,18 +1,174 @@
-I would like to express my sincere gratitude for your continuous guidance and support over the past year. Below are some key areas where your mentorship has made a significant impact on my growth:
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-Technical Skills Development:
-Your insights and feedback greatly enhanced my technical abilities, especially while working on various internal projects at Infosys. Your advice was instrumental in helping me overcome challenges and deliver successful outcomes.
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
 
-Guidance on Internal Projects:
-You provided me with direction and support on several projects, including [mention specific projects if applicable]. Your expertise helped me improve my approach to problem-solving and boosted my confidence in handling complex tasks.
+import javax.naming.NamingException;
 
-Research Paper Publication:
-Your encouragement was a major factor in motivating me to publish my research paper. Your advice during the research and writing process was invaluable, helping me achieve a significant milestone in my academic and professional journey.
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.quartz.CronTrigger;
+import org.quartz.JobDataMap;
+import org.quartz.JobDetail;
+import org.quartz.Trigger;
+import org.springframework.batch.core.configuration.JobLocator;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.quartz.QuartzProperties;
+import org.springframework.scheduling.quartz.SchedulerFactoryBean;
+import org.mockito.junit.MockitoJUnitRunner;
 
-Career Guidance on Onsite Opportunities:
-Your willingness to address my queries regarding potential onsite assignments was incredibly helpful. You provided clarity on the processes and helped me set realistic expectations for future opportunities.
+@RunWith(MockitoJUnitRunner.class)
+public class CollectionLettersQuartzConfigurationTest {
 
-Overall Mentorship and Support:
-Your consistent availability, constructive feedback, and willingness to guide me through various challenges have been instrumental in my professional growth. I truly appreciate the time and effort you invested in my development.
+    @InjectMocks
+    private CollectionLettersQuartzConfiguration config;
 
-Once again, thank you for all your support and guidance. I am truly grateful for everything you have done, and I look forward to continuing to learn from you.
+    @Mock
+    private JobLauncher jobLauncher;
+
+    @Mock
+    private JobLocator jobLocator;
+
+    @Mock
+    private QuartzProperties quartzProperties;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        Map<String, String> propertiesMap = new HashMap<>();
+        propertiesMap.put("someProperty", "someValue");
+        when(quartzProperties.getProperties()).thenReturn(propertiesMap);
+    }
+
+    @Test
+    public void testInit() {
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
+                .thenReturn("0 0 12 * * ?");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
+                .thenReturn("0 0 13 * * ?");
+
+        config.init();
+
+        assertEquals("0 0 12 * * ?", config.getWeekdayCronSchedule());
+        assertEquals("0 0 13 * * ?", config.getWeekendCronSchedule());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testValidateProperties_weekdayCronScheduleIsNull() {
+        config.setWeekdayCronSchedule(null);
+        config.setWeekendCronSchedule("0 0 13 * * ?");
+        config.validateProperties();
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testValidateProperties_weekendCronScheduleIsNull() {
+        config.setWeekdayCronSchedule("0 0 12 * * ?");
+        config.setWeekendCronSchedule(null);
+        config.validateProperties();
+    }
+
+    @Test
+    public void testValidateProperties_validSchedules() {
+        config.setWeekdayCronSchedule("0 0 12 * * ?");
+        config.setWeekendCronSchedule("0 0 13 * * ?");
+        config.validateProperties();
+        // No exception expected
+    }
+
+    @Test
+    public void testCollectionLettersJobDetail() {
+        JobDetail jobDetail = config.collectionLettersJobDetail();
+
+        assertNotNull(jobDetail);
+        assertEquals("collectionLettersJob-detail", jobDetail.getKey().getName());
+        JobDataMap jobDataMap = jobDetail.getJobDataMap();
+        assertEquals(jobLauncher, jobDataMap.get("jobLauncher"));
+        assertEquals(jobLocator, jobDataMap.get("jobLocator"));
+        assertEquals("collectionLettersJob", jobDataMap.get("jobName"));
+    }
+
+    @Test
+    public void testCollectionLettersJobDetailWeekend() {
+        JobDetail jobDetail = config.collectionLettersJobDetailWeekend();
+
+        assertNotNull(jobDetail);
+        assertEquals("collectionLettersJob-detailWeekend", jobDetail.getKey().getName());
+        JobDataMap jobDataMap = jobDetail.getJobDataMap();
+        assertEquals(jobLauncher, jobDataMap.get("jobLauncher"));
+        assertEquals(jobLocator, jobDataMap.get("jobLocator"));
+        assertEquals("weekendJob", jobDataMap.get("jobName"));
+    }
+
+    @Test
+    public void testWeekdayJobTrigger() {
+        config.setWeekdayCronSchedule("0 0 12 * * ?");
+
+        Trigger trigger = config.weekdayJobTrigger();
+
+        assertNotNull(trigger);
+        assertEquals("weekdayJob-trigger", trigger.getKey().getName());
+        assertEquals("0 0 12 * * ?", ((CronTrigger) trigger).getCronExpression());
+    }
+
+    @Test
+    public void testWeekendJobTrigger() {
+        config.setWeekendCronSchedule("0 0 13 * * ?");
+
+        Trigger trigger = config.weekendJobTrigger();
+
+        assertNotNull(trigger);
+        assertEquals("weekendJob-trigger", trigger.getKey().getName());
+        assertEquals("0 0 13 * * ?", ((CronTrigger) trigger).getCronExpression());
+    }
+
+    @Test
+    public void testSchedulerFactoryBean() throws NamingException {
+        config.setWeekdayCronSchedule("0 0 12 * * ?");
+        config.setWeekendCronSchedule("0 0 13 * * ?");
+
+        // Set system property
+        System.setProperty("jboss.server.name", "testServer");
+
+        SchedulerFactoryBean schedulerFactoryBean = config.schedulerFactoryBean();
+
+        assertNotNull(schedulerFactoryBean);
+
+        // Verify that properties are set
+        Properties quartzProps = schedulerFactoryBean.getQuartzProperties();
+        assertEquals("someValue", quartzProps.getProperty("someProperty"));
+        assertEquals("testServer", quartzProps.getProperty("org.quartz.scheduler.instanceName"));
+
+        // Verify that triggers are set
+        Trigger[] triggers = schedulerFactoryBean.getTriggers();
+        assertNotNull(triggers);
+        assertEquals(2, triggers.length);
+
+        // Verify that job details are set
+        JobDetail[] jobDetails = schedulerFactoryBean.getJobDetails();
+        assertNotNull(jobDetails);
+        assertEquals(2, jobDetails.length);
+
+        // Check overwriteExistingJobs
+        assertTrue(schedulerFactoryBean.isOverwriteExistingJobs());
+    }
+
+    @Test
+    public void testJobRegistryBeanPostProcessor() {
+        JobRegistry jobRegistry = mock(JobRegistry.class);
+        JobRegistryBeanPostProcessor processor = config.jobRegistryBeanPostProcessor(jobRegistry);
+        assertNotNull(processor);
+        assertEquals(jobRegistry, processor.getJobRegistry());
+    }
+}
