@@ -1,850 +1,157 @@
-import os
-import zipfile
-import tempfile
-import javalang
-import yaml
-import logging
-import json
-import streamlit as st
-import networkx as nx
-from pathlib import Path
-from collections import defaultdict
-from typing import List, Dict, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pyvis.network import Network
-from groq import Groq
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-# Configuration and constants
-MAX_TOKENS = 8000  # Token limit for prompt generation
-metadata_cache = {}
-config = {}
-scan_summary = defaultdict(lambda: defaultdict(list))
-
-# Set up the logger with enhanced formatting and handlers
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-# Create handlers
-file_handler = logging.FileHandler('groq_api_log.log')
-stream_handler = logging.StreamHandler()
-# Create formatters and add to handlers
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
-stream_handler.setFormatter(formatter)
-# Add handlers to the logger
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
-
-# Initialize session state
-if 'prompt_file_path' not in st.session_state:
-    st.session_state.prompt_file_path = ""
-if 'scan_summary' not in st.session_state:
-    st.session_state.scan_summary = {}
-if 'architecture_prompt' not in st.session_state:
-    st.session_state.architecture_prompt = ""
-
-# Configure security settings
-ALLOWED_FILE_TYPES = ['zip']
-MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
-
-# Secure API key handling
-GROQ_API_KEY = "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"
-if not GROQ_API_KEY:
-    logger.error("Groq API key not found. Please set the GROQ_API_KEY environment variable.")
-    st.error("Groq API key not configured. Please contact the administrator.")
-
-# Use configuration file defaults
-DEFAULT_CONFIG = {
-    'annotation_filters': [],
-    'dependency_filters': {'include': [], 'exclude': []},
-    'file_path_filters': {'include': [], 'exclude': []},
-    'complexity_threshold': 10,
-    'method_length_threshold': 50,
-    'class_size_threshold': 10,
-    'batch_size': 50,
-    'output_file': 'scan_summary.json'
-}
-
-def count_tokens(text):
-    """Estimate the number of tokens in the text."""
-    return len(text) / 4
-
-def load_configuration(config_file):
-    """Load configuration from uploaded YAML file."""
-    global config
-    try:
-        user_config = yaml.safe_load(config_file)
-        config = {**DEFAULT_CONFIG, **user_config}
-        logger.info("Successfully loaded configuration.")
-    except yaml.YAMLError as e:
-        logger.error(f"Error parsing configuration file: {e}")
-        st.error(f"Error parsing configuration file: {e}")
-        config = DEFAULT_CONFIG.copy()
-    except Exception as e:
-        logger.error(f"Error loading configuration: {e}")
-        st.error(f"Error loading configuration: {e}")
-        config = DEFAULT_CONFIG.copy()
-
-def scan_project_async(project_dir: str, output_format: str = 'json'):
-    """Scan the Java project asynchronously with filtering options."""
-    try:
-        logger.info(f"Starting to scan project at {project_dir}")
-
-        java_files = list(Path(project_dir).rglob("*.java"))
-
-        if not java_files:
-            logger.error("No Java files found in the directory.")
-            st.error("No Java files found in the uploaded project.")
-            return
-
-        logger.info(f"Found {len(java_files)} Java files to scan.")
-
-        # Apply file path filters
-        java_files = apply_file_path_filters(java_files)
-
-        batch_size = config.get('batch_size', 50)
-        progress_bar = st.progress(0)
-        total_files = len(java_files)
-        processed_files = 0
-
-        # Use ThreadPoolExecutor for concurrent scanning
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = []
-            for batch in [java_files[i:i + batch_size] for i in range(0, len(java_files), batch_size)]:
-                futures.append(executor.submit(scan_batch, batch))
-
-            # Update progress as futures complete
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                    processed_files += batch_size
-                    progress = processed_files / total_files
-                    progress_bar.progress(min(progress, 1.0))
-                except Exception as exc:
-                    logger.error(f"Batch generated an exception: {exc}")
-                    st.error(f"Error during scanning: {exc}")
-
-        # Detect cyclic dependencies after scanning all files
-        detect_cyclic_dependencies()
-        generate_report(output_format, project_dir)
-        progress_bar.empty()
-    except Exception as e:
-        logger.error(f"Error during project scan: {e}")
-        st.error(f"Error during project scan: {e}")
-
-def apply_file_path_filters(java_files: List[Path]) -> List[Path]:
-    """Apply include/exclude filters to the list of Java files based on file paths."""
-    include_filters = config['file_path_filters'].get('include', [])
-    exclude_filters = config['file_path_filters'].get('exclude', [])
-
-    filtered_files = []
-    for java_file in java_files:
-        file_str = str(java_file)
-        if include_filters and not any(pattern in file_str for pattern in include_filters):
-            continue
-        if any(pattern in file_str for pattern in exclude_filters):
-            continue
-        filtered_files.append(java_file)
-
-    logger.info(f"After applying filters, {len(filtered_files)} Java files will be scanned.")
-    return filtered_files
-
-def scan_batch(file_batch: List[Path]):
-    """Scan a batch of Java files."""
-    for java_file in file_batch:
-        scan_file(java_file)
-
-def scan_file(java_file_path: Path):
-    """Scan a single Java file for services, annotations, and dependencies."""
-    try:
-        with open(java_file_path, 'r', encoding='utf-8') as file:
-            java_code = file.read()
-
-        tree = javalang.parse.parse(java_code)
-
-        for node in tree.types:
-            if isinstance(node, javalang.tree.ClassDeclaration):
-                scan_class(node, java_file_path)
-
-        imports = extract_imports(tree)
-        logger.debug(f"Imports found in {java_file_path}: {imports}")
-
-    except javalang.parser.JavaSyntaxError as e:
-        logger.error(f"Syntax error in {java_file_path}: {e}")
-    except Exception as e:
-        logger.error(f"Error parsing {java_file_path}: {e}")
-
-def scan_class(java_class, java_file_path: Path):
-    """Scan a Java class for advanced analysis: annotations, complexity, dependencies, and relationships."""
-    try:
-        class_name = java_class.name
-        last_modified = os.path.getmtime(java_file_path)
-
-        if class_name in metadata_cache and metadata_cache[class_name]['last_modified'] >= last_modified:
-            logger.info(f"Skipping cached class {class_name}")
-            return
-
-        class_annotations = extract_annotations(java_class)
-        if not apply_annotation_filters(class_annotations):
-            logger.info(f"Class {class_name} filtered out by annotation filter")
-            return
-
-        # Extract bounded context, API endpoints, and domain information
-        bounded_context = detect_bounded_context(java_file_path)
-        api_endpoints = extract_api_endpoints(java_class)
-        domain = extract_domain_from_path(java_file_path)
-
-        # Advanced analysis: Calculate cyclomatic complexity and detect code smells
-        methods_complexity = calculate_methods_complexity(java_class)
-        code_smells = detect_code_smells(java_class, methods_complexity)
-
-        # Collect metadata for the class
-        metadata = {
-            'annotations': class_annotations,
-            'dependencies': [],
-            'inter_service_calls': [],
-            'fields': [],
-            'methods': [],
-            'relationships': [],
-            'file_path': str(java_file_path),
-            'last_modified': last_modified,
-            'component_type': detect_spring_component_type(java_class),
-            'bounded_context': bounded_context,
-            'api_endpoints': api_endpoints,
-            'domain': domain,
-            'methods_complexity': methods_complexity,
-            'code_smells': code_smells
-        }
-
-        # Extract fields and methods
-        metadata['fields'] = extract_fields(java_class)
-        metadata['methods'] = extract_methods(java_class)
-
-        # Detect service injections and relationships
-        detect_service_injections(java_class, metadata)
-        metadata['relationships'] = detect_relationships(java_class, metadata)
-
-        # Cache and summarize the metadata
-        metadata_cache[class_name] = metadata
-        scan_summary[class_name] = metadata
-
-        logger.debug(f"Class {class_name} scanned with metadata: {metadata}")
-    except Exception as e:
-        logger.error(f"Error scanning class {java_class.name}: {e}")
-
-def extract_imports(tree):
-    """Extract imports from the CompilationUnit."""
-    imports = []
-    if hasattr(tree, 'imports'):
-        for imp in tree.imports:
-            imports.append(imp.path)
-    return imports
-
-def detect_spring_component_type(java_class):
-    """Detect the Spring component type of the Java class based on its annotations."""
-    component_types = ["RestController", "Controller", "Service", "Repository", "Component"]
-
-    for annotation in java_class.annotations:
-        annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
-        if annotation_name in component_types:
-            return annotation_name
-
-    return "Unknown"
-
-def detect_service_injections(java_class, metadata):
-    """Detect field-level and constructor-based service injections."""
-    for field in java_class.fields:
-        if field.annotations:
-            for annotation in field.annotations:
-                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
-                if annotation_name == "Autowired":
-                    injected_service = field.type.name if field.type and field.type.name else 'Unknown'
-                    metadata['inter_service_calls'].append(injected_service)
-                    logger.debug(f"Autowired service found in {java_class.name}: {injected_service}")
-
-    for constructor in getattr(java_class, 'constructors', []):
-        for param in constructor.parameters:
-            for annotation in param.annotations:
-                annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
-                if annotation_name == "Autowired":
-                    injected_service = param.type.name if param.type and param.type.name else 'Unknown'
-                    metadata['inter_service_calls'].append(injected_service)
-                    logger.debug(f"Autowired service found in constructor of {java_class.name}: {injected_service}")
-
-def extract_annotations(java_class):
-    """Extract annotations from a Java class."""
-    return [annotation.name if isinstance(annotation.name, str) else annotation.name.value for annotation in
-            java_class.annotations]
-
-def extract_fields(java_class):
-    """Extract fields and their metadata from a Java class."""
-    fields = []
-    for field in java_class.fields:
-        field_info = {
-            'names': [declarator.name for declarator in field.declarators],
-            'type': field.type.name if field.type and isinstance(field.type.name, str) else 'Unknown',
-            'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value
-                            for annotation in field.annotations]
-        }
-        fields.append(field_info)
-    return fields
-
-def extract_methods(java_class):
-    """Extract methods from a Java class."""
-    methods = []
-    for method in java_class.methods:
-        try:
-            method_info = {
-                'name': method.name,
-                'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'void',
-                'parameters': [{'name': param.name,
-                                'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'}
-                               for param in method.parameters],
-                'annotations': [annotation.name if isinstance(annotation.name, str) else annotation.name.value
-                                for annotation in method.annotations]
-            }
-            methods.append(method_info)
-        except Exception as e:
-            logger.error(f"Error extracting method {method.name}: {e}")
-    return methods
-
-def apply_annotation_filters(annotations: List[str]) -> bool:
-    """Check if the class should be scanned based on annotation filters."""
-    filters = config['annotation_filters']
-    if not filters:
-        return True
-    return any(annotation in filters for annotation in annotations)
-
-def detect_relationships(java_class, metadata):
-    """Detect advanced relationships: inheritance, interfaces, method calls, cyclic dependencies, data flow."""
-    relationships = []
-
-    # Inheritance relationships
-    if hasattr(java_class, 'extends') and java_class.extends:
-        parent_class = java_class.extends.name if isinstance(java_class.extends.name, str) else java_class.extends.name.value
-        relationships.append({
-            'type': 'inherits',
-            'target': parent_class,
-            'relationship_type': 'inheritance'
-        })
-
-    # Interface implementation relationships
-    if hasattr(java_class, 'implements') and java_class.implements:
-        for interface in java_class.implements:
-            interface_name = interface.name if isinstance(interface.name, str) else interface.name.value
-            relationships.append({
-                'type': 'implements',
-                'target': interface_name,
-                'relationship_type': 'interface_implementation'
-            })
-
-    # Method call and data flow relationships
-    relationships.extend(detect_method_calls(java_class))
-    relationships.extend(detect_data_flow(java_class))
-
-    return relationships
-
-def detect_method_calls(java_class):
-    """Detect method call relationships within and across services."""
-    relationships = []
-    for method in java_class.methods:
-        if method.body:
-            for path, node in method:
-                if isinstance(node, javalang.tree.MethodInvocation):
-                    target = node.qualifier if node.qualifier else 'this'
-                    relationships.append({
-                        'type': 'calls',
-                        'target': target,
-                        'relationship_type': 'method_call'
-                    })
-    return relationships
-
-def detect_data_flow(java_class):
-    """Detect data flow across services or between methods."""
-    relationships = []
-    for method in java_class.methods:
-        if method.body:
-            for path, node in method:
-                if isinstance(node, javalang.tree.MemberReference):
-                    relationships.append({
-                        'type': 'data_flow',
-                        'target': node.member,
-                        'relationship_type': 'data_access'
-                    })
-    return relationships
-
-def calculate_methods_complexity(java_class):
-    """Calculate cyclomatic complexity of each method in the class."""
-    methods_complexity = {}
-    for method in java_class.methods:
-        complexity = calculate_cyclomatic_complexity(method)
-        methods_complexity[method.name] = complexity
-    return methods_complexity
-
-def calculate_cyclomatic_complexity(method):
-    """Calculate cyclomatic complexity for a method."""
-    complexity = 1  # Start with 1
-    for path, node in method:
-        if isinstance(node, (javalang.tree.IfStatement, javalang.tree.ForStatement,
-                             javalang.tree.WhileStatement, javalang.tree.DoStatement,
-                             javalang.tree.SwitchStatement, javalang.tree.TernaryExpression,
-                             javalang.tree.CatchClause)):
-            complexity += 1
-    return complexity
-
-def detect_code_smells(java_class, methods_complexity):
-    """Detect code smells like long methods and large classes."""
-    code_smells = []
-    # Detect large classes
-    if len(java_class.methods) > config.get('class_size_threshold', 10) or len(java_class.fields) > 10:
-        code_smells.append('Large Class')
-
-    # Detect long methods
-    method_length_threshold = config.get('method_length_threshold', 50)
-    for method in java_class.methods:
-        if len(method.body or []) > method_length_threshold:
-            code_smells.append(f'Long Method: {method.name}')
-
-    # Detect complex methods
-    complexity_threshold = config.get('complexity_threshold', 10)
-    for method_name, complexity in methods_complexity.items():
-        if complexity > complexity_threshold:
-            code_smells.append(f'Complex Method: {method_name} (Cyclomatic Complexity: {complexity})')
-
-    return code_smells
-
-def detect_cyclic_dependencies():
-    """Detect cyclic dependencies between classes."""
-    dependency_graph = nx.DiGraph()
-
-    # Build dependency graph
-    for class_name, metadata in scan_summary.items():
-        dependency_graph.add_node(class_name)
-        for rel in metadata.get('relationships', []):
-            if rel['relationship_type'] in ['method_call', 'data_access']:
-                target = rel['target']
-                dependency_graph.add_edge(class_name, target)
-
-    # Detect cycles
-    cycles = list(nx.simple_cycles(dependency_graph))
-    for cycle in cycles:
-        logger.warning(f"Cyclic dependency detected: {' -> '.join(cycle)}")
-        # Mark classes involved in cycles
-        for class_in_cycle in cycle:
-            scan_summary[class_in_cycle].setdefault('code_smells', []).append('Cyclic Dependency')
-
-def generate_report(output_format='json', project_path=None):
-    """Generate a report of the scan in the desired format (JSON, HTML)."""
-    logger.info("Generating scan report.")
-
-    if output_format == 'json':
-        summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.json'))
-        try:
-            with open(summary_file, 'w') as f:
-                json.dump(scan_summary, f, indent=4)
-            logger.info(f"JSON scan summary written to {summary_file}")
-            # Store the JSON content in session state for potential use
-            with open(summary_file, 'r') as f:
-                st.session_state.scan_summary = json.load(f)
-        except Exception as e:
-            logger.error(f"Error writing JSON report: {e}")
-    elif output_format == 'html':
-        generate_html_report(project_path)
-    else:
-        logger.error(f"Unsupported output format: {output_format}")
-
-def list_classes(scan_summary):
-    """Display a list of scanned classes and their metadata."""
-    class_list = []
-    for class_name, metadata in scan_summary.items():
-        class_list.append({
-            'Class Name': class_name,
-            'Component Type': metadata['component_type'],
-            'File Path': metadata['file_path'],
-            'Annotations': ', '.join(metadata['annotations']),
-            'Code Smells': ', '.join(metadata.get('code_smells', []))
-        })
-
-    st.write("### List of Scanned Classes")
-    st.dataframe(class_list)
-
-def detect_bounded_context(java_file_path: Path) -> str:
-    """Detect bounded context based on the file path or class annotations."""
-    file_path_str = str(java_file_path).lower()
-
-    if "booking" in file_path_str:
-        return "Booking Context"
-    elif "passenger" in file_path_str:
-        return "Passenger Context"
-    elif "flight" in file_path_str:
-        return "Flight Context"
-    else:
-        return "Unknown Context"
-
-def extract_api_endpoints(java_class) -> List[str]:
-    """Extract API endpoints from a Java class by scanning for annotations like @GetMapping."""
-    api_endpoints = []
-    for method in java_class.methods:
-        for annotation in method.annotations:
-            annotation_name = annotation.name if isinstance(annotation.name, str) else annotation.name.value
-            if annotation_name in {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping"}:
-                if annotation.element and annotation.element.values:
-                    endpoint = annotation.element.values[0].value
-                    api_endpoints.append(f"{annotation_name}: {endpoint}")
-    return api_endpoints
-
-def extract_domain_from_path(java_file_path: Path) -> str:
-    """Extract domain from the file path. This assumes domains are structured in directories."""
-    path_parts = str(java_file_path).split(os.sep)
-
-    if "booking" in path_parts:
-        return "Booking Domain"
-    elif "flight" in path_parts:
-        return "Flight Domain"
-    elif "passenger" in path_parts:
-        return "Passenger Domain"
-    else:
-        return "Unknown Domain"
-
-def generate_html_report(project_path=None):
-    """Generate an HTML report from the scan summary."""
-    summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.html'))
-    try:
-        with open(summary_file, 'w') as f:
-            f.write("<html><head><title>Scan Report</title></head><body>")
-            f.write("<h1>Scan Report</h1>")
-            for class_name, data in scan_summary.items():
-                f.write(f"<h2>{class_name}</h2>")
-                f.write(f"<p>File: {data['file_path']}</p>")
-                f.write(f"<p>Component Type: {data['component_type']}</p>")
-                f.write("<h3>Annotations</h3><ul>")
-                for annotation in data['annotations']:
-                    f.write(f"<li>{annotation}</li>")
-                f.write("</ul>")
-                f.write("<h3>Code Smells</h3><ul>")
-                for smell in data.get('code_smells', []):
-                    f.write(f"<li>{smell}</li>")
-                f.write("</ul>")
-                f.write("<h3>Methods Complexity</h3><ul>")
-                for method_name, complexity in data.get('methods_complexity', {}).items():
-                    f.write(f"<li>{method_name}: Cyclomatic Complexity = {complexity}</li>")
-                f.write("</ul>")
-                f.write("<h3>Inter-Service Calls</h3><ul>")
-                for service in data['inter_service_calls']:
-                    f.write(f"<li>{service}</li>")
-                f.write("</ul>")
-                f.write("<h3>Relationships</h3><ul>")
-                for rel in data['relationships']:
-                    f.write(f"<li>{rel['type']} -> {rel['target']} ({rel['relationship_type']})</li>")
-                f.write("</ul>")
-            f.write("</body></html>")
-        logger.info(f"HTML scan summary written to {summary_file}")
-    except Exception as e:
-        logger.error(f"Error writing HTML report: {e}")
-
-def generate_architecture_prompt(json_file_path: str):
-    """Generate a condensed prompt text and store it in session state."""
-    # Check if the JSON file exists
-    if not os.path.exists(json_file_path):
-        raise FileNotFoundError(f"JSON file not found: {json_file_path}")
-
-    # Load the JSON data
-    with open(json_file_path, 'r') as f:
-        scan_summary_data = json.load(f)
-
-    # Initialize prompt text
-    prompt_text = "### Java Project Architecture Overview ###\n\n"
-    total_token_count = count_tokens(prompt_text)
-
-    try:
-        for class_name, metadata in scan_summary_data.items():
-            if total_token_count >= MAX_TOKENS:
-                prompt_text += "\n...Output truncated to stay within token limit...\n"
-                break
-
-            class_info = f"Class: {class_name}\n"
-            class_info += f"File Path: {metadata['file_path']}\n"
-            class_info += f"Component Type: {metadata['component_type']}\n"
-
-            # Write Annotations
-            annotations = ', '.join(metadata['annotations'][:3]) if metadata['annotations'] else "None"
-            class_info += f"Annotations: {annotations}\n"
-
-            # Write Code Smells
-            code_smells = ', '.join(metadata.get('code_smells', [])) if metadata.get('code_smells') else "None"
-            class_info += f"Code Smells: {code_smells}\n"
-
-            # Write Methods Complexity
-            class_info += "Methods Complexity:\n"
-            for method_name, complexity in metadata.get('methods_complexity', {}).items():
-                class_info += f"  - {method_name}: Cyclomatic Complexity = {complexity}\n"
-
-            class_info += "\n"
-
-            # Update total token count
-            total_token_count += count_tokens(class_info)
-
-            # Append to prompt text
-            prompt_text += class_info
-
-        # Store the prompt text in session state
-        st.session_state['architecture_prompt'] = prompt_text
-        logger.info("Architecture prompt generated and stored in session state.")
-    except Exception as e:
-        logger.error(f"Error generating architecture prompt: {e}")
-
-def visualize_inter_service_graph_pyvis(scan_summary):
-    """Create an interactive network graph using PyVis."""
-    net = Network(notebook=True, height="750px", directed=True)  # Removed width parameter
-
-    # Color nodes based on their bounded context or domain
-    context_color_map = {
-        "Booking Context": "lightblue",
-        "Passenger Context": "lightgreen",
-        "Flight Context": "lightcoral",
-        "Unknown Context": "lightgrey"
-    }
-
-    for class_name, metadata in scan_summary.items():
-        # Get bounded context and color
-        bounded_context = metadata.get('bounded_context', "Unknown Context")
-        domain = metadata.get('domain', "Unknown Domain")
-        node_color = context_color_map.get(bounded_context, "lightgrey")
-
-        # Prepare tooltip with more information
-        tooltip = f"Context: {bounded_context}<br>Domain: {domain}<br>"
-        if 'api_endpoints' in metadata and metadata['api_endpoints']:
-            tooltip += "API Endpoints:<br>" + "<br>".join(metadata['api_endpoints'])
-        else:
-            tooltip += "No API Endpoints"
-
-        # Add code smells to tooltip
-        if metadata.get('code_smells'):
-            tooltip += "<br>Code Smells:<br>" + "<br>".join(metadata['code_smells'])
-
-        # Highlight nodes with code smells
-        if metadata.get('code_smells'):
-            node_color = "red"
-
-        # Add the class node with color, size, and tooltip
-        net.add_node(class_name,
-                     label=class_name,
-                     title=tooltip,
-                     color=node_color,
-                     size=20,
-                     font={"size": 14})
-
-        for rel in metadata['relationships']:
-            target = rel['target']
-            # Ensure the target node exists before creating the edge
-            if target not in net.get_nodes():
-                net.add_node(target, label=target, size=15, font={"size": 12})
-
-            # Add the edge between the class and the target
-            net.add_edge(class_name, target, title=rel['relationship_type'])
-
-    # Adjust physics and layout settings
-    net.toggle_physics(True)
-    net.set_options("""
-    var options = {
-      "nodes": {
-        "shape": "dot",
-        "size": 16,
-        "font": {
-          "size": 12,
-          "color": "black"
-        },
-        "color": {
-          "border": "black"
-        }
-      },
-      "edges": {
-        "arrows": {
-          "to": {
-            "enabled": true
-          }
-        },
-        "smooth": {
-          "type": "dynamic"
-        }
-      },
-      "physics": {
-        "barnesHut": {
-          "gravitationalConstant": -5000,
-          "springLength": 300,
-          "springConstant": 0.05
-        },
-        "minVelocity": 0.75
-      },
-      "interaction": {
-        "hideEdgesOnDrag": true,
-        "hover": true,
-        "navigationButtons": true,
-        "keyboard": true
-      }
-    }
-    """)
-
-    # Generate the graph and display in Streamlit
-    try:
-        net.save_graph("dependency_graph.html")
-        HtmlFile = open("dependency_graph.html", 'r', encoding='utf-8')
-        source_code = HtmlFile.read()
-        st.components.v1.html(source_code, height=750)
-    except Exception as e:
-        logger.error(f"Error generating visualization: {e}")
-        st.error(f"Error generating visualization: {e}")
-
-def handle_groq_api(prompt, model):
-    """Handles the Groq API call."""
-    if prompt:
-        try:
-            # Retrieve the architecture prompt from session state
-            architecture_prompt = st.session_state.get('architecture_prompt', '')
-            if architecture_prompt:
-                combined_prompt = f"{prompt}\n\n{architecture_prompt}"
-            else:
-                combined_prompt = prompt
-                st.warning("Architecture prompt not found. Sending only the user prompt to the Groq API.")
-
-            # Log the combined prompt
-            logger.info(f"User prompt: {prompt}")
-
-            # Initialize Groq client
-            client = Groq(
-                api_key=GROQ_API_KEY,
-            )
-
-            # Log API call initiation
-            logger.info("Calling Groq API...")
-
-            # Create the request with the combined prompt
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": combined_prompt
-                    }
-                ],
-                temperature=1,
-                max_tokens=8000,
-                top_p=1,
-                stream=True,
-                stop=None,
-            )
-
-            # Log successful API call
-            logger.info("Groq API call successful.")
-
-            # Process and display the response from Groq
-            response_text = ""
-            for chunk in completion:
-                response_text += chunk.choices[0].delta.content or ""
-
-            # Log the response from Groq API
-            logger.info(f"Response from Groq API: {response_text}")
-
-            # Display the response in the Streamlit app
-            st.write("### Response from Groq API")
-            st.write(response_text)
-
-        except Exception as e:
-            # Log the error with stack trace
-            logger.error(f"Error calling Groq API: {e}", exc_info=True)
-
-            # Display the error in the Streamlit app
-            st.error(f"Error: {e}")
-    else:
-        st.warning("Please enter a prompt.")
-
-def main():
-    """Main function to launch the Streamlit app with an advanced user interface."""
-    st.set_page_config(page_title="Java Dependency Scanner", layout="wide")
-    st.title("Java Project Dependency Scanner with Advanced Analysis")
-
-    # Sidebar for user inputs
-    st.sidebar.header("Upload Project and Configuration")
-    project_zip = st.sidebar.file_uploader("Upload Java Project (ZIP file):", type=ALLOWED_FILE_TYPES)
-    config_file = st.sidebar.file_uploader("Upload Configuration File (YAML):", type=['yaml', 'yml'])
-
-    # Advanced analysis parameters
-    st.sidebar.header("Analysis Parameters")
-    complexity_threshold = st.sidebar.number_input("Cyclomatic Complexity Threshold:", min_value=1, max_value=50, value=10)
-    method_length_threshold = st.sidebar.number_input("Method Length Threshold (Number of Statements):", min_value=1, max_value=200, value=50)
-    class_size_threshold = st.sidebar.number_input("Class Size Threshold (Number of Methods):", min_value=1, max_value=100, value=10)
-    output_format = st.sidebar.selectbox("Select Output Format:", ['json', 'html'])
-
-    # Update configuration with user inputs
-    if config_file:
-        load_configuration(config_file)
-        config['complexity_threshold'] = complexity_threshold
-        config['method_length_threshold'] = method_length_threshold
-        config['class_size_threshold'] = class_size_threshold
-    else:
-        st.warning("Using default configuration parameters.")
-        config.update({
-            'complexity_threshold': complexity_threshold,
-            'method_length_threshold': method_length_threshold,
-            'class_size_threshold': class_size_threshold
-        })
-
-    if project_zip:
-        if project_zip.size > MAX_UPLOAD_SIZE:
-            st.error(f"File size exceeds the maximum allowed size of {MAX_UPLOAD_SIZE / (1024 * 1024)} MB.")
-            return
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Extract the uploaded ZIP file
-            try:
-                with zipfile.ZipFile(project_zip, 'r') as zip_ref:
-                    zip_ref.extractall(temp_dir)
-                st.success("Project uploaded and extracted successfully!")
-            except zipfile.BadZipFile:
-                st.error("Invalid ZIP file.")
-                return
-
-            # Start scanning the project
-            if st.button("Start Scan"):
-                scan_project_async(temp_dir, output_format)
-                st.success("Project scanned successfully!")
-                st.session_state.scan_summary = scan_summary  # Store in session state
-
-                # Display results using tabs
-                tab1, tab2, tab3 = st.tabs(["Class List", "Dependency Graph", "Detailed Analysis"])
-
-                with tab1:
-                    list_classes(scan_summary)
-
-                with tab2:
-                    visualize_inter_service_graph_pyvis(scan_summary)
-
-                with tab3:
-                    st.write("### Detailed Analysis")
-                    class_name = st.selectbox("Select Class:", list(scan_summary.keys()))
-                    if class_name:
-                        class_data = scan_summary[class_name]
-                        st.json(class_data)
-
-                # Generate architecture prompt if JSON is selected
-                if output_format == 'json':
-                    json_file_path = os.path.join(temp_dir, 'scan_summary.json')
-                    generate_architecture_prompt(json_file_path)
-    else:
-        st.warning("Please upload a Java project ZIP file.")
-
-    # Groq API interaction
-    if 'architecture_prompt' in st.session_state and st.session_state['architecture_prompt']:
-        st.header("Interact with Groq API")
-        prompt = st.text_area("Enter your Groq API prompt:", "")
-        model = st.selectbox("Select Model", ("llama3-8b-8192", "gemma-7b-it", "mixtral-8x7b-32768"))
-        if st.button("Send to Groq API"):
-            handle_groq_api(prompt, model)
-    else:
-        st.info("Run the scan to generate the architecture prompt for Groq API interaction.")
-
-if __name__ == "__main__":
-    main()
+NN3 Precondition:
+
+Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
+
+Date Condition:
+
+create_ts is yesterday’s date.
+Target Account:
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Channel Scope:
+
+schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
+Subchannel Scope:
+
+schedule_m2m.sub_chn is in ('RET', 'COL').
+Additional Conditions:
+
+xfer_ref_id IS NULL in the second subquery.
+tran_id_int is in ('300000001', '300000002').
+Rows must have more than 2 records in groups based on call_trac_id or creat_ts.
+
+
+
+Precondition for NN5:
+Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
+
+Recurring Payment Conditions:
+
+schd_stat = 'S03'.
+Date Condition:
+
+create_ts is yesterday's date (TRUNC(SYSDATE - 1)).
+Target Account:
+Precondition for NN28:
+Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
+
+Date Condition:
+
+create_ts is yesterday’s date (TRUNC(SYSDATE - 1)).
+Target Account:
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Subchannel Scope:
+
+schedule_m2m.sub_chn = 'COL'.
+Channel Scope:
+
+Either of the following:
+schedule_m2m.chn_cd = 'CCC'.
+schedule_m2m.chn_cd = 'CSR' and schedule_m2m.tran_id_int = '3000000002'.
+Count Condition:
+
+Only include records where the combination of cr_acc_id and dr_acc_id has more than 2 records in the table schedule_m2m.
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Channel Scope:
+
+schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
+Subchannel Scope:
+
+schedule_m2m.sub_chn is 'COL'.
+Transfer Reference Condition:
+
+If xfer_ref_id IS NULL, then:
+schedule_m2m.chn_cd is in ('CSR', 'VRU').
+schedule_m2m.tran_id_int = '300000002'.
+Group Count Condition:
+
+Rows must have more than 2 records in groups based on cr_acc_id
+
+
+
+Precondition for NN30:
+Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
+
+Date Condition:
+
+updt_ts is between TRUNC(SYSDATE - 1) and TRUNC(SYSDATE).
+Target Account:
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Subchannel Scope:
+
+schedule_m2m.sub_chn = 'COL'.
+Process Code Condition:
+
+schedule_m2m.prcs_cd = 'P01'.
+Occurrence Condition:
+
+schedule_m2m.num_of_occur = 1.
+Channel Scope:
+
+Either of the following:
+schedule_m2m.chn_cd = 'CCC'.
+schedule_m2m.chn_cd = 'CSR' and schedule_m2m.tran_id_int = '3000000002'
+
+
+
+Precondition for NN8:
+Fetching the data from the tables transfer_instruction_m2m, customer, account_m2m, and account_boa based on the following conditions:
+
+Date Condition:
+
+updt_ts is between TRUNC(SYSDATE - 1) and TRUNC(SYSDATE).
+Target Account:
+
+account_m2m.prod_cd is in ('ALI', 'ALS', 'PER', 'BUS', 'RMS').
+account_boa.prod_cd = 'EXT'.
+Subchannel Scope:
+
+transfer_instruction_m2m.sub_chn = 'COL'.
+Channel Scope:
+
+transfer_instruction_m2m.chn_cd is in ('IVR', 'ONL', 'MOB').
+Transfer and Return Conditions:
+
+xfer_ref_id IS NOT NULL.
+rtrn_cd IS NOT NULL.
+
+
+
+Precondition for NN14:
+Fetching the data from the tables schedule_m2m, customer, account_m2m, account_boa, and transfer_instruction_m2m based on the following conditions:
+
+Date Condition:
+
+updt_ts in transfer_instruction_m2m is yesterday’s date (TRUNC(SYSDATE - 1)).
+Return Code Condition:
+
+transfer_instruction_m2m.rtrn_cd is in ('R01', 'R02', 'R03', 'R04', 'R05', 'R12', 'R14', 'R15', 'R16', 'R29', 'R34').
+Schedule Condition:
+
+schedule_m2m.schd_stat = 'S02'.
+Target Account:
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS', 'RMS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Channel Scope:
+
+schedule_m2m.chn_cd is in ('CCC', 'IVR', 'ONL', 'MOB', 'CSR', 'WEB').
+Subchannel Scope:
+
+schedule_m2m.sub_chn = 'COL'.
+Transfer Reference Condition:
+
+xfer_ref_id IS NULL for specific channels like 'CSR' and 'WEB'.
+Transaction Condition:
+
+If schedule_m2m.chn_cd = 'CSR', then tran_id_int = '3000000002'.
+
+
+
