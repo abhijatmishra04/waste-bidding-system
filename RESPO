@@ -33,6 +33,22 @@ Date Condition:
 
 create_ts is yesterday's date (TRUNC(SYSDATE - 1)).
 Target Account:
+
+account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
+account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
+Channel Scope:
+
+schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
+Subchannel Scope:
+
+schedule_m2m.sub_chn is 'COL'.
+Transfer Reference Condition:
+
+If xfer_ref_id IS NULL, then:
+schedule_m2m.chn_cd is in ('CSR', 'VRU').
+schedule_m2m.tran_id_int = '300000002
+
+
 Precondition for NN28:
 Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
 
