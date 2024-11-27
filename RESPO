@@ -1,3 +1,6 @@
-public static final String PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH = "collectionletters.output.flat.file.path";
-public static final String PROPERTY_COLLECTIONLETTERS_AGGREGATOR_FORMAT = "collectionletters.aggregator.format";
-public static final String PROPERTY_COLLECTIONLETTERS_FLATFILE_WRITER_NAME = "collectionletters.flatfile.writer.name";
+this.outputFlatFilePath = dynamicConfigPropRepository
+        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH);
+this.aggregatorFormat = dynamicConfigPropRepository
+        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_AGGREGATOR_FORMAT);
+this.flatfileWriterName = dynamicConfigPropRepository
+        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_FLATFILE_WRITER_NAME);
