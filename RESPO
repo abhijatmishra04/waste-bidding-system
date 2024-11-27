@@ -1,173 +1,24 @@
-NN3 Precondition:
-
-Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
-
-Date Condition:
-
-create_ts is yesterday’s date.
-Target Account:
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Channel Scope:
-
-schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
-Subchannel Scope:
-
-schedule_m2m.sub_chn is in ('RET', 'COL').
-Additional Conditions:
-
-xfer_ref_id IS NULL in the second subquery.
-tran_id_int is in ('300000001', '300000002').
-Rows must have more than 2 records in groups based on call_trac_id or creat_ts.
-
-
-
-Precondition for NN5:
-Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
-
-Recurring Payment Conditions:
-
-schd_stat = 'S03'.
-Date Condition:
-
-create_ts is yesterday's date (TRUNC(SYSDATE - 1)).
-Target Account:
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Channel Scope:
-
-schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
-Subchannel Scope:
-
-schedule_m2m.sub_chn is 'COL'.
-Transfer Reference Condition:
-
-If xfer_ref_id IS NULL, then:
-schedule_m2m.chn_cd is in ('CSR', 'VRU').
-schedule_m2m.tran_id_int = '300000002
-
-
-Precondition for NN28:
-Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
-
-Date Condition:
-
-create_ts is yesterday’s date (TRUNC(SYSDATE - 1)).
-Target Account:
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Subchannel Scope:
-
-schedule_m2m.sub_chn = 'COL'.
-Channel Scope:
-
-Either of the following:
-schedule_m2m.chn_cd = 'CCC'.
-schedule_m2m.chn_cd = 'CSR' and schedule_m2m.tran_id_int = '3000000002'.
-Count Condition:
-
-Only include records where the combination of cr_acc_id and dr_acc_id has more than 2 records in the table schedule_m2m.
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Channel Scope:
-
-schedule_m2m.chn_cd is in ('CCC', 'IVR', 'CSR', 'VRU').
-Subchannel Scope:
-
-schedule_m2m.sub_chn is 'COL'.
-Transfer Reference Condition:
-
-If xfer_ref_id IS NULL, then:
-schedule_m2m.chn_cd is in ('CSR', 'VRU').
-schedule_m2m.tran_id_int = '300000002'.
-Group Count Condition:
-
-Rows must have more than 2 records in groups based on cr_acc_id
-
-
-
-Precondition for NN30:
-Fetching the data from the tables schedule_m2m, customer, account_m2m, and account_boa based on the following conditions:
-
-Date Condition:
-
-updt_ts is between TRUNC(SYSDATE - 1) and TRUNC(SYSDATE).
-Target Account:
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Subchannel Scope:
-
-schedule_m2m.sub_chn = 'COL'.
-Process Code Condition:
-
-schedule_m2m.prcs_cd = 'P01'.
-Occurrence Condition:
-
-schedule_m2m.num_of_occur = 1.
-Channel Scope:
-
-Either of the following:
-schedule_m2m.chn_cd = 'CCC'.
-schedule_m2m.chn_cd = 'CSR' and schedule_m2m.tran_id_int = '3000000002'
-
-
-
-Precondition for NN8:
-Fetching the data from the tables transfer_instruction_m2m, customer, account_m2m, and account_boa based on the following conditions:
-
-Date Condition:
-
-updt_ts is between TRUNC(SYSDATE - 1) and TRUNC(SYSDATE).
-Target Account:
-
-account_m2m.prod_cd is in ('ALI', 'ALS', 'PER', 'BUS', 'RMS').
-account_boa.prod_cd = 'EXT'.
-Subchannel Scope:
-
-transfer_instruction_m2m.sub_chn = 'COL'.
-Channel Scope:
-
-transfer_instruction_m2m.chn_cd is in ('IVR', 'ONL', 'MOB').
-Transfer and Return Conditions:
-
-xfer_ref_id IS NOT NULL.
-rtrn_cd IS NOT NULL.
-
-
-
-Precondition for NN14:
-Fetching the data from the tables schedule_m2m, customer, account_m2m, account_boa, and transfer_instruction_m2m based on the following conditions:
-
-Date Condition:
-
-updt_ts in transfer_instruction_m2m is yesterday’s date (TRUNC(SYSDATE - 1)).
-Return Code Condition:
-
-transfer_instruction_m2m.rtrn_cd is in ('R01', 'R02', 'R03', 'R04', 'R05', 'R12', 'R14', 'R15', 'R16', 'R29', 'R34').
-Schedule Condition:
-
-schedule_m2m.schd_stat = 'S02'.
-Target Account:
-
-account_m2m.prod_cd is in ('CCA', 'ALI', 'ALS', 'PER', 'BUS', 'RMS').
-account_boa.prod_cd is in ('EXT', 'PER', 'BUS', 'DCA').
-Channel Scope:
-
-schedule_m2m.chn_cd is in ('CCC', 'IVR', 'ONL', 'MOB', 'CSR', 'WEB').
-Subchannel Scope:
-
-schedule_m2m.sub_chn = 'COL'.
-Transfer Reference Condition:
-
-xfer_ref_id IS NULL for specific channels like 'CSR' and 'WEB'.
-Transaction Condition:
-
-If schedule_m2m.chn_cd = 'CSR', then tran_id_int = '3000000002'.
-
-
-
+import lombok.extern.log4j.Log4j2;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+@Log4j2
+public class DateUtils {
+
+    private static final String DATE_FORMAT = "yyyy-MM-dd";
+
+    public static Date parseDate(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) {
+            log.info("Invalid date string provided: {}", dateStr);
+            return null; // Return null if the input is invalid
+        }
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat(DATE_FORMAT);
+        try {
+            return simpleDateFormat.parse(dateStr);
+        } catch (ParseException e) {
+            log.error("Error parsing date: {}. {}", dateStr, e.getMessage());
+            return null;
+        }
+    }
+}
