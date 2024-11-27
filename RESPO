@@ -1,29 +1,3 @@
-        try {
-            payment.setNxtTranDt(DateUtils.parseDate(rs.getString("NXT_TRAN_DT")));
-        } catch (Exception e) {
-            log.error("Error parsing NXT_TRAN_DT", e);
-        }
-
-        try {
-            payment.setLastTranDt(DateUtils.parseDate(rs.getString("LST_TRAN_DT")));
-        } catch (Exception e) {
-            log.error("Error parsing LST_TRAN_DT", e);
-        }
-
-        try {
-            payment.setClosedDate(DateUtils.parseDate(rs.getString("CLS_DT")));
-        } catch (Exception e) {
-            log.error("Error parsing CLS_DT", e);
-        }
-
-        try {
-            payment.setFrstTranDt(DateUtils.parseDate(rs.getString("FRST_TRAN_DT")));
-        } catch (Exception e) {
-            log.error("Error parsing FRST_TRAN_DT", e);
-        }
-
-        try {
-            payment.setDueDate(DateUtils.parseDate(rs.getString("DUE_DT")));
-        } catch (Exception e) {
-            log.error("Error parsing DUE_DT", e);
-        }
+public static final String PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH = "collectionletters.output.flat.file.path";
+public static final String PROPERTY_COLLECTIONLETTERS_AGGREGATOR_FORMAT = "collectionletters.aggregator.format";
+public static final String PROPERTY_COLLECTIONLETTERS_FLATFILE_WRITER_NAME = "collectionletters.flatfile.writer.name";
