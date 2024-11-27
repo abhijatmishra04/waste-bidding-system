@@ -1,24 +1,29 @@
-import lombok.extern.log4j.Log4j2;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-
-@Log4j2
-public class DateUtils {
-
-    private static final String DATE_FORMAT = "yyyy-MM-dd";
-
-    public static Date parseDate(String dateStr) {
-        if (dateStr == null || dateStr.isEmpty()) {
-            log.info("Invalid date string provided: {}", dateStr);
-            return null; // Return null if the input is invalid
-        }
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat(DATE_FORMAT);
         try {
-            return simpleDateFormat.parse(dateStr);
-        } catch (ParseException e) {
-            log.error("Error parsing date: {}. {}", dateStr, e.getMessage());
-            return null;
+            payment.setNxtTranDt(DateUtils.parseDate(rs.getString("NXT_TRAN_DT")));
+        } catch (Exception e) {
+            log.error("Error parsing NXT_TRAN_DT", e);
         }
-    }
-}
+
+        try {
+            payment.setLastTranDt(DateUtils.parseDate(rs.getString("LST_TRAN_DT")));
+        } catch (Exception e) {
+            log.error("Error parsing LST_TRAN_DT", e);
+        }
+
+        try {
+            payment.setClosedDate(DateUtils.parseDate(rs.getString("CLS_DT")));
+        } catch (Exception e) {
+            log.error("Error parsing CLS_DT", e);
+        }
+
+        try {
+            payment.setFrstTranDt(DateUtils.parseDate(rs.getString("FRST_TRAN_DT")));
+        } catch (Exception e) {
+            log.error("Error parsing FRST_TRAN_DT", e);
+        }
+
+        try {
+            payment.setDueDate(DateUtils.parseDate(rs.getString("DUE_DT")));
+        } catch (Exception e) {
+            log.error("Error parsing DUE_DT", e);
+        }
