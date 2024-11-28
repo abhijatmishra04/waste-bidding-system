@@ -1,6 +1,4415 @@
-this.outputFlatFilePath = dynamicConfigPropRepository
-        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH);
-this.aggregatorFormat = dynamicConfigPropRepository
-        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_AGGREGATOR_FORMAT);
-this.flatfileWriterName = dynamicConfigPropRepository
-        .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_FLATFILE_WRITER_NAME);
+{
+    "scan_summary": {
+        "MavenWrapperDownloader": {
+            "annotations": [],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "DEFAULT_DOWNLOAD_URL"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": [
+                        "private",
+                        "static",
+                        "final"
+                    ]
+                },
+                {
+                    "names": [
+                        "MAVEN_WRAPPER_PROPERTIES_PATH"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": [
+                        "private",
+                        "static",
+                        "final"
+                    ]
+                },
+                {
+                    "names": [
+                        "MAVEN_WRAPPER_JAR_PATH"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": [
+                        "private",
+                        "static",
+                        "final"
+                    ]
+                },
+                {
+                    "names": [
+                        "PROPERTY_NAME_WRAPPER_URL"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": [
+                        "private",
+                        "static",
+                        "final"
+                    ]
+                }
+            ],
+            "methods": [
+                {
+                    "name": "main",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "args",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public",
+                        "static"
+                    ],
+                    "body_length": 11
+                },
+                {
+                    "name": "downloadFileFromURL",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "urlString",
+                            "type": "String"
+                        },
+                        {
+                            "name": "destination",
+                            "type": "File"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "private",
+                        "static"
+                    ],
+                    "body_length": 7
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "baseDirectory",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "mavenWrapperPropertyFile",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "mavenWrapperProperties",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "mavenWrapperProperties",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "mavenWrapperPropertyFileInputStream",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "baseDirectory",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "outputFile",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "outputFile",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "outputFile",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "outputFile",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System.out",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "e",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "System",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "Channels",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "website",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "fos",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "fos",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "rbc",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "args",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "baseDirectory",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "MAVEN_WRAPPER_PROPERTIES_PATH",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "DEFAULT_DOWNLOAD_URL",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "mavenWrapperPropertyFileInputStream",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "mavenWrapperPropertyFile",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "mavenWrapperPropertyFileInputStream",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "url",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "PROPERTY_NAME_WRAPPER_URL",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "url",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "MAVEN_WRAPPER_PROPERTIES_PATH",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "mavenWrapperPropertyFileInputStream",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "url",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "MAVEN_WRAPPER_JAR_PATH",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "url",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "outputFile",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "urlString",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "rbc",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "destination",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "rbc",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "MAX_VALUE",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\.mvn\\wrapper\\MavenWrapperDownloader.java",
+            "last_modified": 1732787921.7354906,
+            "component_type": "Unknown",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "main": 8,
+                "downloadFileFromURL": 1
+            },
+            "code_smells": [
+                "Excessive Static Methods"
+            ],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [
+                {
+                    "field": "DEFAULT_DOWNLOAD_URL",
+                    "type": "String"
+                },
+                {
+                    "field": "MAVEN_WRAPPER_PROPERTIES_PATH",
+                    "type": "String"
+                },
+                {
+                    "field": "MAVEN_WRAPPER_JAR_PATH",
+                    "type": "String"
+                },
+                {
+                    "field": "PROPERTY_NAME_WRAPPER_URL",
+                    "type": "String"
+                }
+            ],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "module_coupling": [
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                },
+                {
+                    "method": "main",
+                    "coupled_module": "System"
+                }
+            ],
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 2,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "LbmApplication": {
+            "annotations": [
+                "SpringBootApplication"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [],
+            "methods": [
+                {
+                    "name": "main",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "args",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public",
+                        "static"
+                    ],
+                    "body_length": 1
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "SpringApplication",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "args",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\LbmApplication.java",
+            "last_modified": 1732787921.7535388,
+            "component_type": "SpringBootApplication",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "main": 1
+            },
+            "code_smells": [
+                "Excessive Static Methods"
+            ],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 1,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "BookController": {
+            "annotations": [
+                "Controller"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [
+                "BookServices",
+                "SmartServices",
+                "BookRepository"
+            ],
+            "fields": [
+                {
+                    "names": [
+                        "services"
+                    ],
+                    "type": "BookServices",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "services1"
+                    ],
+                    "type": "SmartServices",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "bookRepository"
+                    ],
+                    "type": "BookRepository",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "bookPojo"
+                    ],
+                    "type": "BookPojo",
+                    "annotations": [],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "showListOfBooks",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "addBooksShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "addBooks",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        },
+                        {
+                            "name": "book",
+                            "type": "BookPojo"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "deleteBookFromList",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "editBookDetails",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        },
+                        {
+                            "name": "bookname",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "editBookDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBookDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "getBookTrackingDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBookDetails",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        },
+                        {
+                            "name": "book_name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                },
+                {
+                    "name": "showMainPageForBookOperations",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 4
+                },
+                {
+                    "name": "forBookBarrow",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        },
+                        {
+                            "name": "memberName",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName2",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName3",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "whenReturnBook",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "String"
+                        },
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "setReturnDate",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "member",
+                            "type": "String"
+                        },
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                },
+                {
+                    "name": "showBarrowBookPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "showTotalHistory",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "memberServices",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services1",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services1",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services1",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services1",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services1",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookname",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\BookController.java",
+            "last_modified": 1732787921.7546496,
+            "component_type": "Controller",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [
+                "REQUEST /show-listof-all-books",
+                "GET /add-book",
+                "POST /add-book",
+                "REQUEST /delete-book",
+                "POST /edit-book",
+                "GET /edit-book",
+                "GET /get-book-details",
+                "GET /get-book-tracking-details",
+                "REQUEST /get-book-details-one",
+                "GET /sml-main",
+                "POST /sml-main",
+                "GET /del-smartbs",
+                "REQUEST /set-returndate",
+                "GET /show-barrow-list",
+                "GET /show-total-history"
+            ],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "showListOfBooks": 1,
+                "addBooksShowPage": 1,
+                "addBooks": 1,
+                "deleteBookFromList": 1,
+                "editBookDetails": 1,
+                "editBookDetailsShowPage": 1,
+                "getBookDetailsShowPage": 1,
+                "getBookTrackingDetailsShowPage": 1,
+                "getBookDetails": 1,
+                "showMainPageForBookOperations": 1,
+                "forBookBarrow": 1,
+                "whenReturnBook": 1,
+                "setReturnDate": 1,
+                "showBarrowBookPage": 1,
+                "showTotalHistory": 1
+            },
+            "code_smells": [
+                "Large Class"
+            ],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Controller Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 15,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "ErrorController": {
+            "annotations": [
+                "Controller"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [],
+            "methods": [
+                {
+                    "name": "myExceptionController",
+                    "return_type": "ModelAndView",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "HttpServletRequest"
+                        },
+                        {
+                            "name": "ex",
+                            "type": "Exception"
+                        }
+                    ],
+                    "annotations": [
+                        "ExceptionHandler"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 5
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "request",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "ex",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "model",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\ErrorController.java",
+            "last_modified": 1732787921.7556677,
+            "component_type": "Controller",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "myExceptionController": 1
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Controller Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 1,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "LoginController": {
+            "annotations": [
+                "Controller",
+                "SessionAttributes"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [
+                "LoginServices"
+            ],
+            "fields": [
+                {
+                    "names": [
+                        "services"
+                    ],
+                    "type": "LoginServices",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "showLoginPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "showHomePage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping",
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "logoutUser",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "contactUsPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                }
+            ],
+            "relationships": [],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\LoginController.java",
+            "last_modified": 1732787921.756668,
+            "component_type": "Controller",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [
+                "GET /userlogin",
+                "POST /userlogin",
+                "POST,REQUEST /userlogin",
+                "POST,REQUEST /home",
+                "REQUEST /about",
+                "REQUEST /contactus"
+            ],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "showLoginPage": 1,
+                "showHomePage": 1,
+                "logoutUser": 1,
+                "contactUsPage": 1
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Controller Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 4,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "MemberController": {
+            "annotations": [
+                "Controller"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [
+                "MemberServices",
+                "MemberRepository"
+            ],
+            "fields": [
+                {
+                    "names": [
+                        "services"
+                    ],
+                    "type": "MemberServices",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "memberRepository"
+                    ],
+                    "type": "MemberRepository",
+                    "annotations": [
+                        "Autowired"
+                    ],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "showListOfMembers",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "addMemberShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "addMemberSuccess",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        },
+                        {
+                            "name": "member",
+                            "type": "MemberPojo"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "deleteMemberFromList",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "editMemberDetails",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        },
+                        {
+                            "name": "membername",
+                            "type": "String"
+                        },
+                        {
+                            "name": "memberaddress",
+                            "type": "String"
+                        },
+                        {
+                            "name": "membergender",
+                            "type": "String"
+                        },
+                        {
+                            "name": "memberage",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [
+                        "PostMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "editMemberDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "getBookDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "getBookTrackingDetailsShowPage",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        }
+                    ],
+                    "annotations": [
+                        "GetMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBookDetails",
+                    "return_type": "String",
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "type": "ModelMap"
+                        },
+                        {
+                            "name": "member_name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [
+                        "RequestMapping"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "member",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "services",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "model",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "membername",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberaddress",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "membergender",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberage",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\MemberController.java",
+            "last_modified": 1732787921.756668,
+            "component_type": "Controller",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [
+                "REQUEST /show-listof-all-members",
+                "GET /add-member",
+                "POST /add-member",
+                "REQUEST /delete-member",
+                "POST /edit-member",
+                "GET /edit-member",
+                "GET /get-member-details",
+                "GET /get-member-tracking-details",
+                "REQUEST /get-member-details-one"
+            ],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "showListOfMembers": 1,
+                "addMemberShowPage": 1,
+                "addMemberSuccess": 1,
+                "deleteMemberFromList": 1,
+                "editMemberDetails": 1,
+                "editMemberDetailsShowPage": 1,
+                "getBookDetailsShowPage": 1,
+                "getBookTrackingDetailsShowPage": 1,
+                "getBookDetails": 2
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Controller Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 9,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "BookPojo": {
+            "annotations": [
+                "Entity"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "book_id"
+                    ],
+                    "type": "int",
+                    "annotations": [
+                        "Id",
+                        "GeneratedValue"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_name"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_authors"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_price"
+                    ],
+                    "type": "Double",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_dept"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_published"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_date_of_barrow"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "book_date_of_return"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "is_book_available"
+                    ],
+                    "type": "boolean",
+                    "annotations": [],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "toString",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [
+                        "Override"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_id",
+                    "return_type": "int",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_id",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_id",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_name",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_name",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_authors",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_authors",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_authors",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_price",
+                    "return_type": "Double",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_price",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_price",
+                            "type": "Double"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_dept",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_dept",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_dept",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_published",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_published",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_published",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_date_of_barrow",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_date_of_barrow",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_date_of_barrow",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBook_date_of_return",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBook_date_of_return",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "book_date_of_return",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "isIs_book_available",
+                    "return_type": "boolean",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setIs_book_available",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "is_book_available",
+                            "type": "boolean"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "equals",
+                    "return_type": "boolean",
+                    "parameters": [
+                        {
+                            "name": "o",
+                            "type": "Object"
+                        }
+                    ],
+                    "annotations": [
+                        "Override"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 5
+                },
+                {
+                    "name": "hashCode",
+                    "return_type": "int",
+                    "parameters": [],
+                    "annotations": [
+                        "Override"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "o",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book_name",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "book_name",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_authors",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_price",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_published",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_barrow",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_return",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "is_book_available",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_authors",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_authors",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_authors",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_price",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_price",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_price",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_published",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_published",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_published",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_barrow",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_barrow",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_barrow",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_return",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_return",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_date_of_return",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "is_book_available",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "is_book_available",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "is_book_available",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "o",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "o",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "o",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "result",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "result",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "result",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\BookPojo.java",
+            "last_modified": 1732787921.7606728,
+            "component_type": "Unknown",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "toString": 1,
+                "getBook_id": 1,
+                "setBook_id": 1,
+                "getBook_name": 1,
+                "setBook_name": 1,
+                "getBook_authors": 1,
+                "setBook_authors": 1,
+                "getBook_price": 1,
+                "setBook_price": 1,
+                "getBook_dept": 1,
+                "setBook_dept": 1,
+                "getBook_published": 1,
+                "setBook_published": 1,
+                "getBook_date_of_barrow": 1,
+                "setBook_date_of_barrow": 1,
+                "getBook_date_of_return": 1,
+                "setBook_date_of_return": 1,
+                "isIs_book_available": 1,
+                "setIs_book_available": 1,
+                "equals": 4,
+                "hashCode": 1
+            },
+            "code_smells": [
+                "Large Class"
+            ],
+            "is_test_class": false,
+            "database_entities": [
+                {
+                    "table_name": null,
+                    "fields": [
+                        {
+                            "name": "book_id",
+                            "type": "int",
+                            "column_name": null,
+                            "annotations": [
+                                "Id",
+                                "GeneratedValue"
+                            ]
+                        },
+                        {
+                            "name": "book_name",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_authors",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_price",
+                            "type": "Double",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_dept",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_published",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_date_of_barrow",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "book_date_of_return",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "is_book_available",
+                            "type": "boolean",
+                            "column_name": null,
+                            "annotations": []
+                        }
+                    ],
+                    "relationships": []
+                }
+            ],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 21,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "MemberPojo": {
+            "annotations": [
+                "Entity"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "member_id"
+                    ],
+                    "type": "int",
+                    "annotations": [
+                        "Id",
+                        "GeneratedValue"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_name"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_address"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_phone_number"
+                    ],
+                    "type": "long",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_joined_date"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_taken_book"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_return_book"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_fee"
+                    ],
+                    "type": "double",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_books_quantity"
+                    ],
+                    "type": "int",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_dept"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_gender"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "member_age"
+                    ],
+                    "type": "int",
+                    "annotations": [],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "getMember_id",
+                    "return_type": "int",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_id",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_id",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_name",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_name",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_address",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_address",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_address",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_phone_number",
+                    "return_type": "long",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_phone_number",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_phone_number",
+                            "type": "long"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_joined_date",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_joined_date",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_joined_date",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_taken_book",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_taken_book",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_taken_book",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_return_book",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_return_book",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_return_book",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_fee",
+                    "return_type": "double",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_fee",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_fee",
+                            "type": "double"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_books_quantity",
+                    "return_type": "int",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_books_quantity",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_books_quantity",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_dept",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_dept",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_dept",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "toString",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [
+                        "Override"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_gender",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_gender",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_gender",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMember_age",
+                    "return_type": "int",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMember_age",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "member_age",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "data_flow",
+                    "target": "member_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_address",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_address",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_address",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_phone_number",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_phone_number",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_phone_number",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_joined_date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_joined_date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_joined_date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_taken_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_taken_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_taken_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_return_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_return_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_return_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_fee",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_fee",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_fee",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_books_quantity",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_books_quantity",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_books_quantity",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_address",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_phone_number",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_joined_date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_taken_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_return_book",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_fee",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_books_quantity",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_gender",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_age",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_gender",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_gender",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_gender",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_age",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_age",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "member_age",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\MemberPojo.java",
+            "last_modified": 1732787921.7616715,
+            "component_type": "Unknown",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "getMember_id": 1,
+                "setMember_id": 1,
+                "getMember_name": 1,
+                "setMember_name": 1,
+                "getMember_address": 1,
+                "setMember_address": 1,
+                "getMember_phone_number": 1,
+                "setMember_phone_number": 1,
+                "getMember_joined_date": 1,
+                "setMember_joined_date": 1,
+                "getMember_taken_book": 1,
+                "setMember_taken_book": 1,
+                "getMember_return_book": 1,
+                "setMember_return_book": 1,
+                "getMember_fee": 1,
+                "setMember_fee": 1,
+                "getMember_books_quantity": 1,
+                "setMember_books_quantity": 1,
+                "getMember_dept": 1,
+                "setMember_dept": 1,
+                "toString": 1,
+                "getMember_gender": 1,
+                "setMember_gender": 1,
+                "getMember_age": 1,
+                "setMember_age": 1
+            },
+            "code_smells": [
+                "Large Class"
+            ],
+            "is_test_class": false,
+            "database_entities": [
+                {
+                    "table_name": null,
+                    "fields": [
+                        {
+                            "name": "member_id",
+                            "type": "int",
+                            "column_name": null,
+                            "annotations": [
+                                "Id",
+                                "GeneratedValue"
+                            ]
+                        },
+                        {
+                            "name": "member_name",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_address",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_phone_number",
+                            "type": "long",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_joined_date",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_taken_book",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_return_book",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_fee",
+                            "type": "double",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_books_quantity",
+                            "type": "int",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_dept",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_gender",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "member_age",
+                            "type": "int",
+                            "column_name": null,
+                            "annotations": []
+                        }
+                    ],
+                    "relationships": []
+                }
+            ],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 25,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "SmartBookSystem": {
+            "annotations": [
+                "Entity"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "id"
+                    ],
+                    "type": "int",
+                    "annotations": [
+                        "Id",
+                        "GeneratedValue"
+                    ],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "bookName",
+                        "bookName2",
+                        "bookName3"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "memberName"
+                    ],
+                    "type": "String",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "dateOfBooked"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "dateOfReturn"
+                    ],
+                    "type": "Date",
+                    "annotations": [],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "getBookName",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBookName",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "bookName",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBookName2",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBookName2",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "bookName2",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getBookName3",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setBookName3",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "bookName3",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getMemberName",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setMemberName",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "memberName",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getDateOfBooked",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setDateOfBooked",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "dateOfBooked",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "getDateOfReturn",
+                    "return_type": "Date",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "setDateOfReturn",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "dateOfReturn",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "toString",
+                    "return_type": "String",
+                    "parameters": [],
+                    "annotations": [
+                        "Override"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfBooked",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfBooked",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfBooked",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfReturn",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfReturn",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfReturn",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfBooked",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "dateOfReturn",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\SmartBookSystem.java",
+            "last_modified": 1732787921.7616715,
+            "component_type": "Unknown",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "getBookName": 1,
+                "setBookName": 1,
+                "getBookName2": 1,
+                "setBookName2": 1,
+                "getBookName3": 1,
+                "setBookName3": 1,
+                "getMemberName": 1,
+                "setMemberName": 1,
+                "getDateOfBooked": 1,
+                "setDateOfBooked": 1,
+                "getDateOfReturn": 1,
+                "setDateOfReturn": 1,
+                "toString": 1
+            },
+            "code_smells": [
+                "Large Class"
+            ],
+            "is_test_class": false,
+            "database_entities": [
+                {
+                    "table_name": null,
+                    "fields": [
+                        {
+                            "name": "id",
+                            "type": "int",
+                            "column_name": null,
+                            "annotations": [
+                                "Id",
+                                "GeneratedValue"
+                            ]
+                        },
+                        {
+                            "name": "bookName",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "memberName",
+                            "type": "String",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "dateOfBooked",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        },
+                        {
+                            "name": "dateOfReturn",
+                            "type": "Date",
+                            "column_name": null,
+                            "annotations": []
+                        }
+                    ],
+                    "relationships": []
+                }
+            ],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 13,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "BookServices": {
+            "annotations": [
+                "Service"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "listOfBooks"
+                    ],
+                    "type": "List",
+                    "annotations": [],
+                    "modifiers": [
+                        "static"
+                    ]
+                },
+                {
+                    "names": [
+                        "id"
+                    ],
+                    "type": "int",
+                    "annotations": [],
+                    "modifiers": [
+                        "static"
+                    ]
+                }
+            ],
+            "methods": [
+                {
+                    "name": "showAllBooksData",
+                    "return_type": "List",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "addBook",
+                    "return_type": "List",
+                    "parameters": [
+                        {
+                            "name": "book_name",
+                            "type": "String"
+                        },
+                        {
+                            "name": "book_authors",
+                            "type": "String"
+                        },
+                        {
+                            "name": "book_price",
+                            "type": "double"
+                        },
+                        {
+                            "name": "book_published",
+                            "type": "Date"
+                        },
+                        {
+                            "name": "is_book_available",
+                            "type": "boolean"
+                        },
+                        {
+                            "name": "book_dept",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "delBook",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "editBook",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "type": "int"
+                        },
+                        {
+                            "name": "bookname",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "getBookDetails",
+                    "return_type": "BookPojo",
+                    "parameters": [
+                        {
+                            "name": "book_name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "listOfBooks",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "listOfBooks",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "bid",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "listOfBooks",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "bid",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "bid",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "listOfBooks",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "mybook",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "listOfBooks",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_authors",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_price",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_dept",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_published",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "is_book_available",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "listOfBooks",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "id",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookname",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "book_name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "mybook",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\BookServices.java",
+            "last_modified": 1732787921.7650504,
+            "component_type": "Service",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "showAllBooksData": 1,
+                "addBook": 1,
+                "delBook": 3,
+                "editBook": 3,
+                "getBookDetails": 3
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [
+                {
+                    "field": "listOfBooks",
+                    "type": "List"
+                },
+                {
+                    "field": "id",
+                    "type": "int"
+                }
+            ],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 5,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "LoginServices": {
+            "annotations": [
+                "Component"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [],
+            "methods": [
+                {
+                    "name": "checkUserAuthentication",
+                    "return_type": "boolean",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "String"
+                        },
+                        {
+                            "name": "password",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "name",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "password",
+                    "relationship_type": "method_call"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\LoginServices.java",
+            "last_modified": 1732787921.7650504,
+            "component_type": "Component",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "checkUserAuthentication": 1
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "spring_beans": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 1,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "SmartServices": {
+            "annotations": [
+                "Service"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [
+                {
+                    "names": [
+                        "smartBookSystems"
+                    ],
+                    "type": "List",
+                    "annotations": [],
+                    "modifiers": []
+                },
+                {
+                    "names": [
+                        "totalHostory"
+                    ],
+                    "type": "List",
+                    "annotations": [],
+                    "modifiers": []
+                }
+            ],
+            "methods": [
+                {
+                    "name": "getDetailsAboutMember",
+                    "return_type": "List",
+                    "parameters": [
+                        {
+                            "name": "memberName",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName2",
+                            "type": "String"
+                        },
+                        {
+                            "name": "bookName3",
+                            "type": "String"
+                        },
+                        {
+                            "name": "date",
+                            "type": "Date"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                },
+                {
+                    "name": "getTotalDetails",
+                    "return_type": "List",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "delMember",
+                    "return_type": "void",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 2
+                },
+                {
+                    "name": "showTotalHistory",
+                    "return_type": "List",
+                    "parameters": [],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 1
+                },
+                {
+                    "name": "checkMember",
+                    "return_type": "SmartBookSystem",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "String"
+                        }
+                    ],
+                    "annotations": [],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 3
+                }
+            ],
+            "relationships": [
+                {
+                    "type": "calls",
+                    "target": "smartBookSystems",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "totalHostory",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "smartBookSystems",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "sbs",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "totalHostory",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "it",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "sbs",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "this",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "calls",
+                    "target": "sbs",
+                    "relationship_type": "method_call"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "memberName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName2",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "bookName3",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "date",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "smartBookSystems",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "smartBookSystems",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "totalHostory",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "name",
+                    "relationship_type": "data_access"
+                },
+                {
+                    "type": "data_flow",
+                    "target": "sbs",
+                    "relationship_type": "data_access"
+                }
+            ],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\SmartServices.java",
+            "last_modified": 1732787921.7670329,
+            "component_type": "Service",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "getDetailsAboutMember": 1,
+                "getTotalDetails": 1,
+                "delMember": 3,
+                "showTotalHistory": 1,
+                "checkMember": 3
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 5,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        },
+        "LbmApplicationTests": {
+            "annotations": [
+                "RunWith",
+                "SpringBootTest"
+            ],
+            "dependencies": [],
+            "inter_service_calls": [],
+            "fields": [],
+            "methods": [
+                {
+                    "name": "contextLoads",
+                    "return_type": "void",
+                    "parameters": [],
+                    "annotations": [
+                        "Test"
+                    ],
+                    "modifiers": [
+                        "public"
+                    ],
+                    "body_length": 0
+                }
+            ],
+            "relationships": [],
+            "file_path": "C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\test\\java\\com\\verinon\\lbm\\LbmApplicationTests.java",
+            "last_modified": 1732787921.8504677,
+            "component_type": "Unknown",
+            "bounded_context": "Unknown Context",
+            "api_endpoints": [],
+            "domain": "Unknown Domain",
+            "methods_complexity": {
+                "contextLoads": 1
+            },
+            "code_smells": [],
+            "is_test_class": false,
+            "database_entities": [],
+            "messaging_usage": [],
+            "external_api_calls": [],
+            "config_properties": [],
+            "layer": "Unknown Layer",
+            "transactions": [],
+            "global_state_usage": [],
+            "security": {
+                "secured_methods": [],
+                "roles": []
+            },
+            "documentation_coverage": {
+                "documented_methods": 0,
+                "total_methods": 1,
+                "coverage": 0.0
+            },
+            "outdated_dependencies": []
+        }
+    },
+    "architecture_prompt": "### Enhanced Java Spring Boot Project Architecture Overview ###\n\nClass: MavenWrapperDownloader\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\.mvn\\wrapper\\MavenWrapperDownloader.java\nComponent Type: Unknown\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: None\nGlobal State Usage:\n  - Field: DEFAULT_DOWNLOAD_URL (String)\n  - Field: MAVEN_WRAPPER_PROPERTIES_PATH (String)\n  - Field: MAVEN_WRAPPER_JAR_PATH (String)\n  - Field: PROPERTY_NAME_WRAPPER_URL (String)\nCode Smells: Excessive Static Methods\nMethods Complexity:\n  - main: Cyclomatic Complexity = 8\n  - downloadFileFromURL: Cyclomatic Complexity = 1\nRelationships:\n  - calls System.out (method_call)\n  - calls System.out (method_call)\n  - calls baseDirectory (method_call)\n  - calls mavenWrapperPropertyFile (method_call)\n  - calls mavenWrapperProperties (method_call)\n  - calls mavenWrapperProperties (method_call)\n  - calls System.out (method_call)\n  - calls mavenWrapperPropertyFileInputStream (method_call)\n  - calls System.out (method_call)\n  - calls baseDirectory (method_call)\n  - calls outputFile (method_call)\n  - calls this (method_call)\n  - calls outputFile (method_call)\n  - calls this (method_call)\n  - calls System.out (method_call)\n  - calls outputFile (method_call)\n  - calls this (method_call)\n  - calls System.out (method_call)\n  - calls outputFile (method_call)\n  - calls this (method_call)\n  - calls System.out (method_call)\n  - calls System (method_call)\n  - calls System.out (method_call)\n  - calls e (method_call)\n  - calls System (method_call)\n  - calls Channels (method_call)\n  - calls website (method_call)\n  - calls fos (method_call)\n  - calls this (method_call)\n  - calls fos (method_call)\n  - calls rbc (method_call)\n  - data_flow args (data_access)\n  - data_flow baseDirectory (data_access)\n  - data_flow MAVEN_WRAPPER_PROPERTIES_PATH (data_access)\n  - data_flow DEFAULT_DOWNLOAD_URL (data_access)\n  - data_flow mavenWrapperPropertyFileInputStream (data_access)\n  - data_flow mavenWrapperPropertyFile (data_access)\n  - data_flow mavenWrapperPropertyFileInputStream (data_access)\n  - data_flow url (data_access)\n  - data_flow PROPERTY_NAME_WRAPPER_URL (data_access)\n  - data_flow url (data_access)\n  - data_flow MAVEN_WRAPPER_PROPERTIES_PATH (data_access)\n  - data_flow mavenWrapperPropertyFileInputStream (data_access)\n  - data_flow url (data_access)\n  - data_flow MAVEN_WRAPPER_JAR_PATH (data_access)\n  - data_flow url (data_access)\n  - data_flow outputFile (data_access)\n  - data_flow urlString (data_access)\n  - data_flow rbc (data_access)\n  - data_flow destination (data_access)\n  - data_flow rbc (data_access)\n  - data_flow MAX_VALUE (data_access)\n\nClass: LbmApplication\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\LbmApplication.java\nComponent Type: SpringBootApplication\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: SpringBootApplication\nCode Smells: Excessive Static Methods\nMethods Complexity:\n  - main: Cyclomatic Complexity = 1\nRelationships:\n  - calls SpringApplication (method_call)\n  - data_flow args (data_access)\n\nClass: BookController\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\BookController.java\nComponent Type: Controller\nLayer: Controller Layer\nBounded Context: Unknown Context\nAnnotations: Controller\nCode Smells: Large Class\nMethods Complexity:\n  - showListOfBooks: Cyclomatic Complexity = 1\n  - addBooksShowPage: Cyclomatic Complexity = 1\n  - addBooks: Cyclomatic Complexity = 1\n  - deleteBookFromList: Cyclomatic Complexity = 1\n  - editBookDetails: Cyclomatic Complexity = 1\n  - editBookDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookTrackingDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookDetails: Cyclomatic Complexity = 1\n  - showMainPageForBookOperations: Cyclomatic Complexity = 1\n  - forBookBarrow: Cyclomatic Complexity = 1\n  - whenReturnBook: Cyclomatic Complexity = 1\n  - setReturnDate: Cyclomatic Complexity = 1\n  - showBarrowBookPage: Cyclomatic Complexity = 1\n  - showTotalHistory: Cyclomatic Complexity = 1\nRelationships:\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls book (method_call)\n  - calls book (method_call)\n  - calls book (method_call)\n  - calls book (method_call)\n  - calls book (method_call)\n  - calls book (method_call)\n  - calls services (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls model (method_call)\n  - calls memberServices (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services1 (method_call)\n  - calls services1 (method_call)\n  - calls model (method_call)\n  - calls services1 (method_call)\n  - calls model (method_call)\n  - calls services1 (method_call)\n  - calls model (method_call)\n  - calls services1 (method_call)\n  - data_flow id (data_access)\n  - data_flow id (data_access)\n  - data_flow bookname (data_access)\n  - data_flow book_name (data_access)\n  - data_flow memberName (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow name (data_access)\n  - data_flow member (data_access)\n  - data_flow member (data_access)\n\nClass: ErrorController\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\ErrorController.java\nComponent Type: Controller\nLayer: Controller Layer\nBounded Context: Unknown Context\nAnnotations: Controller\nCode Smells: None\nMethods Complexity:\n  - myExceptionController: Cyclomatic Complexity = 1\nRelationships:\n  - calls model (method_call)\n  - calls model (method_call)\n  - calls request (method_call)\n  - calls model (method_call)\n  - data_flow ex (data_access)\n  - data_flow model (data_access)\n\nClass: LoginController\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\LoginController.java\nComponent Type: Controller\nLayer: Controller Layer\nBounded Context: Unknown Context\nAnnotations: Controller, SessionAttributes\nCode Smells: None\nMethods Complexity:\n  - showLoginPage: Cyclomatic Complexity = 1\n  - showHomePage: Cyclomatic Complexity = 1\n  - logoutUser: Cyclomatic Complexity = 1\n  - contactUsPage: Cyclomatic Complexity = 1\n\nClass: MemberController\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\controller\\MemberController.java\nComponent Type: Controller\nLayer: Controller Layer\nBounded Context: Unknown Context\nAnnotations: Controller\nCode Smells: None\nMethods Complexity:\n  - showListOfMembers: Cyclomatic Complexity = 1\n  - addMemberShowPage: Cyclomatic Complexity = 1\n  - addMemberSuccess: Cyclomatic Complexity = 1\n  - deleteMemberFromList: Cyclomatic Complexity = 1\n  - editMemberDetails: Cyclomatic Complexity = 1\n  - editMemberDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookTrackingDetailsShowPage: Cyclomatic Complexity = 1\n  - getBookDetails: Cyclomatic Complexity = 2\nRelationships:\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls member (method_call)\n  - calls member (method_call)\n  - calls member (method_call)\n  - calls member (method_call)\n  - calls member (method_call)\n  - calls member (method_call)\n  - calls services (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - calls services (method_call)\n  - calls services (method_call)\n  - calls model (method_call)\n  - data_flow id (data_access)\n  - data_flow id (data_access)\n  - data_flow membername (data_access)\n  - data_flow memberaddress (data_access)\n  - data_flow membergender (data_access)\n  - data_flow memberage (data_access)\n  - data_flow member_name (data_access)\n  - data_flow member_name (data_access)\n\nClass: BookPojo\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\BookPojo.java\nComponent Type: Unknown\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Entity\nDatabase Entities:\n  - Table: None\n    Field: book_id (int)\n    Field: book_name (String)\n    Field: book_authors (String)\n    Field: book_price (Double)\n    Field: book_dept (String)\n    Field: book_published (Date)\n    Field: book_date_of_barrow (Date)\n    Field: book_date_of_return (Date)\n    Field: is_book_available (boolean)\nCode Smells: Large Class\nMethods Complexity:\n  - toString: Cyclomatic Complexity = 1\n  - getBook_id: Cyclomatic Complexity = 1\n  - setBook_id: Cyclomatic Complexity = 1\n  - getBook_name: Cyclomatic Complexity = 1\n  - setBook_name: Cyclomatic Complexity = 1\n  - getBook_authors: Cyclomatic Complexity = 1\n  - setBook_authors: Cyclomatic Complexity = 1\n  - getBook_price: Cyclomatic Complexity = 1\n  - setBook_price: Cyclomatic Complexity = 1\n  - getBook_dept: Cyclomatic Complexity = 1\n  - setBook_dept: Cyclomatic Complexity = 1\n  - getBook_published: Cyclomatic Complexity = 1\n  - setBook_published: Cyclomatic Complexity = 1\n  - getBook_date_of_barrow: Cyclomatic Complexity = 1\n  - setBook_date_of_barrow: Cyclomatic Complexity = 1\n  - getBook_date_of_return: Cyclomatic Complexity = 1\n  - setBook_date_of_return: Cyclomatic Complexity = 1\n  - isIs_book_available: Cyclomatic Complexity = 1\n  - setIs_book_available: Cyclomatic Complexity = 1\n  - equals: Cyclomatic Complexity = 4\n  - hashCode: Cyclomatic Complexity = 1\nRelationships:\n  - calls this (method_call)\n  - calls o (method_call)\n  - calls book_name (method_call)\n  - calls book_name (method_call)\n  - data_flow book_id (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_authors (data_access)\n  - data_flow book_price (data_access)\n  - data_flow book_dept (data_access)\n  - data_flow book_published (data_access)\n  - data_flow book_date_of_barrow (data_access)\n  - data_flow book_date_of_return (data_access)\n  - data_flow is_book_available (data_access)\n  - data_flow book_id (data_access)\n  - data_flow book_id (data_access)\n  - data_flow book_id (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_authors (data_access)\n  - data_flow book_authors (data_access)\n  - data_flow book_authors (data_access)\n  - data_flow book_price (data_access)\n  - data_flow book_price (data_access)\n  - data_flow book_price (data_access)\n  - data_flow book_dept (data_access)\n  - data_flow book_dept (data_access)\n  - data_flow book_dept (data_access)\n  - data_flow book_published (data_access)\n  - data_flow book_published (data_access)\n  - data_flow book_published (data_access)\n  - data_flow book_date_of_barrow (data_access)\n  - data_flow book_date_of_barrow (data_access)\n  - data_flow book_date_of_barrow (data_access)\n  - data_flow book_date_of_return (data_access)\n  - data_flow book_date_of_return (data_access)\n  - data_flow book_date_of_return (data_access)\n  - data_flow is_book_available (data_access)\n  - data_flow is_book_available (data_access)\n  - data_flow is_book_available (data_access)\n  - data_flow o (data_access)\n  - data_flow o (data_access)\n  - data_flow o (data_access)\n  - data_flow book_id (data_access)\n  - data_flow book_id (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_id (data_access)\n  - data_flow result (data_access)\n  - data_flow result (data_access)\n  - data_flow result (data_access)\n\nClass: MemberPojo\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\MemberPojo.java\nComponent Type: Unknown\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Entity\nDatabase Entities:\n  - Table: None\n    Field: member_id (int)\n    Field: member_name (String)\n    Field: member_address (String)\n    Field: member_phone_number (long)\n    Field: member_joined_date (Date)\n    Field: member_taken_book (Date)\n    Field: member_return_book (Date)\n    Field: member_fee (double)\n    Field: member_books_quantity (int)\n    Field: member_dept (String)\n    Field: member_gender (String)\n    Field: member_age (int)\nCode Smells: Large Class\nMethods Complexity:\n  - getMember_id: Cyclomatic Complexity = 1\n  - setMember_id: Cyclomatic Complexity = 1\n  - getMember_name: Cyclomatic Complexity = 1\n  - setMember_name: Cyclomatic Complexity = 1\n  - getMember_address: Cyclomatic Complexity = 1\n  - setMember_address: Cyclomatic Complexity = 1\n  - getMember_phone_number: Cyclomatic Complexity = 1\n  - setMember_phone_number: Cyclomatic Complexity = 1\n  - getMember_joined_date: Cyclomatic Complexity = 1\n  - setMember_joined_date: Cyclomatic Complexity = 1\n  - getMember_taken_book: Cyclomatic Complexity = 1\n  - setMember_taken_book: Cyclomatic Complexity = 1\n  - getMember_return_book: Cyclomatic Complexity = 1\n  - setMember_return_book: Cyclomatic Complexity = 1\n  - getMember_fee: Cyclomatic Complexity = 1\n  - setMember_fee: Cyclomatic Complexity = 1\n  - getMember_books_quantity: Cyclomatic Complexity = 1\n  - setMember_books_quantity: Cyclomatic Complexity = 1\n  - getMember_dept: Cyclomatic Complexity = 1\n  - setMember_dept: Cyclomatic Complexity = 1\n  - toString: Cyclomatic Complexity = 1\n  - getMember_gender: Cyclomatic Complexity = 1\n  - setMember_gender: Cyclomatic Complexity = 1\n  - getMember_age: Cyclomatic Complexity = 1\n  - setMember_age: Cyclomatic Complexity = 1\nRelationships:\n  - data_flow member_id (data_access)\n  - data_flow member_id (data_access)\n  - data_flow member_id (data_access)\n  - data_flow member_name (data_access)\n  - data_flow member_name (data_access)\n  - data_flow member_name (data_access)\n  - data_flow member_address (data_access)\n  - data_flow member_address (data_access)\n  - data_flow member_address (data_access)\n  - data_flow member_phone_number (data_access)\n  - data_flow member_phone_number (data_access)\n  - data_flow member_phone_number (data_access)\n  - data_flow member_joined_date (data_access)\n  - data_flow member_joined_date (data_access)\n  - data_flow member_joined_date (data_access)\n  - data_flow member_taken_book (data_access)\n  - data_flow member_taken_book (data_access)\n  - data_flow member_taken_book (data_access)\n  - data_flow member_return_book (data_access)\n  - data_flow member_return_book (data_access)\n  - data_flow member_return_book (data_access)\n  - data_flow member_fee (data_access)\n  - data_flow member_fee (data_access)\n  - data_flow member_fee (data_access)\n  - data_flow member_books_quantity (data_access)\n  - data_flow member_books_quantity (data_access)\n  - data_flow member_books_quantity (data_access)\n  - data_flow member_dept (data_access)\n  - data_flow member_dept (data_access)\n  - data_flow member_dept (data_access)\n  - data_flow member_id (data_access)\n  - data_flow member_name (data_access)\n  - data_flow member_address (data_access)\n  - data_flow member_phone_number (data_access)\n  - data_flow member_joined_date (data_access)\n  - data_flow member_taken_book (data_access)\n  - data_flow member_return_book (data_access)\n  - data_flow member_fee (data_access)\n  - data_flow member_books_quantity (data_access)\n  - data_flow member_dept (data_access)\n  - data_flow member_gender (data_access)\n  - data_flow member_age (data_access)\n  - data_flow member_gender (data_access)\n  - data_flow member_gender (data_access)\n  - data_flow member_gender (data_access)\n  - data_flow member_age (data_access)\n  - data_flow member_age (data_access)\n  - data_flow member_age (data_access)\n\nClass: SmartBookSystem\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\pojos\\SmartBookSystem.java\nComponent Type: Unknown\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Entity\nDatabase Entities:\n  - Table: None\n    Field: id (int)\n    Field: bookName (String)\n    Field: memberName (String)\n    Field: dateOfBooked (Date)\n    Field: dateOfReturn (Date)\nCode Smells: Large Class\nMethods Complexity:\n  - getBookName: Cyclomatic Complexity = 1\n  - setBookName: Cyclomatic Complexity = 1\n  - getBookName2: Cyclomatic Complexity = 1\n  - setBookName2: Cyclomatic Complexity = 1\n  - getBookName3: Cyclomatic Complexity = 1\n  - setBookName3: Cyclomatic Complexity = 1\n  - getMemberName: Cyclomatic Complexity = 1\n  - setMemberName: Cyclomatic Complexity = 1\n  - getDateOfBooked: Cyclomatic Complexity = 1\n  - setDateOfBooked: Cyclomatic Complexity = 1\n  - getDateOfReturn: Cyclomatic Complexity = 1\n  - setDateOfReturn: Cyclomatic Complexity = 1\n  - toString: Cyclomatic Complexity = 1\nRelationships:\n  - data_flow bookName (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow memberName (data_access)\n  - data_flow memberName (data_access)\n  - data_flow memberName (data_access)\n  - data_flow dateOfBooked (data_access)\n  - data_flow dateOfBooked (data_access)\n  - data_flow dateOfBooked (data_access)\n  - data_flow dateOfReturn (data_access)\n  - data_flow dateOfReturn (data_access)\n  - data_flow dateOfReturn (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow memberName (data_access)\n  - data_flow dateOfBooked (data_access)\n  - data_flow dateOfReturn (data_access)\n\nClass: BookServices\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\BookServices.java\nComponent Type: Service\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Service\nGlobal State Usage:\n  - Field: listOfBooks (List)\n  - Field: id (int)\nCode Smells: None\nMethods Complexity:\n  - showAllBooksData: Cyclomatic Complexity = 1\n  - addBook: Cyclomatic Complexity = 1\n  - delBook: Cyclomatic Complexity = 3\n  - editBook: Cyclomatic Complexity = 3\n  - getBookDetails: Cyclomatic Complexity = 3\nRelationships:\n  - calls listOfBooks (method_call)\n  - calls listOfBooks (method_call)\n  - calls it (method_call)\n  - calls it (method_call)\n  - calls bid (method_call)\n  - calls it (method_call)\n  - calls listOfBooks (method_call)\n  - calls it (method_call)\n  - calls it (method_call)\n  - calls bid (method_call)\n  - calls bid (method_call)\n  - calls listOfBooks (method_call)\n  - calls it (method_call)\n  - calls it (method_call)\n  - calls mybook (method_call)\n  - calls this (method_call)\n  - data_flow listOfBooks (data_access)\n  - data_flow id (data_access)\n  - data_flow book_name (data_access)\n  - data_flow book_authors (data_access)\n  - data_flow book_price (data_access)\n  - data_flow book_dept (data_access)\n  - data_flow book_published (data_access)\n  - data_flow is_book_available (data_access)\n  - data_flow listOfBooks (data_access)\n  - data_flow id (data_access)\n  - data_flow id (data_access)\n  - data_flow bookname (data_access)\n  - data_flow book_name (data_access)\n  - data_flow mybook (data_access)\n\nClass: LoginServices\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\LoginServices.java\nComponent Type: Component\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Component\nCode Smells: None\nMethods Complexity:\n  - checkUserAuthentication: Cyclomatic Complexity = 1\nRelationships:\n  - calls name (method_call)\n  - calls password (method_call)\n\nClass: SmartServices\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\main\\java\\com\\verinon\\lbm\\services\\SmartServices.java\nComponent Type: Service\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: Service\nCode Smells: None\nMethods Complexity:\n  - getDetailsAboutMember: Cyclomatic Complexity = 1\n  - getTotalDetails: Cyclomatic Complexity = 1\n  - delMember: Cyclomatic Complexity = 3\n  - showTotalHistory: Cyclomatic Complexity = 1\n  - checkMember: Cyclomatic Complexity = 3\nRelationships:\n  - calls smartBookSystems (method_call)\n  - calls totalHostory (method_call)\n  - calls smartBookSystems (method_call)\n  - calls it (method_call)\n  - calls it (method_call)\n  - calls sbs (method_call)\n  - calls this (method_call)\n  - calls it (method_call)\n  - calls totalHostory (method_call)\n  - calls it (method_call)\n  - calls it (method_call)\n  - calls sbs (method_call)\n  - calls this (method_call)\n  - calls sbs (method_call)\n  - data_flow memberName (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow date (data_access)\n  - data_flow memberName (data_access)\n  - data_flow bookName (data_access)\n  - data_flow bookName2 (data_access)\n  - data_flow bookName3 (data_access)\n  - data_flow date (data_access)\n  - data_flow smartBookSystems (data_access)\n  - data_flow smartBookSystems (data_access)\n  - data_flow name (data_access)\n  - data_flow totalHostory (data_access)\n  - data_flow name (data_access)\n  - data_flow sbs (data_access)\n\nClass: LbmApplicationTests\nFile Path: C:\\Users\\abhij\\AppData\\Local\\Temp\\tmpotn0afwg\\Mini-Project-LibrabryManagement-with-Springboot-master\\src\\test\\java\\com\\verinon\\lbm\\LbmApplicationTests.java\nComponent Type: Unknown\nLayer: Unknown Layer\nBounded Context: Unknown Context\nAnnotations: RunWith, SpringBootTest\nCode Smells: None\nMethods Complexity:\n  - contextLoads: Cyclomatic Complexity = 1\n\n"
+}
