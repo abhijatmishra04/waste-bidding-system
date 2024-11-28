@@ -19,9 +19,6 @@ import io
 from configparser import ConfigParser
 import re
 
-# New import for cloning repositories
-from git import Repo, GitCommandError
-
 # Load environment variables
 load_dotenv()
 
@@ -1280,18 +1277,17 @@ def analyze_module_coupling(java_class):
 
 @app.post("/scan_project")
 async def scan_project_endpoint(
-    project_zip: Optional[UploadFile] = File(None),
-    repo_url: Optional[str] = Form(None),
+    project_zip: UploadFile = File(...),
     config_file: Optional[UploadFile] = File(None),
     complexity_threshold: int = Form(10),
     method_length_threshold: int = Form(50),
     class_size_threshold: int = Form(10),
     output_format: str = Form('json')
 ):
-    if not project_zip and not repo_url:
-        return JSONResponse(status_code=400, content={"error": "Please provide either a ZIP file or a repository URL."})
+    if not project_zip:
+        return JSONResponse(status_code=400, content={"error": "Please provide a ZIP file of the Java project."})
 
-    # Save the uploaded project ZIP file or clone the repository
+    # Save the uploaded project ZIP file
     with tempfile.TemporaryDirectory() as temp_dir:
         project_path = temp_dir
 
@@ -1326,19 +1322,6 @@ async def scan_project_endpoint(
                 logger.error("Invalid ZIP file.")
                 return JSONResponse(status_code=400, content={"error": "Invalid ZIP file."})
 
-        # Handle repository URL
-        elif repo_url:
-            logger.info(f"Cloning repository from URL: {repo_url}")
-            try:
-                Repo.clone_from(repo_url, temp_dir)
-                logger.info("Repository cloned successfully!")
-            except GitCommandError as e:
-                logger.error(f"Error cloning repository: {e}")
-                return JSONResponse(status_code=400, content={"error": f"Failed to clone repository: {e}"})
-            except Exception as e:
-                logger.error(f"Unexpected error during cloning: {e}")
-                return JSONResponse(status_code=500, content={"error": "An unexpected error occurred during repository cloning."})
-
         # Load configuration if provided
         if config_file:
             config_file_path = os.path.join(temp_dir, config_file.filename)
@@ -1372,7 +1355,7 @@ async def scan_project_endpoint(
         if "error" in scan_summary:
             return JSONResponse(status_code=400, content=scan_summary)
 
-        #generate architecture prompt
+        # Generate architecture prompt
         architecture_prompt = generate_architecture_prompt(scan_summary)
 
         # Return the scan results and the architecture prompt
@@ -1380,8 +1363,3 @@ async def scan_project_endpoint(
             "scan_summary": scan_summary,
             "architecture_prompt": architecture_prompt
         })
-
-
-uvicorn special_tool:app --reload
-
-http://localhost:8000/scan_project
