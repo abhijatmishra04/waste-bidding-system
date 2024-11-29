@@ -7,14 +7,11 @@ import logging
 import json
 import networkx as nx
 from pathlib import Path
-from collections import defaultdict
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
-
-# New imports for parsing properties and YAML files
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 import re
 
 # Load environment variables
@@ -118,7 +115,7 @@ def scan_project_async(project_dir: str, output_format: str = 'json') -> Dict[st
                     future.result()
                     processed_files += batch_size
                     progress = processed_files / total_files
-                    progress_percent = min(progress, 1.0)*100
+                    progress_percent = min(progress, 1.0) * 100
                     logger.info("Progress: %.2f%%", progress_percent)
                 except Exception:
                     logger.exception("Batch generated an exception.")
@@ -285,13 +282,13 @@ def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, c
             'methods_complexity': methods_complexity,
             'code_smells': code_smells,
             'is_test_class': is_test_class,
-            'database_entities': [],  # New field for entities
-            'messaging_usage': [],    # New field for messaging
-            'external_api_calls': [], # New field for external API calls
-            'config_properties': [],  # New field for config properties
-            'layer': detect_layer(java_file_path),  # New field for layer identification
-            'transactions': detect_transactions(java_class),  # New field for transactions
-            'global_state_usage': detect_global_state(java_class),  # New field for global state
+            'database_entities': [],
+            'messaging_usage': [],
+            'external_api_calls': [],
+            'config_properties': [],
+            'layer': detect_layer(java_file_path),
+            'transactions': detect_transactions(java_class),
+            'global_state_usage': detect_global_state(java_class),
         }
 
         # Detect service injections and relationships
@@ -327,27 +324,27 @@ def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, c
         if db_interactions:
             metadata['database_interactions'] = db_interactions
 
-        # Database Entity Extraction (New)
+        # Database Entity Extraction
         database_entities = extract_database_entities(java_class)
         if database_entities:
             metadata['database_entities'] = database_entities
 
-        # Messaging Patterns Detection (New)
+        # Messaging Patterns Detection
         messaging_usage = detect_messaging_usage(java_class)
         if messaging_usage:
             metadata['messaging_usage'] = messaging_usage
 
-        # External API Calls Detection (New)
+        # External API Calls Detection
         external_api_calls = detect_external_api_calls(java_class)
         if external_api_calls:
             metadata['external_api_calls'] = external_api_calls
 
-        # Configuration Properties Extraction (New)
+        # Configuration Properties Extraction
         config_properties = extract_config_properties(java_class)
         if config_properties:
             metadata['config_properties'] = config_properties
 
-        # Module Coupling Analysis (New)
+        # Module Coupling Analysis
         module_coupling = analyze_module_coupling(java_class)
         if module_coupling:
             metadata['module_coupling'] = module_coupling
@@ -375,6 +372,61 @@ def extract_imports(tree):
         for imp in tree.imports:
             imports.append(imp.path)
     return imports
+
+def extract_annotations(java_class):
+    """Extract annotations from a Java class."""
+    return [get_annotation_name(annotation) for annotation in java_class.annotations]
+
+def get_annotation_name(annotation):
+    """Get the name of an annotation."""
+    if isinstance(annotation.name, str):
+        return annotation.name
+    elif hasattr(annotation.name, 'qualifier') and annotation.name.qualifier:
+        return f"{annotation.name.qualifier}.{annotation.name.member}"
+    else:
+        return annotation.name.member
+
+def apply_annotation_filters(annotations: List[str]) -> bool:
+    """Check if the class should be scanned based on annotation filters."""
+    filters = config['annotation_filters']
+    if not filters:
+        return True
+    return any(annotation in filters for annotation in annotations)
+
+def extract_fields(java_class):
+    """Extract fields and their metadata from a Java class."""
+    fields = []
+    if java_class.fields:
+        for field in java_class.fields:
+            field_info = {
+                'names': [declarator.name for declarator in field.declarators],
+                'type': field.type.name if field.type and isinstance(field.type.name, str) else 'Unknown',
+                'annotations': [get_annotation_name(annotation) for annotation in field.annotations],
+                'modifiers': list(field.modifiers)
+            }
+            fields.append(field_info)
+    return fields
+
+def extract_methods(java_class):
+    """Extract methods from a Java class."""
+    methods = []
+    if java_class.methods:
+        for method in java_class.methods:
+            try:
+                method_info = {
+                    'name': method.name,
+                    'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'void',
+                    'parameters': [{'name': param.name,
+                                    'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'}
+                                   for param in method.parameters],
+                    'annotations': [get_annotation_name(annotation) for annotation in method.annotations],
+                    'modifiers': list(method.modifiers),
+                    'body_length': len(method.body) if method.body else 0
+                }
+                methods.append(method_info)
+            except Exception:
+                logger.exception("Error extracting method information.")
+    return methods
 
 def detect_spring_component_type(java_class):
     """Detect the Spring component type of the Java class based on its annotations."""
@@ -427,70 +479,818 @@ def detect_service_injections(java_class, metadata):
                             metadata['inter_service_calls'].append(injected_service)
                             logger.debug("Injected service found in method %s of %s: %s", method.name, java_class.name, injected_service)
 
-def extract_annotations(java_class):
-    """Extract annotations from a Java class."""
-    return [get_annotation_name(annotation) for annotation in java_class.annotations]
+def detect_relationships(java_class, metadata):
+    """Detect advanced relationships: inheritance, interfaces, method calls, cyclic dependencies, data flow, entity relationships."""
+    relationships = []
 
-def get_annotation_name(annotation):
-    """Get the name of an annotation."""
-    if isinstance(annotation.name, str):
-        return annotation.name
-    elif hasattr(annotation.name, 'qualifier') and annotation.name.qualifier:
-        return f"{annotation.name.qualifier}.{annotation.name.member}"
-    else:
-        return annotation.name.member
+    # Inheritance relationships
+    if hasattr(java_class, 'extends') and java_class.extends:
+        parent_class = java_class.extends.name if isinstance(java_class.extends.name, str) else java_class.extends.name.value
+        relationships.append({
+            'type': 'inherits',
+            'target': parent_class,
+            'relationship_type': 'inheritance'
+        })
 
-def extract_fields(java_class):
-    """Extract fields and their metadata from a Java class."""
-    fields = []
-    if java_class.fields:
-        for field in java_class.fields:
-            field_info = {
-                'names': [declarator.name for declarator in field.declarators],
-                'type': field.type.name if field.type and isinstance(field.type.name, str) else 'Unknown',
-                'annotations': [get_annotation_name(annotation) for annotation in field.annotations],
-                'modifiers': list(field.modifiers)
-            }
-            fields.append(field_info)
-    return fields
+    # Interface implementation relationships
+    if java_class.implements:
+        for interface in java_class.implements:
+            interface_name = interface.name if isinstance(interface.name, str) else interface.name.value
+            relationships.append({
+                'type': 'implements',
+                'target': interface_name,
+                'relationship_type': 'interface_implementation'
+            })
 
-def extract_methods(java_class):
-    """Extract methods from a Java class."""
-    methods = []
+    # Method call and data flow relationships
+    relationships.extend(detect_method_calls(java_class))
+    relationships.extend(detect_data_flow(java_class))
+
+    # Entity relationships
+    if metadata.get('database_entities'):
+        for entity in metadata['database_entities']:
+            for rel in entity.get('relationships', []):
+                relationships.append({
+                    'type': 'entity_relationship',
+                    'target': rel['target_entity'],
+                    'relationship_type': rel['type']
+                })
+
+    return relationships
+
+def detect_method_calls(java_class):
+    """Detect method call relationships within and across services."""
+    relationships = []
     if java_class.methods:
         for method in java_class.methods:
-            try:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MethodInvocation):
+                        target = node.qualifier if node.qualifier else 'this'
+                        relationships.append({
+                            'type': 'calls',
+                            'target': target,
+                            'relationship_type': 'method_call'
+                        })
+    return relationships
+
+def detect_data_flow(java_class):
+    """Detect data flow across services or between methods."""
+    relationships = []
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MemberReference):
+                        relationships.append({
+                            'type': 'data_flow',
+                            'target': node.member,
+                            'relationship_type': 'data_access'
+                        })
+    return relationships
+
+def calculate_methods_complexity(java_class):
+    """Calculate cyclomatic complexity of each method in the class."""
+    methods_complexity = {}
+    if java_class.methods:
+        for method in java_class.methods:
+            complexity = calculate_cyclomatic_complexity(method)
+            methods_complexity[method.name] = complexity
+    return methods_complexity
+
+def calculate_cyclomatic_complexity(method):
+    """Calculate cyclomatic complexity for a method."""
+    complexity = 1  # Start with 1
+    for path, node in method:
+        if isinstance(node, (javalang.tree.IfStatement, javalang.tree.ForStatement,
+                             javalang.tree.WhileStatement, javalang.tree.DoStatement,
+                             javalang.tree.SwitchStatement, javalang.tree.TernaryExpression,
+                             javalang.tree.CatchClause)):
+            complexity += 1
+    return complexity
+
+def detect_code_smells(java_class, methods_complexity, is_test_class=False):
+    """Detect code smells like long methods and large classes, and Spring Boot specific smells."""
+    code_smells = []
+    methods_count = len(java_class.methods) if java_class.methods else 0
+    fields_count = len(java_class.fields) if java_class.fields else 0
+
+    # Detect large classes
+    if methods_count > config.get('class_size_threshold', 10) or fields_count > 10:
+        code_smells.append('Large Class')
+
+    # Detect long methods
+    method_length_threshold = config.get('method_length_threshold', 50)
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body and len(method.body) > method_length_threshold:
+                code_smells.append(f'Long Method: {method.name}')
+
+    # Detect complex methods
+    complexity_threshold = config.get('complexity_threshold', 10)
+    for method_name, complexity in methods_complexity.items():
+        if complexity > complexity_threshold:
+            code_smells.append(f'Complex Method: {method_name} (Cyclomatic Complexity: {complexity})')
+
+    # Detect Spring Boot specific code smells
+    if 'RestController' in extract_annotations(java_class) and methods_count > 10:
+        code_smells.append('Heavy Controller')
+
+    # Detect misuse of annotations
+    annotations = extract_annotations(java_class)
+    if 'Service' in annotations and 'Repository' in annotations:
+        code_smells.append('Ambiguous Component: Both @Service and @Repository present')
+
+    # Detect God Class
+    if methods_count > 20 and fields_count > 20:
+        code_smells.append('God Class')
+
+    # Detect Data Class
+    if methods_count == 0 and fields_count > 0:
+        code_smells.append('Data Class')
+
+    # Detect excessive static methods
+    static_methods = sum(1 for method in java_class.methods if 'static' in method.modifiers) if java_class.methods else 0
+    if java_class.methods and static_methods > methods_count / 2:
+        code_smells.append('Excessive Static Methods')
+
+    if is_test_class:
+        code_smells = [smell for smell in code_smells if smell not in ['Large Class', 'God Class']]
+
+    return code_smells
+
+def detect_cyclic_dependencies(scan_summary):
+    """Detect cyclic dependencies between classes."""
+    dependency_graph = nx.DiGraph()
+
+    # Build dependency graph
+    for class_name, metadata in scan_summary.items():
+        dependency_graph.add_node(class_name)
+        for rel in metadata.get('relationships', []):
+            if rel['relationship_type'] in ['method_call', 'data_access']:
+                target = rel['target']
+                dependency_graph.add_edge(class_name, target)
+
+    # Detect cycles
+    cycles = list(nx.simple_cycles(dependency_graph))
+    for cycle in cycles:
+        logger.warning("Cyclic dependency detected: %s", ' -> '.join(cycle))
+        # Mark classes involved in cycles
+        for class_in_cycle in cycle:
+            scan_summary[class_in_cycle].setdefault('code_smells', []).append('Cyclic Dependency')
+
+def generate_report(output_format='json', project_path=None, scan_summary=None):
+    """Generate a report of the scan in the desired format (JSON, HTML)."""
+    logger.info("Generating scan report.")
+
+    if output_format == 'json' and project_path:
+        summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.json'))
+        try:
+            with open(summary_file, 'w') as f:
+                json.dump(scan_summary, f, indent=4)
+            logger.info("JSON scan summary written to %s", summary_file)
+        except Exception:
+            logger.exception("Error writing JSON report.")
+    elif output_format == 'html' and project_path:
+        generate_html_report(project_path, scan_summary)
+    else:
+        logger.error("Unsupported output format or missing project path: %s", output_format)
+
+def generate_html_report(project_path=None, scan_summary=None):
+    """Generate an HTML report from the scan summary."""
+    summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.html'))
+    try:
+        with open(summary_file, 'w') as f:
+            f.write("<html><head><title>Scan Report</title></head><body>")
+            f.write("<h1>Scan Report</h1>")
+            for class_name, data in scan_summary.items():
+                f.write(f"<h2>{class_name}</h2>")
+                f.write(f"<p>File: {data['file_path']}</p>")
+                f.write(f"<p>Component Type: {data['component_type']}</p>")
+                f.write(f"<p>Layer: {data.get('layer', 'Unknown')}</p>")
+                f.write(f"<p>Bounded Context: {data['bounded_context']}</p>")
+                f.write("<h3>Annotations</h3><ul>")
+                for annotation in data['annotations']:
+                    f.write(f"<li>{annotation}</li>")
+                f.write("</ul>")
+                f.write("<h3>Code Smells</h3><ul>")
+                for smell in data.get('code_smells', []):
+                    f.write(f"<li>{smell}</li>")
+                f.write("</ul>")
+                f.write("<h3>Methods Complexity</h3><ul>")
+                for method_name, complexity in data.get('methods_complexity', {}).items():
+                    f.write(f"<li>{method_name}: Cyclomatic Complexity = {complexity}</li>")
+                f.write("</ul>")
+                f.write("<h3>Inter-Service Calls</h3><ul>")
+                for service in data.get('inter_service_calls', []):
+                    f.write(f"<li>{service}</li>")
+                f.write("</ul>")
+                f.write("<h3>Relationships</h3><ul>")
+                for rel in data['relationships']:
+                    f.write(f"<li>{rel['type']} -> {rel['target']} ({rel['relationship_type']})</li>")
+                f.write("</ul>")
+                # Additional sections for new features
+                if data.get('database_entities'):
+                    f.write("<h3>Database Entities</h3><ul>")
+                    for entity in data['database_entities']:
+                        f.write(f"<li>Table: {entity.get('table_name', 'Unknown')}</li>")
+                        f.write("<ul>")
+                        for field in entity.get('fields', []):
+                            f.write(f"<li>Field: {field['name']} ({field['type']})</li>")
+                        f.write("</ul>")
+                    f.write("</ul>")
+                if data.get('messaging_usage'):
+                    f.write("<h3>Messaging Usage</h3><ul>")
+                    for usage in data['messaging_usage']:
+                        f.write(f"<li>{usage['usage']} via {usage['type']} in method {usage.get('method', '')}</li>")
+                    f.write("</ul>")
+                if data.get('external_api_calls'):
+                    f.write("<h3>External API Calls</h3><ul>")
+                    for api_call in data['external_api_calls']:
+                        f.write(f"<li>{api_call['usage']} to {api_call.get('target', 'Unknown')} in method {api_call.get('method', '')}</li>")
+                    f.write("</ul>")
+                if data.get('config_properties'):
+                    f.write("<h3>Configuration Properties</h3><ul>")
+                    for prop in data['config_properties']:
+                        f.write(f"<li>Field {prop['field']} uses property {prop['property']}</li>")
+                    f.write("</ul>")
+                if 'spring_beans' in data:
+                    f.write("<h3>Spring Beans</h3><ul>")
+                    for bean in data['spring_beans']:
+                        f.write(f"<li>{bean['name']} ({bean['return_type']})</li>")
+                    f.write("</ul>")
+                if 'api_endpoints' in data:
+                    f.write("<h3>API Endpoints</h3><ul>")
+                    for endpoint in data['api_endpoints']:
+                        f.write(f"<li>{endpoint}</li>")
+                    f.write("</ul>")
+                if 'security' in data and data['security']['secured_methods']:
+                    f.write("<h3>Security</h3><ul>")
+                    for sec in data['security']['secured_methods']:
+                        f.write(f"<li>{sec['method']} - {sec['annotation']}: {sec['value']}</li>")
+                    f.write("</ul>")
+                if 'aspects' in data:
+                    f.write("<h3>Aspects</h3><ul>")
+                    for aspect in data['aspects']:
+                        for advice in aspect['advices']:
+                            f.write(f"<li>{advice['type']} {advice['method']}: {advice['pointcut']}</li>")
+                    f.write("</ul>")
+                if 'profiles' in data:
+                    f.write("<h3>Profiles/Conditions</h3><ul>")
+                    for profile in data['profiles']:
+                        f.write(f"<li>{profile}</li>")
+                    f.write("</ul>")
+                if 'database_interactions' in data:
+                    f.write("<h3>Database Interactions</h3><ul>")
+                    for db in data['database_interactions']:
+                        f.write(f"<li>{db['name']}: {db['query']}</li>")
+                    f.write("</ul>")
+                if 'microservice_calls' in data:
+                    f.write("<h3>Microservice Calls</h3><ul>")
+                    for call in data['microservice_calls']:
+                        f.write(f"<li>{call}</li>")
+                    f.write("</ul>")
+                if 'documentation_coverage' in data:
+                    f.write("<h3>Documentation Coverage</h3>")
+                    f.write(f"<p>Methods Documented: {data['documentation_coverage']['documented_methods']} / {data['documentation_coverage']['total_methods']} ({data['documentation_coverage']['coverage']}%)</p>")
+                if 'outdated_dependencies' in data:
+                    f.write("<h3>Outdated Dependencies</h3><ul>")
+                    for dep in data['outdated_dependencies']:
+                        f.write(f"<li>{dep['dependency']} - {dep['version']}: {dep['issue']}</li>")
+                    f.write("</ul>")
+            f.write("</body></html>")
+        logger.info("HTML scan summary written to %s", summary_file)
+    except Exception:
+        logger.exception("Error writing HTML report.")
+
+def detect_bounded_context(java_file_path: Path) -> str:
+    """Detect bounded context based on the file path or class annotations."""
+    file_path_str = str(java_file_path).lower()
+
+    if "booking" in file_path_str:
+        return "Booking Context"
+    elif "passenger" in file_path_str:
+        return "Passenger Context"
+    elif "flight" in file_path_str:
+        return "Flight Context"
+    else:
+        return "Unknown Context"
+
+def extract_api_endpoints(java_class) -> List[str]:
+    """Extract API endpoints from a Java class by scanning for annotations like @GetMapping."""
+    api_endpoints = []
+    class_mappings = []
+    # Handle class-level @RequestMapping
+    for annotation in java_class.annotations:
+        annotation_name = get_annotation_name(annotation)
+        if annotation_name == "RequestMapping":
+            if annotation.element:
+                value = extract_annotation_value(annotation)
+                class_mappings.extend(value)
+
+    if java_class.methods:
+        for method in java_class.methods:
+            method_mappings = []
+            http_methods = []
+            for annotation in method.annotations:
+                annotation_name = get_annotation_name(annotation)
+                if annotation_name in {"RequestMapping", "GetMapping", "PostMapping", "PutMapping", "DeleteMapping", "PatchMapping"}:
+                    if annotation.element:
+                        value = extract_annotation_value(annotation)
+                        method_mappings.extend(value)
+                    else:
+                        method_mappings.append('/')
+                    http_methods.append(annotation_name.replace('Mapping', '').upper() if 'Mapping' in annotation_name else annotation_name.upper())
+                    # Combine class-level and method-level mappings
+                    for class_mapping in class_mappings or ['/']:
+                        for method_mapping in method_mappings or ['/']:
+                            full_mapping = (class_mapping.rstrip('/') + '/' + method_mapping.lstrip('/')).replace('//', '/')
+                            endpoint_info = f"{','.join(http_methods)} {full_mapping}"
+                            api_endpoints.append(endpoint_info)
+
+    return api_endpoints
+
+def extract_annotation_value(annotation):
+    """Extract the value from an annotation."""
+    values = []
+    if annotation.element:
+        if isinstance(annotation.element, javalang.tree.Literal):
+            values.append(annotation.element.value.strip('"\''))
+        elif isinstance(annotation.element, javalang.tree.ElementValuePair):
+            if isinstance(annotation.element.value, javalang.tree.Literal):
+                values.append(annotation.element.value.value.strip('"\''))
+        elif isinstance(annotation.element, javalang.tree.ElementArrayValue):
+            for element in annotation.element.values:
+                if isinstance(element, javalang.tree.Literal):
+                    values.append(element.value.strip('"\''))
+        elif isinstance(annotation.element, list):
+            for elem in annotation.element:
+                if isinstance(elem, javalang.tree.ElementValuePair):
+                    if isinstance(elem.value, javalang.tree.Literal):
+                        values.append(elem.value.value.strip('"\''))
+    return values
+
+def extract_domain_from_path(java_file_path: Path) -> str:
+    """Extract domain from the file path. This assumes domains are structured in directories."""
+    path_parts = str(java_file_path).split(os.sep)
+
+    if "booking" in path_parts:
+        return "Booking Domain"
+    elif "flight" in path_parts:
+        return "Flight Domain"
+    elif "passenger" in path_parts:
+        return "Passenger Domain"
+    else:
+        return "Unknown Domain"
+
+def generate_architecture_prompt(scan_summary_data: Dict[str, Any]) -> str:
+    """Generate a condensed prompt text from the scan summary of the Java project, respecting an 8000-token limit."""
+    prompt_lines = []
+    total_token_count = 0  # To track token usage
+
+    prompt_lines.append("### Enhanced Java Spring Boot Project Architecture Overview ###\n\n")
+    total_token_count += count_tokens(prompt_lines[-1])
+
+    for class_name, metadata in scan_summary_data.items():
+        # Add token checks to ensure we stay within limits
+        if total_token_count >= MAX_TOKENS:
+            prompt_lines.append("\n...Output truncated to stay within token limit...\n")
+            break
+
+        prompt_lines.append(f"Class: {class_name}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"File Path: {metadata['file_path']}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Component Type: {metadata['component_type']}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Layer: {metadata.get('layer', 'Unknown')}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Bounded Context: {metadata['bounded_context']}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Annotations
+        if metadata['annotations']:
+            annotations = ', '.join(metadata['annotations'][:3])
+            prompt_lines.append(f"Annotations: {annotations}\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+        else:
+            prompt_lines.append("Annotations: None\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Database Entities
+        if metadata.get('database_entities'):
+            prompt_lines.append("Database Entities:\n")
+            for entity in metadata['database_entities']:
+                prompt_lines.append(f"  - Table: {entity.get('table_name', 'Unknown')}\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+                for field in entity.get('fields', []):
+                    prompt_lines.append(f"    Field: {field['name']} ({field['type']})\n")
+                    total_token_count += count_tokens(prompt_lines[-1])
+                for rel in entity.get('relationships', []):
+                    prompt_lines.append(f"    Relationship: {rel['type']} with {rel['target_entity']}\n")
+                    total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Messaging Usage
+        if metadata.get('messaging_usage'):
+            prompt_lines.append("Messaging Usage:\n")
+            for usage in metadata['messaging_usage']:
+                prompt_lines.append(f"  - {usage['usage']} via {usage['type']} in method {usage.get('method', '')}\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write External API Calls
+        if metadata.get('external_api_calls'):
+            prompt_lines.append("External API Calls:\n")
+            for api_call in metadata['external_api_calls']:
+                prompt_lines.append(f"  - {api_call['usage']} to {api_call.get('target', 'Unknown')} in method {api_call.get('method', '')}\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Config Properties
+        if metadata.get('config_properties'):
+            prompt_lines.append("Configuration Properties:\n")
+            for prop in metadata['config_properties']:
+                prompt_lines.append(f"  - Field {prop['field']} uses property {prop['property']}\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Transactions
+        if metadata.get('transactions'):
+            prompt_lines.append("Transactional Methods:\n")
+            for txn in metadata['transactions']:
+                prompt_lines.append(f"  - Method: {txn['method']}\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Global State Usage
+        if metadata.get('global_state_usage'):
+            prompt_lines.append("Global State Usage:\n")
+            for state in metadata['global_state_usage']:
+                prompt_lines.append(f"  - Field: {state['field']} ({state['type']})\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Code Smells
+        if metadata.get('code_smells'):
+            code_smells = ', '.join(metadata['code_smells'])
+            prompt_lines.append(f"Code Smells: {code_smells}\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+        else:
+            prompt_lines.append("Code Smells: None\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Methods Complexity
+        prompt_lines.append("Methods Complexity:\n")
+        for method_name, complexity in metadata.get('methods_complexity', {}).items():
+            prompt_lines.append(f"  - {method_name}: Cyclomatic Complexity = {complexity}\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Relationships
+        if metadata.get('relationships'):
+            prompt_lines.append("Relationships:\n")
+            for rel in metadata['relationships']:
+                prompt_lines.append(f"  - {rel['type']} {rel['target']} ({rel['relationship_type']})\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append("\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+    prompt_text = ''.join(prompt_lines)
+    logger.info("Architecture prompt generated.")
+    return prompt_text
+
+def extract_database_entities(java_class):
+    """Extract database entity information and relationships."""
+    entities = []
+    class_annotations = extract_annotations(java_class)
+    if 'Entity' in class_annotations:
+        entity_info = {
+            'table_name': None,
+            'fields': [],
+            'relationships': []
+        }
+        # Extract table name
+        for annotation in java_class.annotations:
+            if get_annotation_name(annotation) == 'Table':
+                values = extract_annotation_value(annotation)
+                if values:
+                    entity_info['table_name'] = values[0]
+        # Extract fields and column mappings
+        if java_class.fields:
+            for field in java_class.fields:
+                field_annotations = [get_annotation_name(a) for a in field.annotations]
+                column_name = None
+                for annotation in field.annotations:
+                    if get_annotation_name(annotation) == 'Column':
+                        column_values = extract_annotation_value(annotation)
+                        if column_values:
+                            column_name = column_values[0]
+                field_info = {
+                    'name': field.declarators[0].name,
+                    'type': field.type.name if field.type else 'Unknown',
+                    'column_name': column_name,
+                    'annotations': field_annotations
+                }
+                entity_info['fields'].append(field_info)
+                # Detect relationships
+                relationship = detect_entity_relationships(field)
+                if relationship:
+                    entity_info['relationships'].append(relationship)
+        entities.append(entity_info)
+    return entities
+
+def detect_entity_relationships(field):
+    """Detect entity relationships like OneToMany, ManyToOne, etc."""
+    relationship_types = ['OneToMany', 'ManyToOne', 'ManyToMany', 'OneToOne']
+    for annotation in field.annotations:
+        annotation_name = get_annotation_name(annotation)
+        if annotation_name in relationship_types:
+            target_entity = None
+            mapped_by = None
+            # Extract target entity and mappedBy if available
+            if annotation.element:
+                if isinstance(annotation.element, javalang.tree.ElementValuePair):
+                    if annotation.element.name == 'mappedBy':
+                        mapped_by = annotation.element.value.value.strip('"\'')
+                elif isinstance(annotation.element, list):
+                    for elem in annotation.element:
+                        if elem.name == 'mappedBy':
+                            mapped_by = elem.value.value.strip('"\'')
+                        elif elem.name == 'targetEntity':
+                            target_entity = elem.value.value.strip('"\'')
+            return {
+                'type': annotation_name,
+                'field': field.declarators[0].name,
+                'target_entity': target_entity,
+                'mapped_by': mapped_by
+            }
+    return None
+
+def detect_messaging_usage(java_class):
+    """Detect usage of messaging systems like Kafka or RabbitMQ."""
+    messaging_usage = []
+    if java_class.fields:
+        for field in java_class.fields:
+            field_type = field.type.name if field.type else ''
+            if field_type in ['KafkaTemplate', 'AmqpTemplate']:
+                messaging_usage.append({
+                    'type': field_type,
+                    'usage': 'Producer'
+                })
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MethodInvocation):
+                        if node.member in ['send', 'convertAndSend']:
+                            messaging_usage.append({
+                                'method': method.name,
+                                'call': node.member,
+                                'usage': 'Messaging Send'
+                            })
+    return messaging_usage
+
+def detect_external_api_calls(java_class):
+    """Detect external API calls using RestTemplate, WebClient, FeignClient, etc."""
+    external_api_calls = []
+    if java_class.fields:
+        for field in java_class.fields:
+            field_type = field.type.name if field.type else ''
+            if 'FeignClient' in [get_annotation_name(a) for a in field.annotations]:
+                external_api_calls.append({
+                    'field': field.declarators[0].name,
+                    'type': field_type,
+                    'usage': 'Feign Client'
+                })
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MethodInvocation):
+                        if node.qualifier and node.qualifier in ['restTemplate', 'webClient']:
+                            external_api_calls.append({
+                                'method': method.name,
+                                'call': node.member,
+                                'usage': 'External API Call',
+                                'target': node.arguments[0].value if node.arguments else 'Unknown'
+                            })
+    return external_api_calls
+
+def extract_config_properties(java_class):
+    """Extract configuration properties used in the class."""
+    config_properties = []
+    if java_class.fields:
+        for field in java_class.fields:
+            if 'Value' in [get_annotation_name(a) for a in field.annotations]:
+                for annotation in field.annotations:
+                    if get_annotation_name(annotation) == 'Value':
+                        values = extract_annotation_value(annotation)
+                        if values:
+                            config_properties.append({
+                                'field': field.declarators[0].name,
+                                'property': values[0]
+                            })
+    return config_properties
+
+def detect_layer(java_file_path: Path) -> str:
+    """Detect the architectural layer of the class based on its file path."""
+    file_path_str = str(java_file_path).lower()
+    if '/controller/' in file_path_str or file_path_str.endswith('controller.java'):
+        return 'Controller Layer'
+    elif '/service/' in file_path_str or file_path_str.endswith('service.java'):
+        return 'Service Layer'
+    elif '/repository/' in file_path_str or file_path_str.endswith('repository.java'):
+        return 'Repository Layer'
+    elif '/entity/' in file_path_str or file_path_str.endswith('entity.java'):
+        return 'Entity Layer'
+    else:
+        return 'Unknown Layer'
+
+def detect_transactions(java_class):
+    """Detect usage of transactions in methods."""
+    transactions = []
+    if java_class.methods:
+        for method in java_class.methods:
+            if 'Transactional' in [get_annotation_name(a) for a in method.annotations]:
+                transactions.append({
+                    'method': method.name,
+                    'transactional': True
+                })
+    return transactions
+
+def detect_global_state(java_class):
+    """Detect usage of global state or static variables."""
+    global_state_usage = []
+    if java_class.fields:
+        for field in java_class.fields:
+            if 'static' in field.modifiers:
+                global_state_usage.append({
+                    'field': field.declarators[0].name,
+                    'type': field.type.name if field.type else 'Unknown'
+                })
+    return global_state_usage
+
+def analyze_module_coupling(java_class):
+    """Analyze coupling between different modules or packages."""
+    coupling = []
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MethodInvocation):
+                        if node.qualifier and '.' in node.qualifier:
+                            package_name = '.'.join(node.qualifier.split('.')[:-1])
+                            coupling.append({
+                                'method': method.name,
+                                'coupled_module': package_name
+                            })
+    return coupling
+
+def analyze_security(java_class):
+    """Analyze security configurations in the class."""
+    security_info = {
+        'secured_methods': [],
+        'roles': []
+    }
+    if java_class.methods:
+        for method in java_class.methods:
+            for annotation in method.annotations:
+                annotation_name = get_annotation_name(annotation)
+                if annotation_name in ["PreAuthorize", "PostAuthorize", "Secured", "RolesAllowed"]:
+                    security_info['secured_methods'].append({
+                        'method': method.name,
+                        'annotation': annotation_name,
+                        'value': extract_annotation_value(annotation)
+                    })
+    return security_info
+
+def extract_spring_beans(java_class):
+    """Extract beans defined in a @Configuration class."""
+    beans = []
+    if java_class.methods:
+        for method in java_class.methods:
+            for annotation in method.annotations:
+                annotation_name = get_annotation_name(annotation)
+                if annotation_name == "Bean":
+                    bean_info = {
+                        'name': method.name,
+                        'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'Unknown',
+                    }
+                    beans.append(bean_info)
+                    logger.debug("Bean found: %s", bean_info)
+    return beans
+
+def extract_profiles(java_class):
+    """Extract profiles and conditions under which beans are loaded."""
+    profiles = []
+    for annotation in java_class.annotations:
+        annotation_name = get_annotation_name(annotation)
+        if annotation_name in ["Profile", "ConditionalOnProperty", "Conditional"]:
+            values = extract_annotation_value(annotation)
+            profiles.extend(values)
+    return profiles
+
+def detect_aspects(java_class):
+    """Detect aspects, pointcuts, and advice in the code."""
+    aspects = []
+    class_annotations = extract_annotations(java_class)
+    if "Aspect" in class_annotations:
+        aspect_info = {
+            'name': java_class.name,
+            'advices': []
+        }
+        if java_class.methods:
+            for method in java_class.methods:
+                for annotation in method.annotations:
+                    annotation_name = get_annotation_name(annotation)
+                    if annotation_name in ["Before", "After", "Around", "AfterReturning", "AfterThrowing", "Pointcut"]:
+                        advice = {
+                            'type': annotation_name,
+                            'method': method.name,
+                            'pointcut': extract_annotation_value(annotation)
+                        }
+                        aspect_info['advices'].append(advice)
+            aspects.append(aspect_info)
+            logger.debug("Aspect found: %s", aspect_info)
+    return aspects
+
+def detect_inter_service_calls(java_class):
+    """Detect inter-service communication patterns."""
+    inter_service_calls = []
+    if java_class.fields:
+        for field in java_class.fields:
+            field_type = field.type.name if field.type and field.type.name else ''
+            if 'RestTemplate' in field_type or 'WebClient' in field_type:
+                inter_service_calls.append({
+                    'type': field_type,
+                    'usage': 'HTTP Client'
+                })
+    if java_class.methods:
+        for method in java_class.methods:
+            if method.body:
+                for path, node in method:
+                    if isinstance(node, javalang.tree.MethodInvocation):
+                        if node.member in ['getForObject', 'postForObject', 'exchange']:
+                            inter_service_calls.append({
+                                'method': method.name,
+                                'call': node.member,
+                                'target': node.arguments[0].value if node.arguments else 'Unknown',
+                                'usage': 'HTTP Call'
+                            })
+    return inter_service_calls
+
+def analyze_database_interactions(java_class):
+    """Analyze database interactions, especially in repository interfaces."""
+    db_interactions = []
+    extends_classes = [extend.name for extend in java_class.extends] if java_class.extends else []
+    implements_interfaces = [impl.name for impl in java_class.implements] if java_class.implements else []
+    if 'Repository' in extract_annotations(java_class) or 'JpaRepository' in implements_interfaces:
+        if java_class.methods:
+            for method in java_class.methods:
                 method_info = {
                     'name': method.name,
-                    'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'void',
-                    'parameters': [{'name': param.name,
-                                    'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'}
-                                   for param in method.parameters],
-                    'annotations': [get_annotation_name(annotation) for annotation in method.annotations],
-                    'modifiers': list(method.modifiers),
-                    'body_length': len(method.body) if method.body else 0
+                    'query': extract_query_from_method(method)
                 }
-                methods.append(method_info)
-            except Exception:
-                logger.exception("Error extracting method information.")
-    return methods
+                db_interactions.append(method_info)
+    return db_interactions
 
-# The rest of the code remains the same, including all the functions
-# such as detect_cyclic_dependencies, generate_report, detect_bounded_context,
-# extract_api_endpoints, extract_annotation_value, extract_domain_from_path,
-# generate_html_report, generate_architecture_prompt, extract_database_entities,
-# detect_entity_relationships, detect_messaging_usage, detect_external_api_calls,
-# extract_config_properties, detect_layer, detect_transactions, detect_global_state,
-# analyze_module_coupling, apply_annotation_filters, detect_relationships,
-# detect_method_calls, detect_data_flow, calculate_methods_complexity,
-# calculate_cyclomatic_complexity, detect_code_smells, analyze_documentation,
-# check_dependency_versions.
+def extract_query_from_method(method):
+    """Extract query from method annotations or derive from method name."""
+    for annotation in method.annotations:
+        annotation_name = get_annotation_name(annotation)
+        if annotation_name == 'Query':
+            return extract_annotation_value(annotation)
+    # Derive query from method name
+    return f"Derived query based on method name: {method.name}"
 
-# For brevity, these functions are not repeated here, but ensure that in your code,
-# you include all of them with the same exception handling pattern, using logger.exception()
-# where appropriate.
+def analyze_documentation(java_class):
+    """Check for the presence of JavaDoc comments."""
+    documented_methods = 0
+    total_methods = 0
+    if java_class.methods:
+        for method in java_class.methods:
+            total_methods += 1
+            if method.documentation:
+                documented_methods += 1
+    coverage = (documented_methods / total_methods) * 100 if total_methods > 0 else 0
+    return {
+        'documented_methods': documented_methods,
+        'total_methods': total_methods,
+        'coverage': coverage
+    }
 
-# Finally, the FastAPI endpoint remains the same, with exception handling added.
+def check_dependency_versions(dependencies):
+    """Check for outdated dependencies."""
+    outdated_dependencies = []
+    # Placeholder for actual version checking logic
+    for dep, version in dependencies.items():
+        # Simulate outdated dependency detection
+        if 'SNAPSHOT' in version:
+            outdated_dependencies.append({
+                'dependency': dep,
+                'version': version,
+                'issue': 'Snapshot version used'
+            })
+    return outdated_dependencies
 
 @app.post("/scan_project")
 async def scan_project_endpoint(
