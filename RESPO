@@ -1,4 +1,32 @@
-import subprocess
+# Configuration for scanning Java project
 
-uvicorn_path = r"C:\Users\abhijat.mishra\AppData\Roaming\Python\Python313\Scripts\uvicorn.exe"  # Adjust as needed
-subprocess.run([uvicorn_path, "app:app", "--host", "0.0.0.0", "--port", "8000"])
+# Filters to include/exclude files based on file path patterns
+# No exclude filters, include everything by default
+file_path_filters:
+  include: []
+  exclude: []
+
+# Filters to include/exclude classes based on annotations
+# Include everything by default (empty list means no filtering)
+annotation_filters: []
+
+# Filters to include/exclude dependencies (imports) based on their paths
+# Include all dependencies by default
+dependency_filters:
+  include: []
+  exclude: []
+
+# Batch size for scanning files
+batch_size: 50
+
+# Output file for scan summary
+output_file: "scan_summary.json"
+
+# Additional component detection options for Spring components
+# Include all Spring components
+spring_components:
+  - "RestController"
+  - "Service"
+  - "Repository"
+  - "Component"
+  - "Controller"
