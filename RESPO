@@ -42,7 +42,7 @@ ALLOWED_FILE_TYPES = ['zip']
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "your_groq_api_key_here"
 if not GROQ_API_KEY:
     logger.error("Groq API key not found. Please set the GROQ_API_KEY environment variable.")
 
@@ -142,19 +142,25 @@ def parse_configuration_files(project_dir: str) -> Dict[str, Any]:
     # Parse application.properties files
     properties_files = list(Path(project_dir).rglob("application*.properties"))
     for prop_file in properties_files:
-        config_parser = ConfigParser()
+        config_parser = ConfigParser(interpolation=None)
         with open(prop_file, 'r') as f:
             # Read the properties file as a .ini file after adding a section header
             content = '[DEFAULT]\n' + f.read()
-            config_parser.read_string(content)
-            configurations.update(dict(config_parser['DEFAULT']))
+            try:
+                config_parser.read_string(content)
+                configurations.update(dict(config_parser['DEFAULT']))
+            except Exception as e:
+                logger.error("Error parsing properties file %s: %s", prop_file, e)
 
     # Parse application.yml files
     yml_files = list(Path(project_dir).rglob("application*.yml")) + list(Path(project_dir).rglob("application*.yaml"))
     for yml_file in yml_files:
-        with open(yml_file, 'r') as f:
-            yml_content = yaml.safe_load(f)
-            configurations.update(yml_content)
+        try:
+            with open(yml_file, 'r') as f:
+                yml_content = yaml.safe_load(f)
+                configurations.update(yml_content)
+        except Exception as e:
+            logger.error("Error parsing YAML file %s: %s", yml_file, e)
 
     logger.info("Configuration files parsed.")
     return configurations
@@ -681,7 +687,7 @@ def detect_data_flow(java_class):
 
 def calculate_methods_complexity(java_class):
     """Calculate cyclomatic complexity of each method in the class."""
-        methods_complexity = {}
+    methods_complexity = {}
     if java_class.methods:
         for method in java_class.methods:
             complexity = calculate_cyclomatic_complexity(method)
