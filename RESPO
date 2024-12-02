@@ -1,83 +1,62 @@
-def get_annotation_name(annotation):
-    """Get the name of an annotation."""
-    if isinstance(annotation.name, str):
-        return annotation.name
-    elif hasattr(annotation.name, 'qualifier') and annotation.name.qualifier:
-        return f"{annotation.name.qualifier}.{annotation.name.member}"
-    elif hasattr(annotation.name, 'member'):
-        return annotation.name.member
-    elif isinstance(annotation.name, (tuple, list)):
-        # Handle cases where annotation.name is a tuple or list
-        names = []
-        for name_part in annotation.name:
-            if isinstance(name_part, str):
-                names.append(name_part)
-            elif hasattr(name_part, 'member'):
-                names.append(name_part.member)
-            elif hasattr(name_part, 'name'):
-                names.append(name_part.name)
-        return '.'.join(names)
-    else:
-        return str(annotation.name)
+import lombok.Data;
+
+@Data
+public class EntityRecordDTO {
+    private String numEntity;   // NUM-ENTITY
+    private String alphaEntity; // ALPHA-ENTITY
+}
 
 
-def extract_fields(java_class):
-    """Extract fields and their metadata from a Java class."""
-    fields = []
-    if java_class.fields:
-        for field in java_class.fields:
-            try:
-                field_type_name = ''
-                if field.type:
-                    if isinstance(field.type.name, str):
-                        field_type_name = field.type.name
-                    elif isinstance(field.type.name, (tuple, list)):
-                        field_type_name = '.'.join(field.type.name)
-                    else:
-                        field_type_name = str(field.type.name)
-                else:
-                    field_type_name = 'Unknown'
+import org.springframework.batch.item.ItemReader;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
 
-                field_info = {
-                    'names': [declarator.name for declarator in field.declarators],
-                    'type': field_type_name,
-                    'annotations': [get_annotation_name(annotation) for annotation in field.annotations],
-                    'modifiers': list(field.modifiers)
-                }
-                fields.append(field_info)
-            except Exception:
-                logger.exception("Error extracting field information.")
-    return fields
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
 
-def extract_methods(java_class):
-    """Extract methods from a Java class."""
-    methods = []
-    if java_class.methods:
-        for method in java_class.methods:
-            try:
-                return_type_name = ''
-                if method.return_type:
-                    if isinstance(method.return_type.name, str):
-                        return_type_name = method.return_type.name
-                    elif isinstance(method.return_type.name, (tuple, list)):
-                        return_type_name = '.'.join(method.return_type.name)
-                    else:
-                        return_type_name = str(method.return_type.name)
-                else:
-                    return_type_name = 'void'
+@Component
+@Slf4j
+public class EntityFileReader implements ItemReader<List<EntityRecordDTO>> {
 
-                method_info = {
-                    'name': method.name,
-                    'return_type': return_type_name,
-                    'parameters': [{
-                        'name': param.name,
-                        'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'
-                    } for param in method.parameters],
-                    'annotations': [get_annotation_name(annotation) for annotation in method.annotations],
-                    'modifiers': list(method.modifiers),
-                    'body_length': len(method.body) if method.body else 0
-                }
-                methods.append(method_info)
-            except Exception:
-                logger.exception("Error extracting method information.")
-    return methods
+    @Value("${custag.input.file.path}") // File path injected from application.properties
+    private String filePath;
+
+    private boolean isRead = false;
+
+    @Override
+    public List<EntityRecordDTO> read() throws Exception {
+        if (isRead) {
+            log.info("File already read, returning null.");
+            return null; // End of file
+        }
+
+        List<EntityRecordDTO> entityRecords = new ArrayList<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String alphaEntity = line.substring(0, 4).trim(); // First 4 characters
+                String numEntity = line.substring(4, 8).trim();  // Next 4 characters
+
+                // Create DTO and populate fields
+                EntityRecordDTO record = new EntityRecordDTO();
+                record.setAlphaEntity(alphaEntity);
+                record.setNumEntity(numEntity);
+
+                // Add DTO to the list
+                entityRecords.add(record);
+
+                log.debug("Processed line - {}", record);
+            }
+        } catch (IOException e) {
+            log.error("Error reading file at path: {}", filePath, e);
+            throw new Exception("Error reading file", e);
+        }
+
+        isRead = true; // Mark file as read
+        log.info("Successfully read and processed the file: {}", filePath);
+        return entityRecords;
+    }
+}
