@@ -7,17 +7,17 @@ import logging
 import json
 import networkx as nx
 from pathlib import Path
-from collections import defaultdict
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 import io
 
 # New imports for parsing properties and YAML files
 from configparser import ConfigParser
 import re
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -41,11 +41,11 @@ if not logger.handlers:
 ALLOWED_FILE_TYPES = ['zip']
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
-
+# Use environment variable for API key
 GROQ_API_KEY = "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"
 if not GROQ_API_KEY:
     logger.error("Groq API key not found. Please set the GROQ_API_KEY environment variable.")
-
+    raise ValueError("GROQ_API_KEY is not set.")
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -82,7 +82,7 @@ def load_configuration(config_content):
         logger.error(f"Error loading configuration: {e}")
         config = DEFAULT_CONFIG.copy()
 
-def scan_project_async(project_dir: str, output_format: str = 'json') -> Dict[str, Any]:
+def scan_project_async(project_dir: str, output_format: str = 'json', output_directory: str = None) -> Dict[str, Any]:
     """Scan the Java project asynchronously with filtering options."""
     scan_summary = {}
     metadata_cache = {}
@@ -128,7 +128,7 @@ def scan_project_async(project_dir: str, output_format: str = 'json') -> Dict[st
 
         # Detect cyclic dependencies after scanning all files
         detect_cyclic_dependencies(scan_summary)
-        generate_report(output_format, project_dir, scan_summary)
+        generate_report(output_format, project_dir, scan_summary, output_directory)
     except Exception as e:
         logger.error(f"Error during project scan: {e}")
         return {"error": f"Error during project scan: {e}"}
@@ -250,41 +250,41 @@ def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, c
         # Collect metadata for the class
         metadata = {
             'annotations': class_annotations,
-            'dependencies': [],
-            'inter_service_calls': [],
-            'fields': extract_fields(java_class),
-            'methods': extract_methods(java_class),
-            'relationships': [],
-            'file_path': str(java_file_path),
-            'last_modified': last_modified,
             'component_type': detect_spring_component_type(java_class),
             'bounded_context': bounded_context,
             'api_endpoints': api_endpoints,
             'domain': domain,
             'methods_complexity': methods_complexity,
             'code_smells': code_smells,
-            'is_test_class': is_test_class,
-            'database_entities': [],  # New field for entities
-            'messaging_usage': [],    # New field for messaging
-            'external_api_calls': [], # New field for external API calls
-            'config_properties': [],  # New field for config properties
-            'layer': detect_layer(java_file_path),  # New field for layer identification
-            'transactions': detect_transactions(java_class),  # New field for transactions
-            'global_state_usage': detect_global_state(java_class),  # New field for global state
+            'layer': detect_layer(java_file_path),
+            'file_path': str(java_file_path)
         }
+
+        # Extract methods and fields
+        methods = extract_methods(java_class)
+        if methods:
+            metadata['methods'] = methods
+
+        fields = extract_fields(java_class)
+        if fields:
+            metadata['fields'] = fields
 
         # Detect service injections and relationships
         detect_service_injections(java_class, metadata)
-        metadata['relationships'] = detect_relationships(java_class, metadata)
+        relationships = detect_relationships(java_class, metadata)
+        if relationships:
+            metadata['relationships'] = relationships
 
         # Extract Spring Beans
         if metadata['component_type'] in ["Configuration", "Component"]:
             beans = extract_spring_beans(java_class)
-            metadata['spring_beans'] = beans
+            if beans:
+                metadata['spring_beans'] = beans
 
         # Security Analysis
         security_info = analyze_security(java_class)
-        metadata['security'] = security_info
+        if security_info:
+            metadata['security'] = security_info
 
         # AOP Analysis
         aspects = detect_aspects(java_class)
@@ -306,38 +306,40 @@ def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, c
         if db_interactions:
             metadata['database_interactions'] = db_interactions
 
-        # Database Entity Extraction (New)
+        # Database Entity Extraction
         database_entities = extract_database_entities(java_class)
         if database_entities:
             metadata['database_entities'] = database_entities
 
-        # Messaging Patterns Detection (New)
+        # Messaging Patterns Detection
         messaging_usage = detect_messaging_usage(java_class)
         if messaging_usage:
             metadata['messaging_usage'] = messaging_usage
 
-        # External API Calls Detection (New)
+        # External API Calls Detection
         external_api_calls = detect_external_api_calls(java_class)
         if external_api_calls:
             metadata['external_api_calls'] = external_api_calls
 
-        # Configuration Properties Extraction (New)
+        # Configuration Properties Extraction
         config_properties = extract_config_properties(java_class)
         if config_properties:
             metadata['config_properties'] = config_properties
 
-        # Module Coupling Analysis (New)
+        # Module Coupling Analysis
         module_coupling = analyze_module_coupling(java_class)
         if module_coupling:
             metadata['module_coupling'] = module_coupling
 
         # Documentation Analysis
         documentation_coverage = analyze_documentation(java_class)
-        metadata['documentation_coverage'] = documentation_coverage
+        if documentation_coverage:
+            metadata['documentation_coverage'] = documentation_coverage
 
         # Dependency Version Checks
         outdated_dependencies = check_dependency_versions(dependencies)
-        metadata['outdated_dependencies'] = outdated_dependencies
+        if outdated_dependencies:
+            metadata['outdated_dependencies'] = outdated_dependencies
 
         # Cache and summarize the metadata
         metadata_cache[class_name] = metadata
@@ -371,6 +373,8 @@ def detect_spring_component_type(java_class):
 
 def detect_service_injections(java_class, metadata):
     """Detect field-level, constructor-based, and method-based service injections."""
+    inter_service_calls = []
+
     # Field injection
     if java_class.fields:
         for field in java_class.fields:
@@ -379,7 +383,7 @@ def detect_service_injections(java_class, metadata):
                     annotation_name = get_annotation_name(annotation)
                     if annotation_name in ["Autowired", "Inject", "Resource"]:
                         injected_service = field.type.name if field.type and field.type.name else 'Unknown'
-                        metadata['inter_service_calls'].append(injected_service)
+                        inter_service_calls.append(injected_service)
                         logger.debug(f"Injected service found in {java_class.name}: {injected_service}")
 
     # Constructor injection
@@ -391,7 +395,7 @@ def detect_service_injections(java_class, metadata):
                     if annotation_name in ["Autowired", "Inject"]:
                         for param in constructor.parameters:
                             injected_service = param.type.name if param.type and param.type.name else 'Unknown'
-                            metadata['inter_service_calls'].append(injected_service)
+                            inter_service_calls.append(injected_service)
                             logger.debug(f"Injected service found in constructor of {java_class.name}: {injected_service}")
 
     # Method injection
@@ -403,8 +407,11 @@ def detect_service_injections(java_class, metadata):
                     if annotation_name in ["Autowired", "Inject"]:
                         for param in method.parameters:
                             injected_service = param.type.name if param.type and param.type.name else 'Unknown'
-                            metadata['inter_service_calls'].append(injected_service)
+                            inter_service_calls.append(injected_service)
                             logger.debug(f"Injected service found in method {method.name} of {java_class.name}: {injected_service}")
+
+    if inter_service_calls:
+        metadata['inter_service_calls'] = inter_service_calls
 
 def extract_annotations(java_class):
     """Extract annotations from a Java class."""
@@ -443,7 +450,7 @@ def extract_methods(java_class):
                     'name': method.name,
                     'return_type': method.return_type.name if method.return_type and isinstance(method.return_type.name, str) else 'void',
                     'parameters': [{'name': param.name,
-                                    'type': param.type.name if param.type and isinstance(param.type.name, str) else 'Unknown'}
+                                    'type': param.type.name if param.type and param.type.name else 'Unknown'}
                                    for param in method.parameters],
                     'annotations': [get_annotation_name(annotation) for annotation in method.annotations],
                     'modifiers': list(method.modifiers),
@@ -482,21 +489,21 @@ def extract_profiles(java_class):
 
 def analyze_security(java_class):
     """Analyze security configurations in the class."""
-    security_info = {
-        'secured_methods': [],
-        'roles': []
-    }
+    secured_methods = []
     if java_class.methods:
         for method in java_class.methods:
             for annotation in method.annotations:
                 annotation_name = get_annotation_name(annotation)
                 if annotation_name in ["PreAuthorize", "PostAuthorize", "Secured", "RolesAllowed"]:
-                    security_info['secured_methods'].append({
+                    secured_methods.append({
                         'method': method.name,
                         'annotation': annotation_name,
                         'value': extract_annotation_value(annotation)
                     })
-    return security_info
+    if secured_methods:
+        return {'secured_methods': secured_methods}
+    else:
+        return None
 
 def detect_aspects(java_class):
     """Detect aspects, pointcuts, and advice in the code."""
@@ -550,7 +557,6 @@ def detect_inter_service_calls(java_class):
 def analyze_database_interactions(java_class):
     """Analyze database interactions, especially in repository interfaces."""
     db_interactions = []
-    extends_classes = [extend.name for extend in java_class.extends] if java_class.extends else []
     implements_interfaces = [impl.name for impl in java_class.implements] if java_class.implements else []
     if 'Repository' in extract_annotations(java_class) or 'JpaRepository' in implements_interfaces:
         if java_class.methods:
@@ -609,7 +615,7 @@ def apply_annotation_filters(annotations: List[str]) -> bool:
     return any(annotation in filters for annotation in annotations)
 
 def detect_relationships(java_class, metadata):
-    """Detect advanced relationships: inheritance, interfaces, method calls, cyclic dependencies, data flow, entity relationships."""
+    """Detect relationships and filter out non-meaningful ones."""
     relationships = []
 
     # Inheritance relationships
@@ -635,7 +641,7 @@ def detect_relationships(java_class, metadata):
     relationships.extend(detect_method_calls(java_class))
     relationships.extend(detect_data_flow(java_class))
 
-    # Entity relationships (New)
+    # Entity relationships
     if metadata.get('database_entities'):
         for entity in metadata['database_entities']:
             for rel in entity.get('relationships', []):
@@ -645,7 +651,17 @@ def detect_relationships(java_class, metadata):
                     'relationship_type': rel['type']
                 })
 
-    return relationships
+    # Filter out generic relationships
+    meaningful_relationships = []
+    for rel in relationships:
+        target = rel.get('target', '')
+        if target in ['this', 'super', java_class.name]:
+            continue  # Skip non-meaningful targets
+        if len(target) <= 3:
+            continue  # Skip generic or too short targets
+        meaningful_relationships.append(rel)
+
+    return meaningful_relationships
 
 def detect_method_calls(java_class):
     """Detect method call relationships within and across services."""
@@ -743,7 +759,6 @@ def detect_code_smells(java_class, methods_complexity, is_test_class=False):
     if java_class.methods and static_methods > methods_count / 2:
         code_smells.append('Excessive Static Methods')
 
-
     if is_test_class:
         code_smells = [smell for smell in code_smells if smell not in ['Large Class', 'God Class']]
 
@@ -769,22 +784,94 @@ def detect_cyclic_dependencies(scan_summary):
         for class_in_cycle in cycle:
             scan_summary[class_in_cycle].setdefault('code_smells', []).append('Cyclic Dependency')
 
-def generate_report(output_format='json', project_path=None, scan_summary=None):
-    """Generate a report of the scan in the desired format (JSON, HTML)."""
-    logger.info("Generating scan report.")
+def generate_report(output_format='json', project_path=None, scan_summary=None, output_directory=None):
+    """Generate separate reports for code analysis and data analysis."""
+    logger.info("Generating scan reports.")
 
-    if output_format == 'json' and project_path:
-        summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.json'))
+    if output_format == 'json':
+        # Use provided output directory or default to project_path
+        if output_directory is None:
+            output_directory = project_path
+
+        # Ensure the output directory is an absolute path
+        output_directory = os.path.abspath(output_directory)
+
+        # Log the output directory
+        logger.info(f"Output directory is set to: {output_directory}")
+
+        # Test if we can write to the output directory
+        test_file_path = os.path.join(output_directory, 'test_write.txt')
         try:
-            with open(summary_file, 'w') as f:
-                json.dump(scan_summary, f, indent=4)
-            logger.info(f"JSON scan summary written to {summary_file}")
+            with open(test_file_path, 'w') as f:
+                f.write('Test write to verify permissions.')
+            os.remove(test_file_path)  # Clean up after test
+            logger.info("Write test successful.")
         except Exception as e:
-            logger.error(f"Error writing JSON report: {e}")
-    elif output_format == 'html' and project_path:
-        generate_html_report(project_path, scan_summary)
+            logger.error(f"Cannot write to the specified output directory: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return  # Exit the function if writing is not possible
+
+        code_analysis_file = os.path.join(output_directory, 'code_analysis.json')
+        data_analysis_file = os.path.join(output_directory, 'data_analysis.json')
+
+        try:
+            # Prepare data for code analysis JSON
+            code_analysis_data = {}
+            data_analysis_data = {}
+            for class_name, metadata in scan_summary.items():
+                # Split the metadata into code and data analysis
+                code_analysis_metadata = {k: v for k, v in metadata.items() if k in [
+                    'annotations', 'methods', 'fields', 'component_type', 'layer',
+                    'methods_complexity', 'code_smells', 'relationships'
+                ]}
+
+                data_analysis_metadata = {k: v for k, v in metadata.items() if k in [
+                    'database_entities', 'config_properties', 'external_api_calls',
+                    'messaging_usage', 'api_endpoints', 'bounded_context', 'domain'
+                ]}
+
+                # Remove unnecessary fields and fields with empty values
+                code_analysis_metadata = clean_metadata(code_analysis_metadata)
+                data_analysis_metadata = clean_metadata(data_analysis_metadata)
+
+                # Replace absolute paths with relative paths
+                if 'file_path' in code_analysis_metadata:
+                    rel_path = os.path.relpath(code_analysis_metadata['file_path'], project_path)
+                    code_analysis_metadata['file_path'] = rel_path
+
+                code_analysis_data[class_name] = code_analysis_metadata
+                if data_analysis_metadata:
+                    data_analysis_data[class_name] = data_analysis_metadata
+
+            # Write code analysis JSON
+            with open(code_analysis_file, 'w') as f:
+                json.dump(code_analysis_data, f, indent=4)
+            logger.info(f"Code analysis JSON written to {code_analysis_file}")
+
+            # Write data analysis JSON
+            with open(data_analysis_file, 'w') as f:
+                json.dump(data_analysis_data, f, indent=4)
+            logger.info(f"Data analysis JSON written to {data_analysis_file}")
+
+        except Exception as e:
+            logger.error(f"Error writing JSON reports: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
     else:
         logger.error(f"Unsupported output format or missing project path: {output_format}")
+
+def clean_metadata(metadata):
+    """Remove unnecessary fields and fields with empty values."""
+    fields_to_remove = ['last_modified', 'is_test_class', 'file_path']
+    cleaned_metadata = {}
+
+    for key, value in metadata.items():
+        if key in fields_to_remove:
+            continue
+        if value is None or value == '' or (isinstance(value, list) and not value) or (isinstance(value, dict) and not value):
+            continue
+        cleaned_metadata[key] = value
+
+    return cleaned_metadata
 
 def detect_bounded_context(java_file_path: Path) -> str:
     """Detect bounded context based on the file path or class annotations."""
@@ -824,12 +911,12 @@ def extract_api_endpoints(java_class) -> List[str]:
                     else:
                         method_mappings.append('/')
                     http_methods.append(annotation_name.replace('Mapping', '').upper() if 'Mapping' in annotation_name else annotation_name.upper())
-                    # Combine class-level and method-level mappings
-                    for class_mapping in class_mappings or ['/']:
-                        for method_mapping in method_mappings or ['/']:
-                            full_mapping = (class_mapping.rstrip('/') + '/' + method_mapping.lstrip('/')).replace('//', '/')
-                            endpoint_info = f"{','.join(http_methods)} {full_mapping}"
-                            api_endpoints.append(endpoint_info)
+            # Combine class-level and method-level mappings
+            for class_mapping in class_mappings or ['/']:
+                for method_mapping in method_mappings or ['/']:
+                    full_mapping = (class_mapping.rstrip('/') + '/' + method_mapping.lstrip('/')).replace('//', '/')
+                    endpoint_info = f"{','.join(http_methods)} {full_mapping}"
+                    api_endpoints.append(endpoint_info)
 
     return api_endpoints
 
@@ -865,228 +952,6 @@ def extract_domain_from_path(java_file_path: Path) -> str:
         return "Passenger Domain"
     else:
         return "Unknown Domain"
-
-def generate_html_report(project_path=None, scan_summary=None):
-    """Generate an HTML report from the scan summary."""
-    summary_file = os.path.join(project_path, config.get('output_file', 'scan_summary.html'))
-    try:
-        with open(summary_file, 'w') as f:
-            f.write("<html><head><title>Scan Report</title></head><body>")
-            f.write("<h1>Scan Report</h1>")
-            for class_name, data in scan_summary.items():
-                f.write(f"<h2>{class_name}</h2>")
-                f.write(f"<p>File: {data['file_path']}</p>")
-                f.write(f"<p>Component Type: {data['component_type']}</p>")
-                f.write(f"<p>Layer: {data.get('layer', 'Unknown')}</p>")
-                f.write(f"<p>Bounded Context: {data['bounded_context']}</p>")
-                f.write("<h3>Annotations</h3><ul>")
-                for annotation in data['annotations']:
-                    f.write(f"<li>{annotation}</li>")
-                f.write("</ul>")
-                f.write("<h3>Code Smells</h3><ul>")
-                for smell in data.get('code_smells', []):
-                    f.write(f"<li>{smell}</li>")
-                f.write("</ul>")
-                f.write("<h3>Methods Complexity</h3><ul>")
-                for method_name, complexity in data.get('methods_complexity', {}).items():
-                    f.write(f"<li>{method_name}: Cyclomatic Complexity = {complexity}</li>")
-                f.write("</ul>")
-                f.write("<h3>Inter-Service Calls</h3><ul>")
-                for service in data.get('inter_service_calls', []):
-                    f.write(f"<li>{service}</li>")
-                f.write("</ul>")
-                f.write("<h3>Relationships</h3><ul>")
-                for rel in data['relationships']:
-                    f.write(f"<li>{rel['type']} -> {rel['target']} ({rel['relationship_type']})</li>")
-                f.write("</ul>")
-                # Additional sections for new features
-                if data.get('database_entities'):
-                    f.write("<h3>Database Entities</h3><ul>")
-                    for entity in data['database_entities']:
-                        f.write(f"<li>Table: {entity.get('table_name', 'Unknown')}</li>")
-                        f.write("<ul>")
-                        for field in entity.get('fields', []):
-                            f.write(f"<li>Field: {field['name']} ({field['type']})</li>")
-                        f.write("</ul>")
-                    f.write("</ul>")
-                if data.get('messaging_usage'):
-                    f.write("<h3>Messaging Usage</h3><ul>")
-                    for usage in data['messaging_usage']:
-                        f.write(f"<li>{usage['usage']} via {usage['type']} in method {usage.get('method', '')}</li>")
-                    f.write("</ul>")
-                if data.get('external_api_calls'):
-                    f.write("<h3>External API Calls</h3><ul>")
-                    for api_call in data['external_api_calls']:
-                        f.write(f"<li>{api_call['usage']} to {api_call.get('target', 'Unknown')} in method {api_call.get('method', '')}</li>")
-                    f.write("</ul>")
-                if data.get('config_properties'):
-                    f.write("<h3>Configuration Properties</h3><ul>")
-                    for prop in data['config_properties']:
-                        f.write(f"<li>Field {prop['field']} uses property {prop['property']}</li>")
-                    f.write("</ul>")
-                if 'spring_beans' in data:
-                    f.write("<h3>Spring Beans</h3><ul>")
-                    for bean in data['spring_beans']:
-                        f.write(f"<li>{bean['name']} ({bean['return_type']})</li>")
-                    f.write("</ul>")
-                if 'api_endpoints' in data:
-                    f.write("<h3>API Endpoints</h3><ul>")
-                    for endpoint in data['api_endpoints']:
-                        f.write(f"<li>{endpoint}</li>")
-                    f.write("</ul>")
-                if 'security' in data and data['security']['secured_methods']:
-                    f.write("<h3>Security</h3><ul>")
-                    for sec in data['security']['secured_methods']:
-                        f.write(f"<li>{sec['method']} - {sec['annotation']}: {sec['value']}</li>")
-                    f.write("</ul>")
-                if 'aspects' in data:
-                    f.write("<h3>Aspects</h3><ul>")
-                    for aspect in data['aspects']:
-                        for advice in aspect['advices']:
-                            f.write(f"<li>{advice['type']} {advice['method']}: {advice['pointcut']}</li>")
-                    f.write("</ul>")
-                if 'profiles' in data:
-                    f.write("<h3>Profiles/Conditions</h3><ul>")
-                    for profile in data['profiles']:
-                        f.write(f"<li>{profile}</li>")
-                    f.write("</ul>")
-                if 'database_interactions' in data:
-                    f.write("<h3>Database Interactions</h3><ul>")
-                    for db in data['database_interactions']:
-                        f.write(f"<li>{db['name']}: {db['query']}</li>")
-                    f.write("</ul>")
-                if 'microservice_calls' in data:
-                    f.write("<h3>Microservice Calls</h3><ul>")
-                    for call in data['microservice_calls']:
-                        f.write(f"<li>{call}</li>")
-                    f.write("</ul>")
-                if 'documentation_coverage' in data:
-                    f.write("<h3>Documentation Coverage</h3>")
-                    f.write(f"<p>Methods Documented: {data['documentation_coverage']['documented_methods']} / {data['documentation_coverage']['total_methods']} ({data['documentation_coverage']['coverage']}%)</p>")
-                if 'outdated_dependencies' in data:
-                    f.write("<h3>Outdated Dependencies</h3><ul>")
-                    for dep in data['outdated_dependencies']:
-                        f.write(f"<li>{dep['dependency']} - {dep['version']}: {dep['issue']}</li>")
-                    f.write("</ul>")
-            f.write("</body></html>")
-        logger.info(f"HTML scan summary written to {summary_file}")
-    except Exception as e:
-        logger.error(f"Error writing HTML report: {e}")
-
-def generate_architecture_prompt(scan_summary_data: Dict[str, Any]) -> str:
-    """Generate a condensed prompt text from the scan summary of the Java project, respecting an 8000-token limit."""
-    prompt_lines = []
-    total_token_count = 0  # To track token usage
-
-    prompt_lines.append("### Enhanced Java Spring Boot Project Architecture Overview ###\n\n")
-    total_token_count += count_tokens(prompt_lines[-1])
-
-    for class_name, metadata in scan_summary_data.items():
-        # Add token checks to ensure we stay within limits
-        if total_token_count >= MAX_TOKENS:
-            prompt_lines.append("\n...Output truncated to stay within token limit...\n")
-            break
-
-        prompt_lines.append(f"Class: {class_name}\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-        prompt_lines.append(f"File Path: {metadata['file_path']}\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-        prompt_lines.append(f"Component Type: {metadata['component_type']}\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-        prompt_lines.append(f"Layer: {metadata.get('layer', 'Unknown')}\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-        prompt_lines.append(f"Bounded Context: {metadata['bounded_context']}\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Annotations
-        if metadata['annotations']:
-            annotations = ', '.join(metadata['annotations'][:3])
-            prompt_lines.append(f"Annotations: {annotations}\n")
-            total_token_count += count_tokens(prompt_lines[-1])
-        else:
-            prompt_lines.append("Annotations: None\n")
-            total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Database Entities
-        if metadata.get('database_entities'):
-            prompt_lines.append("Database Entities:\n")
-            for entity in metadata['database_entities']:
-                prompt_lines.append(f"  - Table: {entity.get('table_name', 'Unknown')}\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-                for field in entity.get('fields', []):
-                    prompt_lines.append(f"    Field: {field['name']} ({field['type']})\n")
-                    total_token_count += count_tokens(prompt_lines[-1])
-                for rel in entity.get('relationships', []):
-                    prompt_lines.append(f"    Relationship: {rel['type']} with {rel['target_entity']}\n")
-                    total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Messaging Usage
-        if metadata.get('messaging_usage'):
-            prompt_lines.append("Messaging Usage:\n")
-            for usage in metadata['messaging_usage']:
-                prompt_lines.append(f"  - {usage['usage']} via {usage['type']} in method {usage.get('method', '')}\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write External API Calls
-        if metadata.get('external_api_calls'):
-            prompt_lines.append("External API Calls:\n")
-            for api_call in metadata['external_api_calls']:
-                prompt_lines.append(f"  - {api_call['usage']} to {api_call.get('target', 'Unknown')} in method {api_call.get('method', '')}\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Config Properties
-        if metadata.get('config_properties'):
-            prompt_lines.append("Configuration Properties:\n")
-            for prop in metadata['config_properties']:
-                prompt_lines.append(f"  - Field {prop['field']} uses property {prop['property']}\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Transactions
-        if metadata.get('transactions'):
-            prompt_lines.append("Transactional Methods:\n")
-            for txn in metadata['transactions']:
-                prompt_lines.append(f"  - Method: {txn['method']}\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Global State Usage
-        if metadata.get('global_state_usage'):
-            prompt_lines.append("Global State Usage:\n")
-            for state in metadata['global_state_usage']:
-                prompt_lines.append(f"  - Field: {state['field']} ({state['type']})\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Code Smells
-        if metadata.get('code_smells'):
-            code_smells = ', '.join(metadata['code_smells'])
-            prompt_lines.append(f"Code Smells: {code_smells}\n")
-            total_token_count += count_tokens(prompt_lines[-1])
-        else:
-            prompt_lines.append("Code Smells: None\n")
-            total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Methods Complexity
-        prompt_lines.append("Methods Complexity:\n")
-        for method_name, complexity in metadata.get('methods_complexity', {}).items():
-            prompt_lines.append(f"  - {method_name}: Cyclomatic Complexity = {complexity}\n")
-            total_token_count += count_tokens(prompt_lines[-1])
-
-        # Write Relationships
-        if metadata.get('relationships'):
-            prompt_lines.append("Relationships:\n")
-            for rel in metadata['relationships']:
-                prompt_lines.append(f"  - {rel['type']} {rel['target']} ({rel['relationship_type']})\n")
-                total_token_count += count_tokens(prompt_lines[-1])
-
-        prompt_lines.append("\n")
-        total_token_count += count_tokens(prompt_lines[-1])
-
-    prompt_text = ''.join(prompt_lines)
-    logger.info("Architecture prompt generated.")
-    return prompt_text
 
 def extract_database_entities(java_class):
     """Extract database entity information and relationships."""
@@ -1282,7 +1147,8 @@ async def scan_project_endpoint(
     complexity_threshold: int = Form(10),
     method_length_threshold: int = Form(50),
     class_size_threshold: int = Form(10),
-    output_format: str = Form('json')
+    output_format: str = Form('json'),
+    output_directory: Optional[str] = Form(None)
 ):
     if not project_zip:
         return JSONResponse(status_code=400, content={"error": "Please provide a ZIP file of the Java project."})
@@ -1349,7 +1215,7 @@ async def scan_project_endpoint(
             })
 
         # Start scanning the project
-        scan_summary = scan_project_async(project_path, output_format)
+        scan_summary = scan_project_async(project_path, output_format, output_directory)
 
         # If there was an error, return it
         if "error" in scan_summary:
@@ -1360,6 +1226,64 @@ async def scan_project_endpoint(
 
         # Return the scan results and the architecture prompt
         return JSONResponse(content={
-            "scan_summary": scan_summary,
+            "scan_summary": "Scan completed successfully. Check the generated JSON files.",
             "architecture_prompt": architecture_prompt
         })
+
+def generate_architecture_prompt(scan_summary_data: Dict[str, Any]) -> str:
+    """Generate a condensed prompt text from the scan summary of the Java project, respecting an 8000-token limit."""
+    prompt_lines = []
+    total_token_count = 0  # To track token usage
+
+    prompt_lines.append("### Enhanced Java Spring Boot Project Architecture Overview ###\n\n")
+    total_token_count += count_tokens(prompt_lines[-1])
+
+    for class_name, metadata in scan_summary_data.items():
+        # Add token checks to ensure we stay within limits
+        if total_token_count >= MAX_TOKENS:
+            prompt_lines.append("\n...Output truncated to stay within token limit...\n")
+            break
+
+        prompt_lines.append(f"Class: {class_name}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Component Type: {metadata.get('component_type', 'Unknown')}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Layer: {metadata.get('layer', 'Unknown')}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append(f"Bounded Context: {metadata.get('bounded_context', 'Unknown')}\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Annotations
+        if metadata.get('annotations'):
+            annotations = ', '.join(metadata['annotations'][:3])
+            prompt_lines.append(f"Annotations: {annotations}\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+        else:
+            prompt_lines.append("Annotations: None\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Code Smells
+        if metadata.get('code_smells'):
+            code_smells = ', '.join(metadata['code_smells'])
+            prompt_lines.append(f"Code Smells: {code_smells}\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+        else:
+            prompt_lines.append("Code Smells: None\n")
+            total_token_count += count_tokens(prompt_lines[-1])
+
+        # Write Relationships
+        if metadata.get('relationships'):
+            prompt_lines.append("Relationships:\n")
+            for rel in metadata['relationships']:
+                prompt_lines.append(f"  - {rel['type']} {rel['target']} ({rel['relationship_type']})\n")
+                total_token_count += count_tokens(prompt_lines[-1])
+
+        prompt_lines.append("\n")
+        total_token_count += count_tokens(prompt_lines[-1])
+
+    prompt_text = ''.join(prompt_lines)
+    logger.info("Architecture prompt generated.")
+    return prompt_text
