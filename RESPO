@@ -37,3 +37,59 @@ public class TemporaryWriter implements ItemWriter<EnrichedRecordDTO> {
         }
     }
 }
+
+
+package com.bofa.sst.batch.core;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+
+@Component
+@Slf4j
+public class CustagProcessor implements ItemProcessor<CustomRecordDTO, EnrichedRecordDTO> {
+
+    private final HashMap<String, String> entityMap;
+
+    public CustagProcessor(HashMap<String, String> entityMap) {
+        this.entityMap = entityMap;
+    }
+
+    @Override
+    public EnrichedRecordDTO process(CustomRecordDTO item) throws Exception {
+        log.info("Processing record with Entity: {}, AccountNumber: {}, ProductCode: {}", 
+                 item.getEntity(), item.getAccountNumber(), item.getProductCode());
+
+        // Match `entity` from 2nd file with `numEntity` from HashMap
+        String alphaEntity = entityMap.get(item.getEntity());
+        if (alphaEntity != null) {
+            // Create an enriched DTO with all required fields
+            EnrichedRecordDTO enrichedRecord = new EnrichedRecordDTO();
+            enrichedRecord.setAlphaEntity(alphaEntity);
+            enrichedRecord.setNumEntity(item.getEntity());
+            enrichedRecord.setAccountNumber(item.getAccountNumber());
+            enrichedRecord.setProductCode(item.getProductCode());
+
+            log.info("Match found! Enriched Record: {}", enrichedRecord);
+            return enrichedRecord;
+        } else {
+            log.warn("No match found for Entity: {}", item.getEntity());
+            return null; // Skip unmatched records
+        }
+    }
+}
+
+
+
+import lombok.Data;
+
+@Data
+public class EnrichedRecordDTO {
+    private String productCode;    // e.g., BUS or PER
+    private String numEntity;      // Numeric entity from 2nd file
+    private String alphaEntity;    // Matched alpha entity from 1st file
+    private String accountNumber;  // Account number from 2nd file
+}
+
