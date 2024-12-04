@@ -2,7 +2,10 @@ package com.bofa.sst.batch.core;
 
 import com.bofa.sst.batch.util.CompCharaterUtil;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemStream;
+import org.springframework.batch.item.ItemStreamException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,13 +16,13 @@ import java.io.IOException;
 
 @Component
 @Log4j2
-public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
+public class CustagCompFileReader implements ItemReader<CustomRecordDTO>, ItemStream {
 
     private BufferedInputStream bis = null;
     private int counter = 0;
     private int numberOfRecordsToRead = 0;
 
-    @Value("${custag.input.file.path}") // File path injected from properties
+    @Value("${custag.input.file.path}")
     private String inputFilePath;
 
     private static final int RECORD_SIZE = 28;
@@ -27,8 +30,7 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
     @Override
     public CustomRecordDTO read() throws Exception {
         if (bis == null) {
-            log.error("BufferedInputStream is not initialized. Did you call open()?");
-            throw new RuntimeException("BufferedInputStream is not initialized.");
+            throw new RuntimeException("BufferedInputStream is not initialized. Did you call open()?");
         }
 
         if (counter >= numberOfRecordsToRead) {
@@ -52,7 +54,8 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
         return createRecord(readBytes);
     }
 
-    public void open() {
+    @Override
+    public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
             File inputFile = new File(inputFilePath);
             log.info("Attempting to open file at path: {}", inputFilePath);
@@ -72,11 +75,18 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
             log.info("Successfully opened file: {} with size: {} bytes. Total records: {}", inputFilePath, fileSize, numberOfRecordsToRead);
         } catch (IOException e) {
             log.error("Error occurred while opening the file: {}", inputFilePath, e);
-            throw new RuntimeException("Error opening file: " + inputFilePath, e);
+            throw new ItemStreamException("Error opening file: " + inputFilePath, e);
         }
     }
 
-    public void close() {
+    @Override
+    public void update(ExecutionContext executionContext) throws ItemStreamException {
+        // Can store `counter` if restartability is required
+        executionContext.putInt("counter", counter);
+    }
+
+    @Override
+    public void close() throws ItemStreamException {
         try {
             if (bis != null) {
                 bis.close();
@@ -84,6 +94,7 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
             }
         } catch (IOException e) {
             log.error("Error occurred while closing the file", e);
+            throw new ItemStreamException("Error closing file", e);
         }
     }
 
