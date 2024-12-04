@@ -1,231 +1,39 @@
 package com.bofa.sst.batch.core;
 
-import org.springframework.batch.item.ItemReader;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import lombok.extern.log4j.Log4j2;
-
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.util.HashMap;
-
-@Component
-@Log4j2
-public class EntityFileReader implements ItemReader<HashMap<String, String>> {
-
-    @Value("${custag.input.file.path}") // File path from application.properties
-    private String filePath;
-
-    private boolean isRead = false;
-
-    @Override
-    public HashMap<String, String> read() throws Exception {
-        // Read the file only once
-        if (isRead) {
-            log.info("File has already been read. Returning null to indicate completion.");
-            return null;
-        }
-
-        HashMap<String, String> entityMap = new HashMap<>();
-
-        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                String alphaEntity = line.substring(0, 4).trim(); // First 4 characters
-                String numEntity = line.substring(4, 8).trim();  // Next 4 characters
-
-                // Add to HashMap
-                entityMap.put(numEntity, alphaEntity);
-                log.debug("Processed line - NUM-ENTITY: {}, ALPHA-ENTITY: {}", numEntity, alphaEntity);
-            }
-        } catch (IOException e) {
-            log.error("Error reading file at path: {}", filePath, e);
-            throw new Exception("Error reading file", e);
-        }
-
-        isRead = true; // Mark file as read
-        log.info("Successfully read and processed the file: {}", filePath);
-        return entityMap;
-    }
-}
-
-
-
-
-
-package com.bofa.sst.batch.core;
-
-import org.springframework.batch.core.partition.support.Partitioner;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import lombok.extern.log4j.Log4j2;
-
-import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
-
-@Component
-@Log4j2
-public class CustagFilePartitioner implements Partitioner {
-
-    @Value("${custag.input.file.path}") // File path injected from properties
-    private String filePath;
-
-    private static final int RECORD_SIZE = 30; // Each record is 30 bytes
-
-    @Override
-    public Map<String, ExecutionContext> partition(int gridSize) {
-        log.info("CustagFilePartitioner ::: Partitioning has started...");
-        Map<String, ExecutionContext> partitions = new HashMap<>();
-
-        try {
-            File file = new File(filePath);
-            long fileSize = file.length(); // Total size of the file in bytes
-            int totalRecords = (int) (fileSize / RECORD_SIZE); // Total number of records
-            int linesPerPartition = totalRecords / gridSize;
-            int remainingLines = totalRecords % gridSize;
-
-            log.info("CustagFilePartitioner ::: Total Records: {}, Lines Per Partition: {}, Remaining Lines: {}", 
-                      totalRecords, linesPerPartition, remainingLines);
-
-            int startPosition = 1;
-            int endPosition = 0;
-
-            for (int i = 0; i < gridSize; i++) {
-                ExecutionContext context = new ExecutionContext();
-                endPosition = startPosition + linesPerPartition - 1;
-
-                // Distribute remaining lines across partitions
-                if (i < remainingLines) {
-                    endPosition += 1;
-                }
-
-                log.info("CustagFilePartitioner ::: Partition FromLine: {}, ToLine: {}", startPosition, endPosition);
-
-                context.putInt("fromLine", startPosition);
-                context.putInt("toLine", endPosition);
-                context.putInt("numberOfRecords", totalRecords);
-
-                partitions.put("partition" + i, context);
-                startPosition = endPosition + 1;
-            }
-
-            log.info("CustagFilePartitioner ::: Total Partitions Created: {}", partitions.size());
-
-        } catch (Exception ex) {
-            log.error("CustagFilePartitioner ::: Exception occurred while partitioning: {}", ex.getMessage(), ex);
-        }
-
-        return partitions;
-    }
-}
-
-
-
-import lombok.Data;
-
-@Data
-public class CustomRecordDTO {
-    private String productCode;
-    private String entity;
-    private String accountNumber;
-}
-
-
-
-
-import org.springframework.batch.item.ItemReader;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.stereotype.Component;
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.util.List;
 
 @Component
 @Slf4j
-public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
-
-    private BufferedInputStream bis = null;
-    private int counter = 0;
-    private int numberOfRecordsToRead = 0;
-
-    @Value("${custag.input.file.path}") // File path injected from properties
-    private String inputFilePath;
+public class TemporaryWriter implements ItemWriter<EnrichedRecordDTO> {
 
     @Override
-    public CustomRecordDTO read() throws Exception {
-        if (counter >= numberOfRecordsToRead) {
-            log.info("All records have been read. Returning null.");
-            return null;
-        }
+    public void write(List<? extends EnrichedRecordDTO> items) throws Exception {
+        // Define the temporary output file
+        String tempOutputPath = "temp_output.txt";
 
-        byte[] readBytes = new byte[30]; // Adjusted record size to 30
-        if (bis.read(readBytes) > 0) {
-            counter++;
-            log.debug("Read record number: {}", counter);
-            return createRecord(readBytes);
-        }
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(tempOutputPath))) {
+            log.info("Writing to temporary file: {}", tempOutputPath);
 
-        return null;
-    }
+            for (EnrichedRecordDTO item : items) {
+                // Log each record
+                log.info("Writing Enriched Record: {}", item);
 
-    public void open() {
-        try {
-            File inputFile = new File(inputFilePath);
-            log.info("Attempting to open file at path: {}", inputFilePath);
-            if (!inputFile.exists()) {
-                log.error("File does not exist at the provided path: {}", inputFilePath);
-                throw new RuntimeException("File not found: " + inputFilePath);
+                // Write to the file
+                writer.write(item.toString());
+                writer.newLine();
             }
-            bis = new BufferedInputStream(new FileInputStream(inputFile));
-            log.info("Successfully opened file: {}", inputFilePath);
+
+            log.info("Finished writing all records to temporary file.");
         } catch (IOException e) {
-            log.error("Error occurred while opening the file: {}", inputFilePath, e);
-            throw new RuntimeException("Error opening file: " + inputFilePath, e);
+            log.error("Error occurred while writing to temporary file.", e);
+            throw new RuntimeException("Error writing to temporary file", e);
         }
-    }
-
-    public void close() {
-        try {
-            if (bis != null) {
-                bis.close();
-                log.info("Successfully closed the file.");
-            }
-        } catch (IOException e) {
-            log.error("Error occurred while closing the file", e);
-        }
-    }
-
-    private CustomRecordDTO createRecord(byte[] reader) {
-        CustomRecordDTO record = new CustomRecordDTO();
-
-        try {
-            String productCode = new String(parseField(reader, 0, 3), "UTF-8").trim();
-            String entity = CompCharacterUtil.packedToString(parseField(reader, 3, 4)).trim();
-            String accountNumber = new String(parseField(reader, 7, 23), "UTF-8").trim();
-
-            record.setProductCode(productCode);
-            record.setEntity(entity);
-            record.setAccountNumber(accountNumber);
-
-            log.info("Parsed record - ProductCode: {}, Entity: {}, AccountNumber: {}", productCode, entity, accountNumber);
-        } catch (Exception e) {
-            log.error("Error occurred while parsing the record", e);
-            throw new RuntimeException("Error parsing record", e);
-        }
-
-        return record;
-    }
-
-    private byte[] parseField(byte[] reader, int offset, int length) {
-        byte[] bytes = new byte[length];
-        System.arraycopy(reader, offset, bytes, 0, length);
-        log.debug("Parsed field from offset {} with length {}: {}", offset, length, new String(bytes).trim());
-        return bytes;
     }
 }
