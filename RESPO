@@ -26,6 +26,11 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
 
     @Override
     public CustomRecordDTO read() throws Exception {
+        if (bis == null) {
+            log.error("BufferedInputStream is not initialized. Did you call open()?");
+            throw new RuntimeException("BufferedInputStream is not initialized.");
+        }
+
         if (counter >= numberOfRecordsToRead) {
             log.info("All records have been read. Returning null.");
             return null;
@@ -34,14 +39,17 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
         byte[] readBytes = new byte[RECORD_SIZE];
         int bytesRead = bis.read(readBytes);
 
-        if (bytesRead > 0) {
-            counter++;
-            log.debug("Read record number: {}", counter);
-            return createRecord(readBytes);
-        } else {
-            log.warn("End of file reached or no data available to read.");
+        if (bytesRead == -1) {
+            log.warn("End of file reached unexpectedly. Returning null.");
             return null;
+        } else if (bytesRead < RECORD_SIZE) {
+            log.error("Incomplete record read. Expected {}, but got {} bytes.", RECORD_SIZE, bytesRead);
+            throw new RuntimeException("Incomplete record read.");
         }
+
+        counter++;
+        log.debug("Read record number: {}", counter);
+        return createRecord(readBytes);
     }
 
     public void open() {
@@ -56,8 +64,11 @@ public class CustagCompFileReader implements ItemReader<CustomRecordDTO> {
 
             bis = new BufferedInputStream(new FileInputStream(inputFile));
             long fileSize = inputFile.length();
-            numberOfRecordsToRead = (int) (fileSize / RECORD_SIZE);
+            if (fileSize % RECORD_SIZE != 0) {
+                log.warn("File size {} is not a multiple of RECORD_SIZE {}. Some records may be incomplete.", fileSize, RECORD_SIZE);
+            }
 
+            numberOfRecordsToRead = (int) (fileSize / RECORD_SIZE);
             log.info("Successfully opened file: {} with size: {} bytes. Total records: {}", inputFilePath, fileSize, numberOfRecordsToRead);
         } catch (IOException e) {
             log.error("Error occurred while opening the file: {}", inputFilePath, e);
