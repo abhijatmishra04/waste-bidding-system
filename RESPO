@@ -1,116 +1,134 @@
 package com.bofa.sst.batch.core;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.stereotype.Component;
-
-import java.util.HashMap;
-
-@Component
-@Slf4j
-public class CustagProcessor implements ItemProcessor<CustomRecordDTO, EnrichedRecordDTO> {
-
-    private final HashMap<String, String> entityMap;
-
-    // Constructor-based injection of the HashMap
-    public CustagProcessor(HashMap<String, String> entityMap) {
-        this.entityMap = entityMap;
-    }
-
-    @Override
-    public EnrichedRecordDTO process(CustomRecordDTO item) throws Exception {
-        String entityFromFile = item.getEntity().trim();
-
-        log.info("CustagProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
-                 entityFromFile, item.getAccountNumber(), item.getProductCode());
-
-        // Logging the entire HashMap size to ensure it is populated
-        if (entityMap.isEmpty()) {
-            log.error("CustagProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
-            throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
-        }
-
-        log.debug("CustagProcessor: HashMap contains {} entries.", entityMap.size());
-
-        String alphaEntity = entityMap.get(entityFromFile);
-
-        if (alphaEntity != null) {
-            EnrichedRecordDTO enrichedRecord = new EnrichedRecordDTO();
-            enrichedRecord.setAlphaEntity(alphaEntity);
-            enrichedRecord.setNumEntity(entityFromFile);
-            enrichedRecord.setAccountNumber(item.getAccountNumber());
-            enrichedRecord.setProductCode(item.getProductCode());
-
-            log.info("CustagProcessor: Match found - NumEntity: {}, AlphaEntity: {}", entityFromFile, alphaEntity);
-            return enrichedRecord;
-        } else {
-            log.warn("CustagProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
-
-            // Additional debug logs to analyze mismatches
-            log.debug("CustagProcessor: First 5 keys in HashMap for comparison: {}", 
-                      entityMap.keySet().stream().limit(5).toList());
-            log.debug("CustagProcessor: First 5 values in HashMap: {}", 
-                      entityMap.values().stream().limit(5).toList());
-            return null;
-        }
-    }
-}
-
-
-
-package com.bofa.sst.batch.core;
-
+import com.bofa.sst.batch.util.CompCharaterUtil;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemStream;
+import org.springframework.batch.item.ItemStreamException;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.HashMap;
 
 @Component
 @Log4j2
-public class EntityFileReader {
+public class CustagCompFileReader implements ItemReader<CustomRecordDTO>, ItemStream {
 
-    @Value("${custag.input.file.paths}") // File path from application.properties
-    private String filePath;
+    private BufferedInputStream bis = null;
+    private int counter = 0;
+    private int startLine = 0;
+    private int endLine = 0;
+    private int currentRecord = 0;
+    private int numberOfRecordsToRead = 0;
 
-    @Bean
-    public HashMap<String, String> loadEntityMap() throws Exception {
-        HashMap<String, String> entityMap = new HashMap<>();
-        log.info("EntityFileReader: Starting to read the file at path: {}", filePath);
+    @Value("${custag.input.file.path}")
+    private String inputFilePath;
 
-        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
-            String line;
-            int lineNumber = 0;
+    private static final int RECORD_SIZE = 30; // Fixed record size
 
-            while ((line = br.readLine()) != null) {
-                lineNumber++;
-                if (line.length() < 8) {
-                    log.warn("EntityFileReader: Skipping line {} - Line is too short: {}", lineNumber, line);
-                    continue;
-                }
+    @Override
+    public void open(ExecutionContext executionContext) throws ItemStreamException {
+        try {
+            // Retrieve partition-specific start and end lines from ExecutionContext
+            startLine = executionContext.getInt("fromLine");
+            endLine = executionContext.getInt("toLine");
 
-                String alphaEntity = line.substring(0, 4).trim(); // First 4 characters
-                String numEntity = line.substring(4, 8).trim();  // Next 4 characters
+            log.info("CustagCompFileReader: Opening reader for partition: Start Line: {}, End Line: {}", startLine, endLine);
 
-                if (numEntity.isEmpty() || alphaEntity.isEmpty()) {
-                    log.warn("EntityFileReader: Skipping line {} - Missing values: {}", lineNumber, line);
-                    continue;
-                }
-
-                entityMap.put(numEntity, alphaEntity);
-                log.debug("EntityFileReader: Processed line {} - NumEntity: {}, AlphaEntity: {}", lineNumber, numEntity, alphaEntity);
+            File inputFile = new File(inputFilePath);
+            if (!inputFile.exists()) {
+                log.error("CustagCompFileReader: File does not exist at path: {}", inputFilePath);
+                throw new RuntimeException("File not found: " + inputFilePath);
             }
 
+            bis = new BufferedInputStream(new FileInputStream(inputFile));
+
+            // Skip to the start line based on partition
+            long skipBytes = (long) (startLine - 1) * RECORD_SIZE;
+            if (bis.skip(skipBytes) != skipBytes) {
+                log.error("CustagCompFileReader: Unable to skip to start line. Expected bytes to skip: {}", skipBytes);
+                throw new RuntimeException("Error skipping to start line in file.");
+            }
+
+            numberOfRecordsToRead = endLine - startLine + 1;
+            log.info("CustagCompFileReader: Successfully opened file for partition with {} records to read.", numberOfRecordsToRead);
+
         } catch (IOException e) {
-            log.error("EntityFileReader: Error reading file at path: {}", filePath, e);
-            throw new Exception("Error reading file", e);
+            log.error("CustagCompFileReader: Error opening file.", e);
+            throw new ItemStreamException("Error opening file", e);
+        }
+    }
+
+    @Override
+    public CustomRecordDTO read() throws Exception {
+        if (currentRecord >= numberOfRecordsToRead) {
+            log.info("CustagCompFileReader: All records for this partition have been read. Returning null.");
+            return null;
         }
 
-        log.info("EntityFileReader: Successfully created entity map with {} entries.", entityMap.size());
-        return entityMap;
+        byte[] readBytes = new byte[RECORD_SIZE];
+        int bytesRead = bis.read(readBytes);
+
+        if (bytesRead == -1) {
+            log.info("CustagCompFileReader: End of file reached unexpectedly.");
+            return null;
+        } else if (bytesRead < RECORD_SIZE) {
+            log.error("CustagCompFileReader: Incomplete record read. Expected: {}, but got: {}", RECORD_SIZE, bytesRead);
+            throw new RuntimeException("Incomplete record read.");
+        }
+
+        currentRecord++;
+        log.info("CustagCompFileReader: Read record number: {}", currentRecord);
+        return createRecord(readBytes);
+    }
+
+    private CustomRecordDTO createRecord(byte[] reader) {
+        try {
+            String productCode = new String(parseField(reader, 0, 3), "UTF-8").trim();
+            String entity = CompCharaterUtil.packedToString(parseField(reader, 3, 2)).trim();
+            String accountNumber = new String(parseField(reader, 5, 23), "UTF-8").trim();
+
+            CustomRecordDTO record = new CustomRecordDTO();
+            record.setProductCode(productCode);
+            record.setEntity(entity);
+            record.setAccountNumber(accountNumber);
+
+            log.info("CustagCompFileReader: Parsed record - ProductCode: {}, Entity: {}, AccountNumber: {}",
+                     productCode, entity, accountNumber);
+            return record;
+        } catch (Exception e) {
+            log.error("CustagCompFileReader: Error parsing record.", e);
+            throw new RuntimeException("Error parsing record", e);
+        }
+    }
+
+    private byte[] parseField(byte[] reader, int offset, int length) {
+        byte[] field = new byte[length];
+        System.arraycopy(reader, offset, field, 0, length);
+        log.info("CustagCompFileReader: Parsed field from offset {} with length {}: {}", offset, length, new String(field).trim());
+        return field;
+    }
+
+    @Override
+    public void close() throws ItemStreamException {
+        try {
+            if (bis != null) {
+                bis.close();
+                log.info("CustagCompFileReader: Successfully closed the file.");
+            }
+        } catch (IOException e) {
+            log.error("CustagCompFileReader: Error closing the file.", e);
+            throw new ItemStreamException("Error closing file", e);
+        }
+    }
+
+    @Override
+    public void update(ExecutionContext executionContext) throws ItemStreamException {
+        // Persist state if needed
+        executionContext.putInt("counter", currentRecord);
     }
 }
