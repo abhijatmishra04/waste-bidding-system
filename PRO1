@@ -42,7 +42,7 @@ ALLOWED_FILE_TYPES = ['zip']
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 # Use environment variable for API key
-GROQ_API_KEY = "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"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     logger.error("Groq API key not found. Please set the GROQ_API_KEY environment variable.")
     raise ValueError("GROQ_API_KEY is not set.")
@@ -208,19 +208,19 @@ def scan_file(java_file_path: Path, scan_summary, metadata_cache, configurations
 
         tree = javalang.parse.parse(java_code)
 
-        for node in tree.types:
-            if isinstance(node, javalang.tree.ClassDeclaration):
-                scan_class(node, java_file_path, scan_summary, metadata_cache, configurations, dependencies)
-
         imports = extract_imports(tree)
         logger.debug(f"Imports found in {java_file_path}: {imports}")
+
+        for node in tree.types:
+            if isinstance(node, javalang.tree.ClassDeclaration):
+                scan_class(node, java_file_path, scan_summary, metadata_cache, configurations, dependencies, imports)
 
     except javalang.parser.JavaSyntaxError as e:
         logger.error(f"Syntax error in {java_file_path}: {e}")
     except Exception as e:
         logger.error(f"Error parsing {java_file_path}: {e}")
 
-def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, configurations, dependencies):
+def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, configurations, dependencies, imports):
     """Scan a Java class for advanced analysis: annotations, complexity, dependencies, and relationships."""
     try:
         class_name = java_class.name
@@ -257,7 +257,8 @@ def scan_class(java_class, java_file_path: Path, scan_summary, metadata_cache, c
             'methods_complexity': methods_complexity,
             'code_smells': code_smells,
             'layer': detect_layer(java_file_path),
-            'file_path': str(java_file_path)
+            'file_path': str(java_file_path),
+            'imports': imports  # Include imports in metadata
         }
 
         # Extract methods and fields
@@ -650,6 +651,15 @@ def detect_relationships(java_class, metadata):
                     'target': rel['target_entity'],
                     'relationship_type': rel['type']
                 })
+
+    # Add import relationships
+    if 'imports' in metadata:
+        for imp in metadata['imports']:
+            relationships.append({
+                'type': 'imports',
+                'target': imp,
+                'relationship_type': 'import'
+            })
 
     # Filter out generic relationships
     meaningful_relationships = []
@@ -1278,7 +1288,10 @@ def generate_architecture_prompt(scan_summary_data: Dict[str, Any]) -> str:
         if metadata.get('relationships'):
             prompt_lines.append("Relationships:\n")
             for rel in metadata['relationships']:
-                prompt_lines.append(f"  - {rel['type']} {rel['target']} ({rel['relationship_type']})\n")
+                if rel['relationship_type'] == 'import':
+                    prompt_lines.append(f"  - Imports {rel['target']}\n")
+                else:
+                    prompt_lines.append(f"  - {rel['type']} {rel['target']} ({rel['relationship_type']})\n")
                 total_token_count += count_tokens(prompt_lines[-1])
 
         prompt_lines.append("\n")
