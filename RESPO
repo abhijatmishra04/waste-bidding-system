@@ -40,3 +40,44 @@ public class EntityFileReader {
         return entityMap;
     }
 }
+
+
+
+
+
+
+@Component
+@Slf4j
+public class CustagProcessor implements ItemProcessor<CustomRecordDTO, EnrichedRecordDTO> {
+
+    private final HashMap<String, String> entityMap;
+
+    // Constructor-based injection for the HashMap
+    public CustagProcessor(HashMap<String, String> entityMap) {
+        this.entityMap = entityMap;
+    }
+
+    @Override
+    public EnrichedRecordDTO process(CustomRecordDTO item) throws Exception {
+        log.info("Processing record with Entity: {}, AccountNumber: {}, ProductCode: {}",
+                item.getEntity(), item.getAccountNumber(), item.getProductCode());
+
+        // Match entity from 2nd file with numEntity from HashMap
+        String mappedEntity = entityMap.get(item.getEntity());
+        if (mappedEntity != null) {
+            // Create an enriched DTO with all required fields
+            EnrichedRecordDTO enrichedRecord = new EnrichedRecordDTO();
+            enrichedRecord.setAlphaEntity(mappedEntity); // Rename this if needed
+            enrichedRecord.setNumEntity(item.getEntity());
+            enrichedRecord.setAccountNumber(item.getAccountNumber());
+            enrichedRecord.setProductCode(item.getProductCode());
+
+            log.info("Match found! Enriched Record: {}", enrichedRecord);
+            return enrichedRecord;
+        } else {
+            log.info("No match found for Entity: {}", item.getEntity());
+            return null;
+        }
+    }
+}
+
