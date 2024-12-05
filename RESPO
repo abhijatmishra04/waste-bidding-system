@@ -1,5 +1,65 @@
 package com.bofa.sst.batch.core;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+
+@Component
+@Slf4j
+public class CustagProcessor implements ItemProcessor<CustomRecordDTO, EnrichedRecordDTO> {
+
+    private final HashMap<String, String> entityMap;
+
+    // Constructor-based injection of the HashMap
+    public CustagProcessor(HashMap<String, String> entityMap) {
+        this.entityMap = entityMap;
+    }
+
+    @Override
+    public EnrichedRecordDTO process(CustomRecordDTO item) throws Exception {
+        String entityFromFile = item.getEntity().trim();
+
+        log.info("CustagProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
+                 entityFromFile, item.getAccountNumber(), item.getProductCode());
+
+        // Logging the entire HashMap size to ensure it is populated
+        if (entityMap.isEmpty()) {
+            log.error("CustagProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
+            throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
+        }
+
+        log.debug("CustagProcessor: HashMap contains {} entries.", entityMap.size());
+
+        String alphaEntity = entityMap.get(entityFromFile);
+
+        if (alphaEntity != null) {
+            EnrichedRecordDTO enrichedRecord = new EnrichedRecordDTO();
+            enrichedRecord.setAlphaEntity(alphaEntity);
+            enrichedRecord.setNumEntity(entityFromFile);
+            enrichedRecord.setAccountNumber(item.getAccountNumber());
+            enrichedRecord.setProductCode(item.getProductCode());
+
+            log.info("CustagProcessor: Match found - NumEntity: {}, AlphaEntity: {}", entityFromFile, alphaEntity);
+            return enrichedRecord;
+        } else {
+            log.warn("CustagProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
+
+            // Additional debug logs to analyze mismatches
+            log.debug("CustagProcessor: First 5 keys in HashMap for comparison: {}", 
+                      entityMap.keySet().stream().limit(5).toList());
+            log.debug("CustagProcessor: First 5 values in HashMap: {}", 
+                      entityMap.values().stream().limit(5).toList());
+            return null;
+        }
+    }
+}
+
+
+
+package com.bofa.sst.batch.core;
+
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -14,70 +74,43 @@ import java.util.HashMap;
 @Log4j2
 public class EntityFileReader {
 
-    @Value("${custag.input.file.path}") // File path injected from properties
+    @Value("${custag.input.file.paths}") // File path from application.properties
     private String filePath;
 
     @Bean
-    public HashMap<String, String> entityMap() throws Exception {
+    public HashMap<String, String> loadEntityMap() throws Exception {
         HashMap<String, String> entityMap = new HashMap<>();
-        log.info("Reading the first file to populate HashMap...");
+        log.info("EntityFileReader: Starting to read the file at path: {}", filePath);
 
         try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
             String line;
+            int lineNumber = 0;
+
             while ((line = br.readLine()) != null) {
+                lineNumber++;
+                if (line.length() < 8) {
+                    log.warn("EntityFileReader: Skipping line {} - Line is too short: {}", lineNumber, line);
+                    continue;
+                }
+
                 String alphaEntity = line.substring(0, 4).trim(); // First 4 characters
                 String numEntity = line.substring(4, 8).trim();  // Next 4 characters
 
+                if (numEntity.isEmpty() || alphaEntity.isEmpty()) {
+                    log.warn("EntityFileReader: Skipping line {} - Missing values: {}", lineNumber, line);
+                    continue;
+                }
+
                 entityMap.put(numEntity, alphaEntity);
-                log.debug("Processed line - NUM-ENTITY: {}, ALPHA-ENTITY: {}", numEntity, alphaEntity);
+                log.debug("EntityFileReader: Processed line {} - NumEntity: {}, AlphaEntity: {}", lineNumber, numEntity, alphaEntity);
             }
+
         } catch (IOException e) {
-            log.error("Error reading file at path: {}", filePath, e);
+            log.error("EntityFileReader: Error reading file at path: {}", filePath, e);
             throw new Exception("Error reading file", e);
         }
 
-        log.info("Successfully populated HashMap with {} entries.", entityMap.size());
+        log.info("EntityFileReader: Successfully created entity map with {} entries.", entityMap.size());
         return entityMap;
     }
 }
-
-
-
-
-
-
-@Component
-@Slf4j
-public class CustagProcessor implements ItemProcessor<CustomRecordDTO, EnrichedRecordDTO> {
-
-    private final HashMap<String, String> entityMap;
-
-    // Constructor-based injection for the HashMap
-    public CustagProcessor(HashMap<String, String> entityMap) {
-        this.entityMap = entityMap;
-    }
-
-    @Override
-    public EnrichedRecordDTO process(CustomRecordDTO item) throws Exception {
-        log.info("Processing record with Entity: {}, AccountNumber: {}, ProductCode: {}",
-                item.getEntity(), item.getAccountNumber(), item.getProductCode());
-
-        // Match entity from 2nd file with numEntity from HashMap
-        String mappedEntity = entityMap.get(item.getEntity());
-        if (mappedEntity != null) {
-            // Create an enriched DTO with all required fields
-            EnrichedRecordDTO enrichedRecord = new EnrichedRecordDTO();
-            enrichedRecord.setAlphaEntity(mappedEntity); // Rename this if needed
-            enrichedRecord.setNumEntity(item.getEntity());
-            enrichedRecord.setAccountNumber(item.getAccountNumber());
-            enrichedRecord.setProductCode(item.getProductCode());
-
-            log.info("Match found! Enriched Record: {}", enrichedRecord);
-            return enrichedRecord;
-        } else {
-            log.info("No match found for Entity: {}", item.getEntity());
-            return null;
-        }
-    }
-}
-
