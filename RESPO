@@ -1,109 +1,54 @@
+public static final String UPDATE_SCHEDULE_M2M =
+    "UPDATE schedule_m2m " +
+    "SET CLS_DT = ?, " +        // Current date
+    "    UPDT_BY = 'CUSTAGG', " + // Hardcoded updated by value
+    "    UPDT_TS = ?, " +       // Current timestamp
+    "    SCHD_STAT = 'S02' " +  // Hardcoded schedule status
+    "WHERE SCHD_ID = ?";
+
+
+
 package com.bofa.sst.batch.core.impl;
 
 import com.bofa.sst.batch.constants.CustaggSQLFactory;
 import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.model.CustaggRecordsDTO;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.item.ItemWriter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.List;
 
 @Component
 @Log4j2
-public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
-
-    private final HashMap<String, String> entityMap;
+public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO> {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    public CustaggProcessor(HashMap<String, String> entityMap) {
-        this.entityMap = entityMap;
-    }
-
     @Override
-    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
-        String entityFromFile = item.getEntity().trim();
-        String accountNumber = item.getAccountNumber().trim();
-        String productCode = item.getProductCode().trim();
+    public void write(List<? extends CustaggProcessedRecordsDTO> items) throws Exception {
+        log.info("CustaggWriter: Writing {} records to the database.", items.size());
 
-        log.info("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
-                 entityFromFile, accountNumber, productCode);
-
-        // Ensure the entityMap is loaded
-        if (entityMap.isEmpty()) {
-            log.error("CustaggProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
-            throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
-        }
-
-        log.info("CustaggProcessor: HashMap contains {} entries.", entityMap.size());
-
-        // Match entity from the HashMap
-        String mappedEntity = entityMap.get(entityFromFile);
-        if (mappedEntity != null) {
-            CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
-            enrichedRecord.setMappedEntity(mappedEntity);
-            enrichedRecord.setNumEntity(entityFromFile);
-            enrichedRecord.setAccountNumber(accountNumber);
-            enrichedRecord.setProductCode(productCode);
-
-            log.info("CustaggProcessor: Match found - NumEntity: {}, MappedEntity: {}", entityFromFile, mappedEntity);
-
-            // Query database to fetch schd_id
-            String scheduleId = fetchScheduleIdUsingJoin(accountNumber, entityFromFile, productCode);
-            if (scheduleId != null) {
-                enrichedRecord.setScheduleId(scheduleId);
-                log.info("CustaggProcessor: Fetched Schedule ID: {}", scheduleId);
-            } else {
-                log.warn("CustaggProcessor: No Schedule ID found for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-                         accountNumber, entityFromFile, productCode);
+        for (CustaggProcessedRecordsDTO record : items) {
+            try {
+                updateScheduleM2M(record.getScheduleId());
+                log.info("CustaggWriter: Successfully updated ScheduleM2M for Schedule ID: {}", record.getScheduleId());
+            } catch (Exception e) {
+                log.error("CustaggWriter: Failed to update ScheduleM2M for Schedule ID: {}", record.getScheduleId(), e);
             }
-
-            return enrichedRecord;
-        } else {
-            log.info("CustaggProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
-        }
-
-        return null; // Skip records with no match
-    }
-
-    private String fetchScheduleIdUsingJoin(String accountNumber, String numEntity, String productCode) {
-        try {
-            log.info("Executing query to fetch Schedule ID for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-                     accountNumber, numEntity, productCode);
-            
-            return jdbcTemplate.queryForObject(
-                CustaggSQLFactory.FETCH_SCHEDULE_ID, 
-                new Object[]{accountNumber, numEntity, productCode}, 
-                String.class
-            );
-        } catch (Exception e) {
-            log.error("CustaggProcessor: Error fetching Schedule ID for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-                      accountNumber, numEntity, productCode, e);
-            return null;
         }
     }
-}
 
+    private void updateScheduleM2M(String scheduleId) {
+        String updateQuery = CustaggSQLFactory.UPDATE_SCHEDULE_M2M;
+        Timestamp currentTimestamp = Timestamp.from(Instant.now());
 
+        jdbcTemplate.update(updateQuery, new Object[]{currentTimestamp, currentTimestamp, scheduleId});
 
-
-package com.bofa.sst.batch.constants;
-
-public class CustaggSQLFactory {
-
-    public static final String FETCH_SCHEDULE_ID = 
-        "SELECT schd.schd_id " +
-        "FROM account_boa acc " +
-        "JOIN schedule_m2m schd ON acc.account_boa_id = schd.dr_acc_id " +
-        "WHERE acc.acc_no = ? " +
-        "  AND acc.ent_cd = ? " +
-        "  AND acc.prod_cd = ? " +
-        "  AND schd.schd_stat = 'S01' " +
-        "  AND schd.xfer_ref_id IS NULL";
-
-    // Add other SQL queries as needed...
+        log.info("CustaggWriter: Executed update query for Schedule ID: {}", scheduleId);
+    }
 }
