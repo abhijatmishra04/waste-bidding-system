@@ -1,1 +1,101 @@
+SELECT schd.schd_id
+FROM account_m2m acc
+JOIN schedule_m2m schd 
+  ON acc.account_m2m_id = schd.cr_acc_id
+WHERE acc.acc_no = ?
+  AND acc.ent_cd = ?
+  AND acc.prod_cd = ?
+  AND schd.schd_stat = 'S01'
+  AND schd.xfer_ref_id IS NULL;
+
+
+@Override
+public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
+    String entityFromFile = item.getEntity().trim();
+    String accountNumber = item.getAccountNumber().trim();
+    String productCode = item.getProductCode().trim();
+
+    log.info("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
+             entityFromFile, accountNumber, productCode);
+
+    // Ensure the entityMap is loaded
+    if (entityMap.isEmpty()) {
+        log.error("CustaggProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
+        throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
+    }
+
+    log.info("CustaggProcessor: HashMap contains {} entries.", entityMap.size());
+
+    // Match entity from the HashMap
+    String mappedEntity = entityMap.get(entityFromFile);
+    if (mappedEntity != null) {
+        CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
+        enrichedRecord.setMappedEntity(mappedEntity);
+        enrichedRecord.setNumEntity(entityFromFile);
+        enrichedRecord.setAccountNumber(accountNumber);
+        enrichedRecord.setProductCode(productCode);
+
+        log.info("CustaggProcessor: Match found - NumEntity: {}, MappedEntity: {}", entityFromFile, mappedEntity);
+
+        // Query database to fetch schd_id from account_boa
+        String scheduleIdAccountBoa = fetchScheduleIdUsingAccountBoa(accountNumber, entityFromFile, productCode);
+        if (scheduleIdAccountBoa != null) {
+            enrichedRecord.setScheduleId(scheduleIdAccountBoa);
+            log.info("CustaggProcessor: Fetched Schedule ID from Account_BOA: {}", scheduleIdAccountBoa);
+        } else {
+            log.warn("CustaggProcessor: No Schedule ID found for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                     accountNumber, entityFromFile, productCode);
+        }
+
+        // Query database to fetch schd_id from account_m2m
+        String scheduleIdAccountM2M = fetchScheduleIdUsingAccountM2M(accountNumber, entityFromFile, productCode);
+        if (scheduleIdAccountM2M != null) {
+            enrichedRecord.setScheduleId(scheduleIdAccountM2M);
+            log.info("CustaggProcessor: Fetched Schedule ID from Account_M2M: {}", scheduleIdAccountM2M);
+        } else {
+            log.warn("CustaggProcessor: No Schedule ID found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                     accountNumber, entityFromFile, productCode);
+        }
+
+        return enrichedRecord;
+    } else {
+        log.info("CustaggProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
+    }
+
+    return null; // Skip records with no match
+}
+
+private String fetchScheduleIdUsingAccountBoa(String accountNumber, String numEntity, String productCode) {
+    try {
+        log.info("Executing query to fetch Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                 accountNumber, numEntity, productCode);
+        
+        return jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA,
+            new Object[]{accountNumber, numEntity, productCode},
+            String.class
+        );
+    } catch (Exception e) {
+        log.error("CustaggProcessor: Error fetching Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                  accountNumber, numEntity, productCode, e);
+        return null;
+    }
+}
+
+private String fetchScheduleIdUsingAccountM2M(String accountNumber, String numEntity, String productCode) {
+    try {
+        log.info("Executing query to fetch Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                 accountNumber, numEntity, productCode);
+        
+        return jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M,
+            new Object[]{accountNumber, numEntity, productCode},
+            String.class
+        );
+    } catch (Exception e) {
+        log.error("CustaggProcessor: Error fetching Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                  accountNumber, numEntity, productCode, e);
+        return null;
+    }
+}
 
