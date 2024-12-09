@@ -1,100 +1,60 @@
-@Override
-public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
-    String entityFromFile = item.getEntity().trim();
-    String accountNumber = item.getAccountNumber().trim();
-    String productCode = item.getProductCode().trim();
+package com.bofa.sst.batch.core.impl;
 
-    log.info("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
-             entityFromFile, accountNumber, productCode);
+import com.bofa.sst.batch.constants.CustaggSQLFactory;
+import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
-    // Ensure the entityMap is loaded
-    if (entityMap.isEmpty()) {
-        log.error("CustaggProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
-        throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
-    }
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 
-    log.info("CustaggProcessor: HashMap contains {} entries.", entityMap.size());
+@Component
+@Log4j2
+public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO> {
 
-    // Match entity from the HashMap
-    String mappedEntity = entityMap.get(entityFromFile);
-    if (mappedEntity != null) {
-        CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
-        enrichedRecord.setMappedEntity(mappedEntity);
-        enrichedRecord.setNumEntity(entityFromFile);
-        enrichedRecord.setAccountNumber(accountNumber);
-        enrichedRecord.setProductCode(productCode);
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
-        log.info("CustaggProcessor: Match found - NumEntity: {}, MappedEntity: {}", entityFromFile, mappedEntity);
+    @Override
+    public void write(List<? extends CustaggProcessedRecordsDTO> items) throws Exception {
+        log.info("CustaggWriter: Writing {} records to the database.", items.size());
 
-        // Fetch schd_id from both sources
-        List<String> scheduleIds = new ArrayList<>();
-
-        String scheduleIdAccountBoa = fetchScheduleIdUsingAccountBoa(accountNumber, entityFromFile, productCode);
-        if (scheduleIdAccountBoa != null) {
-            scheduleIds.add(scheduleIdAccountBoa);
-            log.info("CustaggProcessor: Fetched Schedule ID from Account_BOA: {}", scheduleIdAccountBoa);
+        // Collect all Schedule IDs from the processed records
+        List<String> allScheduleIds = new ArrayList<>();
+        for (CustaggProcessedRecordsDTO record : items) {
+            if (record.getScheduleId() != null) {
+                allScheduleIds.add(record.getScheduleId());
+            }
         }
 
-        String scheduleIdAccountM2M = fetchScheduleIdUsingAccountM2M(accountNumber, entityFromFile, productCode);
-        if (scheduleIdAccountM2M != null) {
-            scheduleIds.add(scheduleIdAccountM2M);
-            log.info("CustaggProcessor: Fetched Schedule ID from Account_M2M: {}", scheduleIdAccountM2M);
+        // Perform batch update
+        if (!allScheduleIds.isEmpty()) {
+            updateScheduleM2M(allScheduleIds);
+            log.info("CustaggWriter: Successfully updated {} ScheduleM2M records.", allScheduleIds.size());
+        } else {
+            log.warn("CustaggWriter: No Schedule IDs to update.");
+        }
+    }
+
+    private void updateScheduleM2M(List<String> scheduleIds) {
+        String updateQuery = CustaggSQLFactory.UPDATE_SCHEDULE_M2M;
+
+        // Prepare parameters for batch update
+        List<Object[]> batchParams = new ArrayList<>();
+        Date currentDate = new Date(System.currentTimeMillis());
+        Timestamp currentTimestamp = new Timestamp(System.currentTimeMillis());
+
+        for (String scheduleId : scheduleIds) {
+            batchParams.add(new Object[]{currentDate, currentTimestamp, scheduleId});
         }
 
-        enrichedRecord.setScheduleIds(scheduleIds); // Set the combined list of schd_ids
-        return enrichedRecord;
-    } else {
-        log.info("CustaggProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
-    }
-
-    return null; // Skip records with no match
-}
-
-public class CustaggProcessedRecordsDTO {
-    private String mappedEntity;
-    private String numEntity;
-    private String accountNumber;
-    private String productCode;
-    private List<String> scheduleIds; // Store multiple schd_ids
-
-    // Getters and Setters for all fields, including scheduleIds
-}
-
-
-
-@Override
-public void write(List<? extends CustaggProcessedRecordsDTO> items) throws Exception {
-    log.info("CustaggWriter: Writing {} records to the database.", items.size());
-
-    // Collect all Schedule IDs from the processed records
-    List<String> allScheduleIds = new ArrayList<>();
-    for (CustaggProcessedRecordsDTO record : items) {
-        allScheduleIds.addAll(record.getScheduleIds());
-    }
-
-    // Perform batch update
-    if (!allScheduleIds.isEmpty()) {
-        updateScheduleM2M(allScheduleIds);
-        log.info("CustaggWriter: Successfully updated {} ScheduleM2M records.", allScheduleIds.size());
-    } else {
-        log.warn("CustaggWriter: No Schedule IDs to update.");
+        // Execute batch update
+        jdbcTemplate.batchUpdate(updateQuery, batchParams);
+        log.info("CustaggWriter: Executed batch update for {} Schedule IDs.", scheduleIds.size());
     }
 }
-
-private void updateScheduleM2M(List<String> scheduleIds) {
-    String updateQuery = CustaggSQLFactory.UPDATE_SCHEDULE_M2M;
-
-    // Prepare parameters for batch update
-    List<Object[]> batchParams = new ArrayList<>();
-    Date currentDate = new Date(System.currentTimeMillis());
-    Timestamp currentTimestamp = Timestamp.from(Instant.now());
-
-    for (String scheduleId : scheduleIds) {
-        batchParams.add(new Object[]{currentDate, currentTimestamp, scheduleId});
-    }
-
-    // Execute batch update
-    jdbcTemplate.batchUpdate(updateQuery, batchParams);
-    log.info("CustaggWriter: Executed batch update for {} Schedule IDs.", scheduleIds.size());
-}
-
