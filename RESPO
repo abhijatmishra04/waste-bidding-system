@@ -1,46 +1,189 @@
-private List<String> fetchAndUpdateTransferExecutionIds(List<String> scheduleIds) {
-    List<String> transferExecutionIds = new ArrayList<>();
-    for (String scheduleId : scheduleIds) {
-        try {
-            String transferExecutionId = jdbcTemplate.queryForObject(
-                CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID,
-                new Object[]{scheduleId},
-                String.class
-            );
-            if (transferExecutionId != null) {
-                transferExecutionIds.add(transferExecutionId);
-                log.info("Fetched Transfer Execution ID: {}", transferExecutionId);
-            } else {
-                log.info("No Transfer Execution ID found for Schedule ID: {}", scheduleId);
+@Component
+@Log4j2
+public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+
+    private final HashMap<String, String> entityMap;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    public CustaggProcessor(HashMap<String, String> entityMap) {
+        this.entityMap = entityMap;
+    }
+
+    @Override
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
+        String entityFromFile = item.getEntity().trim();
+        String accountNumber = item.getAccountNumber();
+        String productCode = item.getProductCode().trim();
+
+        Log.info("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
+                entityFromFile, accountNumber, productCode);
+
+        if (entityMap.isEmpty()) {
+            Log.info("CustaggProcessor: The HashMap is empty! Ensure the EntityFileReader is correctly loading data.");
+            throw new IllegalStateException("HashMap is empty. Check EntityFileReader.");
+        }
+
+        Log.info("CustaggProcessor: HashMap contains {} entries.", entityMap.size());
+
+        String mappedEntity = entityMap.get(entityFromFile);
+        if (mappedEntity != null) {
+            CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
+            enrichedRecord.setMappedEntity(mappedEntity);
+            enrichedRecord.setNumEntity(entityFromFile);
+            enrichedRecord.setAccountNumber(accountNumber);
+            enrichedRecord.setProductCode(productCode);
+
+            Log.info("CustaggProcessor: Match found - NumEntity: {}, MappedEntity: {}", entityFromFile, mappedEntity);
+
+            // Fetch Schedule IDs
+            List<String> scheduleIds = fetchScheduleIds(accountNumber, entityFromFile, productCode);
+            enrichedRecord.setScheduleIds(scheduleIds);
+
+            // Fetch Transfer Execution IDs and update transfer_execution_m2m
+            List<String> transferExecutionIds = fetchAndUpdateTransferExecutionIds(scheduleIds);
+            enrichedRecord.setTransferExecutionIds(transferExecutionIds);
+
+            // Fetch Transfer Instruction IDs and update transfer_instruction_m2m
+            if (!transferExecutionIds.isEmpty() && !scheduleIds.isEmpty()) {
+                fetchAndUpdateTransferInstructionIds(transferExecutionIds, scheduleIds);
             }
+
+            return enrichedRecord;
+        } else {
+            Log.info("CustaggProcessor: No match found for Entity: {} in the HashMap.", entityFromFile);
+        }
+
+        return null;
+    }
+
+    private List<String> fetchScheduleIds(String accountNumber, String numEntity, String productCode) {
+        List<String> scheduleIds = new ArrayList<>();
+
+        String scheduleIdAccountBoa = fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        if (scheduleIdAccountBoa != null) {
+            scheduleIds.add(scheduleIdAccountBoa);
+            Log.info("CustaggProcessor: Fetched Schedule ID from Account_BOA: {}", scheduleIdAccountBoa);
+        }
+
+        String scheduleIdAccountM2M = fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
+        if (scheduleIdAccountM2M != null) {
+            scheduleIds.add(scheduleIdAccountM2M);
+            Log.info("CustaggProcessor: Fetched Schedule ID from Account_M2M: {}", scheduleIdAccountM2M);
+        }
+
+        return scheduleIds;
+    }
+
+    private String fetchScheduleIdUsingAccountBoa(String accountNumber, String numEntity, String productCode) {
+        try {
+            Log.info("Executing query to fetch Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                    accountNumber, numEntity, productCode);
+            return jdbcTemplate.queryForObject(
+                    CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA,
+                    new Object[]{accountNumber, numEntity, productCode},
+                    String.class
+            );
         } catch (Exception e) {
-            log.info("Error fetching Transfer Execution ID for Schedule ID: {}", scheduleId, e);
+            Log.error("CustaggProcessor: Error fetching Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                    accountNumber, numEntity, productCode, e);
+            return null;
         }
     }
 
-    // Pass the list to the batch update method
-    if (!transferExecutionIds.isEmpty()) {
-        updateTransferExecution(transferExecutionIds);
+    private String fetchScheduleIdUsingAccountM2M(String accountNumber, String numEntity, String productCode) {
+        try {
+            Log.info("Executing query to fetch Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                    accountNumber, numEntity, productCode);
+            return jdbcTemplate.queryForObject(
+                    CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M,
+                    new Object[]{accountNumber, numEntity, productCode},
+                    String.class
+            );
+        } catch (Exception e) {
+            Log.error("CustaggProcessor: Error fetching Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                    accountNumber, numEntity, productCode, e);
+            return null;
+        }
     }
 
-    return transferExecutionIds;
-}
+    private List<String> fetchAndUpdateTransferExecutionIds(List<String> scheduleIds) {
+        List<String> transferExecutionIds = new ArrayList<>();
 
-
-private void updateTransferExecution(List<String> transferExecutionIds) {
-    try {
-        jdbcTemplate.batchUpdate(
-            CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M,
-            transferExecutionIds,
-            transferExecutionIds.size(),
-            (ps, transferExecutionId) -> {
-                ps.setString(1, "CUSTAGG"); // updt_by
-                ps.setTimestamp(2, new Timestamp(System.currentTimeMillis())); // updt_ts
-                ps.setString(3, transferExecutionId); // xfer_exeq_m2m_id
+        for (String scheduleId : scheduleIds) {
+            try {
+                String transferExecutionId = jdbcTemplate.queryForObject(
+                        CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID,
+                        new Object[]{scheduleId},
+                        String.class
+                );
+                if (transferExecutionId != null) {
+                    transferExecutionIds.add(transferExecutionId);
+                    Log.info("Fetched Transfer Execution ID for Schedule ID {}: {}", scheduleId, transferExecutionId);
+                } else {
+                    Log.warn("No Transfer Execution ID found for Schedule ID: {}", scheduleId);
+                }
+            } catch (Exception e) {
+                Log.error("Error fetching Transfer Execution ID for Schedule ID: {}", scheduleId, e);
             }
-        );
-        log.info("Batch updated Transfer Execution M2M for IDs: {}", transferExecutionIds);
-    } catch (Exception e) {
-        log.info("Error updating Transfer Execution M2M for IDs: {}", transferExecutionIds, e);
+        }
+
+        if (!transferExecutionIds.isEmpty()) {
+            updateTransferExecution(transferExecutionIds);
+        }
+
+        return transferExecutionIds;
+    }
+
+    private void updateTransferExecution(List<String> transferExecutionIds) {
+        try {
+            jdbcTemplate.batchUpdate(
+                    CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M,
+                    transferExecutionIds,
+                    transferExecutionIds.size(),
+                    (ps, transferExecutionId) -> {
+                        ps.setString(1, "CUSTAGG");
+                        ps.setTimestamp(2, new Timestamp(System.currentTimeMillis()));
+                        ps.setString(3, transferExecutionId);
+                    }
+            );
+            Log.info("Batch updated Transfer Execution M2M for IDs: {}", transferExecutionIds);
+        } catch (Exception e) {
+            Log.error("Error updating Transfer Execution M2M for IDs: {}", transferExecutionIds, e);
+        }
+    }
+
+    private void fetchAndUpdateTransferInstructionIds(List<String> transferExecutionIds, List<String> scheduleIds) {
+        for (String scheduleId : scheduleIds) {
+            for (String transferExecutionId : transferExecutionIds) {
+                try {
+                    String transferInstructionId = jdbcTemplate.queryForObject(
+                            CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID,
+                            new Object[]{transferExecutionId, scheduleId},
+                            String.class
+                    );
+                    if (transferInstructionId != null) {
+                        updateTransferInstruction(transferInstructionId);
+                        Log.info("Updated Transfer Instruction M2M for ID: {}", transferInstructionId);
+                    }
+                } catch (Exception e) {
+                    Log.error("Error fetching Transfer Instruction ID for Execution ID: {} and Schedule ID: {}",
+                            transferExecutionId, scheduleId, e);
+                }
+            }
+        }
+    }
+
+    private void updateTransferInstruction(String transferInstructionId) {
+        try {
+            jdbcTemplate.update(
+                    CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M,
+                    "H02", "Custagg", new Timestamp(System.currentTimeMillis()), transferInstructionId
+            );
+            Log.info("Successfully updated Transfer Instruction M2M for ID: {}", transferInstructionId);
+        } catch (Exception e) {
+            Log.error("Error updating Transfer Instruction M2M for ID: {}", transferInstructionId, e);
+        }
     }
 }
