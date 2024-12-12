@@ -1,47 +1,49 @@
-private void updateTransferInstructionM2M(List<String> transferInstructionIds) {
-    if (transferInstructionIds == null || transferInstructionIds.isEmpty()) {
-        Log.info("No Transfer Instruction IDs provided for update.");
-        return;
-    }
-
+private String fetchScheduleIdUsingAccountBoa(String accountNumber, String numEntity, String productCode) {
     try {
-        String sql = CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M;
-        jdbcTemplate.batchUpdate(
-            sql,
-            transferInstructionIds,
-            transferInstructionIds.size(),
-            (ps, transferInstrId) -> ps.setString(1, transferInstrId)
+        Log.info("Executing query to fetch Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+        
+        return jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA,
+            new Object[]{accountNumber, numEntity, productCode},
+            String.class
         );
-
-        Log.info("Successfully updated Transfer Instruction M2M for IDs: {}", transferInstructionIds);
+    } catch (EmptyResultDataAccessException e) {
+        Log.warn("No Schedule ID found in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage());
+        return null;
+    } catch (DataAccessException e) {
+        Log.error("Database access error while fetching Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return null;
     } catch (Exception e) {
-        Log.error("Error updating Transfer Instruction M2M for IDs: {}", transferInstructionIds, e);
+        Log.error("Unexpected error while fetching Schedule ID from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return null;
     }
 }
 
-
-private List<String> fetchTransferInstructionIds(List<String> scheduleIds) {
-    List<String> transferInstructionIds = new ArrayList<>();
-    if (scheduleIds == null || scheduleIds.isEmpty()) {
-        Log.info("No Schedule IDs provided for fetching Transfer Instruction IDs.");
-        return transferInstructionIds;
-    }
-
+private String fetchScheduleIdUsingAccountM2M(String accountNumber, String numEntity, String productCode) {
     try {
-        // Convert list to array for IN clause
-        String sql = CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID;
-        transferInstructionIds = jdbcTemplate.query(
-            sql,
-            ps -> {
-                ps.setArray(1, scheduleIds.toArray(new String[0]));
-            },
-            (rs, rowNum) -> rs.getString("xfer_instr_id")
+        Log.info("Executing query to fetch Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+        
+        return jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M,
+            new Object[]{accountNumber, numEntity, productCode},
+            String.class
         );
-
-        Log.info("Fetched Transfer Instruction IDs: {}", transferInstructionIds);
+    } catch (EmptyResultDataAccessException e) {
+        Log.warn("No Schedule ID found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage());
+        return null;
+    } catch (DataAccessException e) {
+        Log.error("Database access error while fetching Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return null;
     } catch (Exception e) {
-        Log.error("Error fetching Transfer Instruction IDs for Schedule IDs: {}", scheduleIds, e);
+        Log.error("Unexpected error while fetching Schedule ID from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return null;
     }
-
-    return transferInstructionIds;
 }
