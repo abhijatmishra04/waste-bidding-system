@@ -1,5 +1,76 @@
-SELECT COUNT(*) 
-FROM ACCOUNT_BOA A 
-INNER JOIN SCHEDULE_M2M O 
-ON O.DR_ACC_ID = A.ACC_BOA_ID 
-WHERE A.ACC_NO = ? AND A.END_CD = ? AND A.PROD_CD = ?
+private boolean isRecordPresentInAccountBoa(String accountNumber, String numEntity, String productCode) {
+    try {
+        Log.info("Checking record presence in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+        
+        Integer count = jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_CHECK_RECORD_PRESENT_ACCOUNT_BOA,
+            new Object[]{accountNumber, numEntity, productCode},
+            Integer.class
+        );
+        
+        Log.info("Record presence check in Account_BOA returned count: {}", count);
+        return count != null && count > 0;
+    } catch (DataAccessException e) {
+        Log.error("Database access error while checking record presence in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return false;
+    }
+}
+
+private boolean isRecordPresentInAccountM2M(String accountNumber, String numEntity, String productCode) {
+    try {
+        Log.info("Checking record presence in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+        
+        Integer count = jdbcTemplate.queryForObject(
+            CustaggSQLFactory.FETCH_CHECK_RECORD_PRESENT_ACCOUNT_M2M,
+            new Object[]{accountNumber, numEntity, productCode},
+            Integer.class
+        );
+        
+        Log.info("Record presence check in Account_M2M returned count: {}", count);
+        return count != null && count > 0;
+    } catch (DataAccessException e) {
+        Log.error("Database access error while checking record presence in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
+            accountNumber, numEntity, productCode, e.getMessage(), e);
+        return false;
+    }
+}
+
+
+private List<String> fetchScheduleIds(String accountNumber, String numEntity, String productCode) {
+    List<String> scheduleIds = new ArrayList<>();
+
+    // Check record presence in Account_BOA and fetch schedule ID
+    if (isRecordPresentInAccountBoa(accountNumber, numEntity, productCode)) {
+        String scheduleIdAccountBoa = fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        if (scheduleIdAccountBoa != null) {
+            scheduleIds.add(scheduleIdAccountBoa);
+            Log.info("Fetched Schedule ID from Account_BOA: {}", scheduleIdAccountBoa);
+        } else {
+            Log.warn("No Schedule ID found in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                accountNumber, numEntity, productCode);
+        }
+    } else {
+        Log.info("No matching records in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+    }
+
+    // Check record presence in Account_M2M and fetch schedule ID
+    if (isRecordPresentInAccountM2M(accountNumber, numEntity, productCode)) {
+        String scheduleIdAccountM2M = fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
+        if (scheduleIdAccountM2M != null) {
+            scheduleIds.add(scheduleIdAccountM2M);
+            Log.info("Fetched Schedule ID from Account_M2M: {}", scheduleIdAccountM2M);
+        } else {
+            Log.warn("No Schedule ID found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+                accountNumber, numEntity, productCode);
+        }
+    } else {
+        Log.info("No matching records in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
+            accountNumber, numEntity, productCode);
+    }
+
+    return scheduleIds;
+}
