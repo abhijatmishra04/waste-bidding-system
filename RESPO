@@ -1,102 +1,154 @@
-package com.bofa.sst.batch.partition;
+package com.bofa.sst.batch.exception;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.batch.item.ExecutionContext;
-
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Map;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.junit4.SpringRunner;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-public class CustaggFilePartitionerTest {
+@RunWith(SpringRunner.class)
+public class CustaggGlobalExceptionHandlerTest {
 
-    private CustaggFilePartitioner partitioner;
+    @InjectMocks
+    private CustaggGlobalExceptionHandler exceptionHandler;
 
-    private static final String TEST_FILE_PATH = "src/test/resources/test_input.txt";
-    private static final int RECORD_SIZE = 30;
+    @Mock
+    private CustaggJobException jobException;
+
+    @Mock
+    private CustaggValidationException validationException;
+
+    @Mock
+    private CustaggDatabaseException databaseException;
 
     @Before
-    public void setUp() throws Exception {
-        // Create the partitioner and set a test file path using reflection
-        partitioner = new CustaggFilePartitioner();
-        java.lang.reflect.Field filePathField = CustaggFilePartitioner.class.getDeclaredField("filePath");
-        filePathField.setAccessible(true);
-        filePathField.set(partitioner, TEST_FILE_PATH);
-
-        // Prepare a test file
-        File testFile = new File(TEST_FILE_PATH);
-        if (!testFile.exists()) {
-            String testData = generateTestData(300); // 300 bytes (10 records)
-            Files.write(Paths.get(TEST_FILE_PATH), testData.getBytes());
-        }
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
     }
 
-    private String generateTestData(int size) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < size; i++) {
-            builder.append("A");
-        }
-        return builder.toString();
-    }
-
+    /**
+     * Test JobException handler when the exception message is non-empty.
+     */
     @Test
-    public void testPartition_FileDoesNotExist() throws Exception {
-        // Set a non-existent file path
-        java.lang.reflect.Field filePathField = CustaggFilePartitioner.class.getDeclaredField("filePath");
-        filePathField.setAccessible(true);
-        filePathField.set(partitioner, "invalid/path.txt");
+    public void testHandleJobException_WithMessage() {
+        // Arrange
+        when(jobException.getMessage()).thenReturn("Job error occurred");
+        when(jobException.getJobErrorEnum()).thenReturn(JobErrorEnum.JOB_ERROR);
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleJobException(jobException);
 
-        assertTrue("Partitions should be empty when file does not exist", partitions.isEmpty());
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Job error occurred", response.getBody().getDescription());
+        verify(jobException, times(1)).getMessage();
     }
 
+    /**
+     * Test JobException handler when the exception message is empty.
+     */
     @Test
-    public void testPartition_EmptyFile() throws Exception {
-        // Create an empty test file
-        String emptyFilePath = "src/test/resources/empty_file.txt";
-        Files.write(Paths.get(emptyFilePath), new byte[0]);
+    public void testHandleJobException_EmptyMessage() {
+        // Arrange
+        when(jobException.getMessage()).thenReturn("");
+        when(jobException.getJobErrorEnum()).thenReturn(JobErrorEnum.JOB_ERROR);
 
-        java.lang.reflect.Field filePathField = CustaggFilePartitioner.class.getDeclaredField("filePath");
-        filePathField.setAccessible(true);
-        filePathField.set(partitioner, emptyFilePath);
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleJobException(jobException);
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-
-        assertTrue("Partitions should be empty when file is empty", partitions.isEmpty());
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(JobErrorEnum.JOB_ERROR.getDescription(), response.getBody().getDescription());
     }
 
+    /**
+     * Test ValidationException handler when the exception message is non-empty.
+     */
     @Test
-    public void testPartition_ValidFile() throws Exception {
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+    public void testHandleValidationException_WithMessage() {
+        // Arrange
+        when(validationException.getMessage()).thenReturn("Validation error occurred");
+        when(validationException.getJobErrorEnum()).thenReturn(JobErrorEnum.VALIDATION_ERROR);
 
-        assertNotNull("Partitions should not be null", partitions);
-        assertEquals("Should create 5 partitions", 5, partitions.size());
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleValidationException(validationException);
 
-        ExecutionContext context1 = partitions.get("partition0");
-        assertNotNull(context1);
-        assertEquals("fromLine should start at 1", 1, context1.getInt("fromLine"));
-        assertEquals("toLine should calculate correctly", 3, context1.getInt("toLine")); // 10 records / 5 partitions
-
-        ExecutionContext context5 = partitions.get("partition4");
-        assertNotNull(context5);
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Validation error occurred", response.getBody().getDescription());
     }
 
+    /**
+     * Test ValidationException handler when the exception message is empty.
+     */
     @Test
-    public void testPartition_ExceptionHandling() throws Exception {
-        // Mock file creation to throw exception
-        CustaggFilePartitioner spyPartitioner = spy(partitioner);
-        when(spyPartitioner.partition(anyInt())).thenThrow(new RuntimeException("Test Exception"));
+    public void testHandleValidationException_EmptyMessage() {
+        // Arrange
+        when(validationException.getMessage()).thenReturn("");
+        when(validationException.getJobErrorEnum()).thenReturn(JobErrorEnum.VALIDATION_ERROR);
 
-        try {
-            spyPartitioner.partition(5);
-            fail("Exception was expected but not thrown");
-        } catch (Exception e) {
-            assertEquals("Test Exception", e.getMessage());
-        }
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleValidationException(validationException);
+
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(JobErrorEnum.VALIDATION_ERROR.getDescription(), response.getBody().getDescription());
+    }
+
+    /**
+     * Test generic Exception handler.
+     */
+    @Test
+    public void testHandleException() {
+        // Arrange
+        Exception exception = new Exception("Internal server error");
+
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleException(exception);
+
+        // Assert
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals("Internal server error", response.getBody().getDescription());
+    }
+
+    /**
+     * Test DatabaseException handler when the exception message is non-empty.
+     */
+    @Test
+    public void testHandleDatabaseException_WithMessage() {
+        // Arrange
+        when(databaseException.getMessage()).thenReturn("Database error occurred");
+        when(databaseException.getJobErrorEnum()).thenReturn(JobErrorEnum.DATABASE_ERROR);
+
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleDatabaseException(databaseException);
+
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Database error occurred", response.getBody().getDescription());
+    }
+
+    /**
+     * Test DatabaseException handler when the exception message is empty.
+     */
+    @Test
+    public void testHandleDatabaseException_EmptyMessage() {
+        // Arrange
+        when(databaseException.getMessage()).thenReturn("");
+        when(databaseException.getJobErrorEnum()).thenReturn(JobErrorEnum.DATABASE_ERROR);
+
+        // Act
+        ResponseEntity<CustaggJobError> response = exceptionHandler.handleDatabaseException(databaseException);
+
+        // Assert
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(JobErrorEnum.DATABASE_ERROR.getDescription(), response.getBody().getDescription());
     }
 }
