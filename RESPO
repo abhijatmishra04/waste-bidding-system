@@ -2,156 +2,108 @@ package com.bofa.sst.batch.core.impl;
 
 import com.bofa.sst.batch.model.CustaggRecordsDTO;
 import org.junit.*;
-import org.mockito.*;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemStreamException;
 
-import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
 
 public class CustagCompFileReaderTest {
 
     private CustagCompFileReader fileReader;
-    private ExecutionContext mockExecutionContext;
-    private BufferedInputStream mockBufferedInputStream;
-    private FileInputStream mockFileInputStream;
-    private File mockFile;
+    private ExecutionContext executionContext;
+    private Path testFilePath;
 
     @Before
     public void setUp() throws Exception {
-        fileReader = Mockito.spy(new CustagCompFileReader());
-        mockExecutionContext = mock(ExecutionContext.class);
-        mockBufferedInputStream = mock(BufferedInputStream.class);
-        mockFileInputStream = mock(FileInputStream.class);
-        mockFile = mock(File.class);
+        fileReader = new CustagCompFileReader();
+        executionContext = new ExecutionContext();
 
-        // Inject mock values
-        fileReader.inputFilePath = "test-file-path";
-        Mockito.doReturn(mockBufferedInputStream).when(fileReader).createBufferedInputStream(any());
+        // Create a temporary test file
+        testFilePath = Files.createTempFile("test-input", ".txt");
+        String sampleData = "PROD01ENTITY001ACC123456789012345\n"
+                          + "PROD02ENTITY002ACC987654321098765\n";
+        Files.write(testFilePath, sampleData.getBytes(), StandardOpenOption.WRITE);
+
+        fileReader.inputFilePath = testFilePath.toString();
     }
 
     @Test
-    public void testOpen_Success() throws Exception {
-        // Arrange
-        when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-        when(mockExecutionContext.getInt("toLine")).thenReturn(2);
-        when(mockFile.exists()).thenReturn(true);
-        Mockito.doReturn(mockFile).when(fileReader).getFile(anyString());
-        when(mockBufferedInputStream.skip(anyLong())).thenReturn(30L);
+    public void testOpenAndRead_Success() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
 
-        // Act
-        fileReader.open(mockExecutionContext);
+        try {
+            fileReader.open(executionContext);
 
-        // Assert
-        verify(mockExecutionContext).getInt("fromLine");
-        verify(mockExecutionContext).getInt("toLine");
-        verify(mockBufferedInputStream).skip(30L);
-    }
+            CustaggRecordsDTO record1 = fileReader.read();
+            assertNotNull("First record should not be null", record1);
+            assertEquals("PROD01", record1.getProductCode());
+            assertEquals("ENTITY001", record1.getEntity());
+            assertEquals("ACC123456789012345", record1.getAccountNumber());
 
-    @Test(expected = RuntimeException.class)
-    public void testOpen_FileNotFound() {
-        // Arrange
-        when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-        when(mockExecutionContext.getInt("toLine")).thenReturn(2);
-        Mockito.doReturn(mockFile).when(fileReader).getFile(anyString());
-        when(mockFile.exists()).thenReturn(false);
+            CustaggRecordsDTO record2 = fileReader.read();
+            assertNotNull("Second record should not be null", record2);
+            assertEquals("PROD02", record2.getProductCode());
+            assertEquals("ENTITY002", record2.getEntity());
+            assertEquals("ACC987654321098765", record2.getAccountNumber());
 
-        // Act
-        fileReader.open(mockExecutionContext);
-    }
-
-    @Test(expected = RuntimeException.class)
-    public void testOpen_SkipFails() throws Exception {
-        // Arrange
-        when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-        when(mockExecutionContext.getInt("toLine")).thenReturn(2);
-        when(mockFile.exists()).thenReturn(true);
-        Mockito.doReturn(mockFile).when(fileReader).getFile(anyString());
-        when(mockBufferedInputStream.skip(anyLong())).thenReturn(-1L);
-
-        // Act
-        fileReader.open(mockExecutionContext);
-    }
-
-    @Test
-    public void testRead_Success() throws Exception {
-        // Arrange
-        byte[] recordBytes = new byte[30];
-        when(mockBufferedInputStream.read(any(byte[].class))).thenReturn(30);
-        fileReader.numberOfRecordsToRead = 2;
-        fileReader.currentRecord = 0;
-
-        // Act
-        CustaggRecordsDTO result = fileReader.read();
-
-        // Assert
-        assertNotNull(result);
-        verify(mockBufferedInputStream).read(any(byte[].class));
-    }
-
-    @Test
-    public void testRead_EndOfFile() throws Exception {
-        // Arrange
-        when(mockBufferedInputStream.read(any(byte[].class))).thenReturn(-1);
-        fileReader.numberOfRecordsToRead = 2;
-        fileReader.currentRecord = 0;
-
-        // Act
-        CustaggRecordsDTO result = fileReader.read();
-
-        // Assert
-        assertNull(result);
-        verify(mockBufferedInputStream).read(any(byte[].class));
+            assertNull("No more records expected", fileReader.read());
+        } finally {
+            fileReader.close(); // Ensure cleanup
+        }
     }
 
     @Test(expected = RuntimeException.class)
     public void testRead_IncompleteRecord() throws Exception {
-        // Arrange
-        when(mockBufferedInputStream.read(any(byte[].class))).thenReturn(25); // Less than RECORD_SIZE
-        fileReader.numberOfRecordsToRead = 2;
-        fileReader.currentRecord = 0;
+        Files.write(testFilePath, "INCOMPLETE".getBytes(), StandardOpenOption.APPEND);
 
-        // Act
-        fileReader.read();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        try {
+            fileReader.open(executionContext);
+            fileReader.read(); // Valid record
+            fileReader.read(); // Valid record
+            fileReader.read(); // Incomplete record - should throw exception
+        } finally {
+            fileReader.close(); // Cleanup
+        }
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testOpen_FileNotFound() throws Exception {
+        fileReader.inputFilePath = "non-existent-file.txt";
+        fileReader.open(executionContext);
     }
 
     @Test
-    public void testClose_Success() throws Exception {
-        // Arrange
-        fileReader.bis = mockBufferedInputStream;
+    public void testUpdateExecutionContext() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
 
-        // Act
-        fileReader.close();
+        try {
+            fileReader.open(executionContext);
+            fileReader.read();
+            fileReader.update(executionContext);
 
-        // Assert
-        verify(mockBufferedInputStream).close();
-    }
-
-    @Test
-    public void testClose_NullStream() throws Exception {
-        // Act
-        fileReader.close();
-
-        // Assert
-        assertTrue("Closing a null stream should not throw an exception.", true);
-    }
-
-    @Test
-    public void testUpdate() {
-        // Arrange
-        fileReader.currentRecord = 5;
-
-        // Act
-        fileReader.update(mockExecutionContext);
-
-        // Assert
-        verify(mockExecutionContext).putInt("counter", 5);
+            assertEquals("ExecutionContext counter should be updated", 1, executionContext.getInt("counter"));
+        } finally {
+            fileReader.close(); // Cleanup
+        }
     }
 
     @After
     public void tearDown() throws Exception {
-        fileReader.close();
+        // Ensure the stream is closed
+        if (fileReader != null) {
+            fileReader.close();
+        }
+        // Safely delete the temporary file
+        if (Files.exists(testFilePath)) {
+            Files.deleteIfExists(testFilePath);
+        }
     }
 }
