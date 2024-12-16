@@ -1,22 +1,23 @@
-package com.bofa.sst.batch.core;
+package com.bofa.sst.batch.core.impl;
 
 import com.bofa.sst.batch.constants.CustaggSQLFactory;
-import com.bofa.sst.batch.core.impl.CustaggProcessor;
-import com.bofa.sst.batch.dto.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.dto.CustaggRecordsDTO;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.*;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -25,6 +26,7 @@ public class CustaggProcessorTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @InjectMocks
     private CustaggProcessor processor;
 
     private HashMap<String, String> entityMap;
@@ -34,8 +36,6 @@ public class CustaggProcessorTest {
         entityMap = new HashMap<>();
         entityMap.put("ENTITY1", "MAPPED_ENTITY1");
         processor = new CustaggProcessor(entityMap);
-        MockitoAnnotations.initMocks(this);
-        processor = Mockito.spy(new CustaggProcessor(entityMap));
         ReflectionTestUtils.setField(processor, "jdbcTemplate", jdbcTemplate);
     }
 
@@ -47,11 +47,13 @@ public class CustaggProcessorTest {
         input.setAccountNumber("ACC12345");
         input.setProductCode("PROD01");
 
+        // Mock database calls
         when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
                 .thenReturn("SCHED123");
         when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID), eq(String.class), any()))
                 .thenReturn("EXEC456");
-        doNothing().when(jdbcTemplate).update(eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M), any());
+
+        doAnswer(invocation -> null).when(jdbcTemplate).update(eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M), any());
 
         // Act
         CustaggProcessedRecordsDTO result = processor.process(input);
@@ -65,7 +67,8 @@ public class CustaggProcessorTest {
         assertTrue(result.getScheduleIds().contains("SCHED123"));
         assertTrue(result.getTransferExecutionIds().contains("EXEC456"));
 
-        verify(jdbcTemplate, times(1)).queryForObject(anyString(), eq(String.class), any());
+        // Verify database interactions
+        verify(jdbcTemplate, times(2)).queryForObject(anyString(), eq(String.class), any());
         verify(jdbcTemplate, times(1)).update(eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M), any());
     }
 
@@ -79,13 +82,17 @@ public class CustaggProcessorTest {
 
         // Act
         processor.process(input);
+
+        // Assert (Expecting exception)
     }
 
     @Test
     public void testProcess_NoMatchInEntityMap() throws Exception {
         // Arrange
         CustaggRecordsDTO input = new CustaggRecordsDTO();
-        input.setEntity("INVALID_ENTITY");
+        input.setEntity("UNKNOWN_ENTITY");
+        input.setAccountNumber("ACC12345");
+        input.setProductCode("PROD01");
 
         // Act
         CustaggProcessedRecordsDTO result = processor.process(input);
@@ -102,14 +109,15 @@ public class CustaggProcessorTest {
         input.setAccountNumber("ACC12345");
         input.setProductCode("PROD01");
 
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any()))
-                .thenThrow(new RuntimeException("Fetch error"));
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
+                .thenThrow(new RuntimeException("DB error"));
 
         // Act
         CustaggProcessedRecordsDTO result = processor.process(input);
 
         // Assert
         assertNotNull(result);
+        assertEquals("MAPPED_ENTITY1", result.getMappedEntity());
         assertTrue(result.getScheduleIds().isEmpty());
     }
 
@@ -123,14 +131,15 @@ public class CustaggProcessorTest {
 
         when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
                 .thenReturn("SCHED123");
+
         when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID), eq(String.class), any()))
-                .thenThrow(new RuntimeException("Transfer Execution Error"));
+                .thenThrow(new RuntimeException("DB error"));
 
         // Act
         CustaggProcessedRecordsDTO result = processor.process(input);
 
         // Assert
         assertNotNull(result);
-        assertEquals(0, result.getTransferExecutionIds().size());
+        assertTrue(result.getTransferExecutionIds().isEmpty());
     }
 }
