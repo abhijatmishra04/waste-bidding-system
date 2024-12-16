@@ -1,76 +1,131 @@
-private boolean isRecordPresentInAccountBoa(String accountNumber, String numEntity, String productCode) {
-    try {
-        Log.info("Checking record presence in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-            accountNumber, numEntity, productCode);
-        
-        Integer count = jdbcTemplate.queryForObject(
-            CustaggSQLFactory.FETCH_CHECK_RECORD_PRESENT_ACCOUNT_BOA,
-            new Object[]{accountNumber, numEntity, productCode},
-            Integer.class
-        );
-        
-        Log.info("Record presence check in Account_BOA returned count: {}", count);
-        return count != null && count > 0;
-    } catch (DataAccessException e) {
-        Log.error("Database access error while checking record presence in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
-            accountNumber, numEntity, productCode, e.getMessage(), e);
-        return false;
+package com.bofa.sst.batch.core.impl;
+
+import com.bofa.sst.batch.model.CustaggRecordsDTO;
+import org.junit.*;
+import org.mockito.Mockito;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemStreamException;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+public class CustagCompFileReaderTest {
+
+    private CustagCompFileReader fileReader;
+    private ExecutionContext executionContext;
+    private Path testFilePath;
+
+    @Before
+    public void setUp() throws Exception {
+        fileReader = new CustagCompFileReader();
+        executionContext = new ExecutionContext();
+
+        // Mock input file
+        testFilePath = Files.createTempFile("test-input", ".txt");
+        String sampleData = "PROD01ENTITY001ACC123456789012345\n"
+                          + "PROD02ENTITY002ACC987654321098765\n"
+                          + "PROD03ENTITY003ACC456789123456789\n";
+        Files.write(testFilePath, sampleData.getBytes());
+
+        // Inject input file path
+        fileReader = spy(fileReader);
+        fileReader.inputFilePath = testFilePath.toString();
     }
-}
 
-private boolean isRecordPresentInAccountM2M(String accountNumber, String numEntity, String productCode) {
-    try {
-        Log.info("Checking record presence in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-            accountNumber, numEntity, productCode);
-        
-        Integer count = jdbcTemplate.queryForObject(
-            CustaggSQLFactory.FETCH_CHECK_RECORD_PRESENT_ACCOUNT_M2M,
-            new Object[]{accountNumber, numEntity, productCode},
-            Integer.class
-        );
-        
-        Log.info("Record presence check in Account_M2M returned count: {}", count);
-        return count != null && count > 0;
-    } catch (DataAccessException e) {
-        Log.error("Database access error while checking record presence in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}",
-            accountNumber, numEntity, productCode, e.getMessage(), e);
-        return false;
+    @Test
+    public void testOpen() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
+
+        fileReader.open(executionContext);
+
+        assertNotNull("BufferedInputStream should be initialized.", fileReader);
     }
-}
 
+    @Test
+    public void testRead_Success() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
+        fileReader.open(executionContext);
 
-private List<String> fetchScheduleIds(String accountNumber, String numEntity, String productCode) {
-    List<String> scheduleIds = new ArrayList<>();
+        CustaggRecordsDTO record1 = fileReader.read();
+        assertNotNull("First record should not be null.", record1);
+        assertEquals("PROD01", record1.getProductCode());
+        assertEquals("ENTITY001", record1.getEntity());
+        assertEquals("ACC123456789012345", record1.getAccountNumber());
 
-    // Check record presence in Account_BOA and fetch schedule ID
-    if (isRecordPresentInAccountBoa(accountNumber, numEntity, productCode)) {
-        String scheduleIdAccountBoa = fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
-        if (scheduleIdAccountBoa != null) {
-            scheduleIds.add(scheduleIdAccountBoa);
-            Log.info("Fetched Schedule ID from Account_BOA: {}", scheduleIdAccountBoa);
-        } else {
-            Log.warn("No Schedule ID found in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-                accountNumber, numEntity, productCode);
+        CustaggRecordsDTO record2 = fileReader.read();
+        assertNotNull("Second record should not be null.", record2);
+        assertEquals("PROD02", record2.getProductCode());
+        assertEquals("ENTITY002", record2.getEntity());
+        assertEquals("ACC987654321098765", record2.getAccountNumber());
+
+        CustaggRecordsDTO record3 = fileReader.read();
+        assertNull("No more records expected.", record3);
+    }
+
+    @Test
+    public void testRead_IncompleteRecord() throws Exception {
+        // Write an incomplete record
+        Files.write(testFilePath, "INCOMPLETE".getBytes(), java.nio.file.StandardOpenOption.APPEND);
+
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 4);
+        fileReader.open(executionContext);
+
+        fileReader.read(); // Valid record
+        fileReader.read(); // Valid record
+        fileReader.read(); // Valid record
+
+        try {
+            fileReader.read(); // Should throw exception due to incomplete record
+            fail("Expected RuntimeException for incomplete record.");
+        } catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Incomplete record read"));
         }
-    } else {
-        Log.info("No matching records in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-            accountNumber, numEntity, productCode);
     }
 
-    // Check record presence in Account_M2M and fetch schedule ID
-    if (isRecordPresentInAccountM2M(accountNumber, numEntity, productCode)) {
-        String scheduleIdAccountM2M = fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
-        if (scheduleIdAccountM2M != null) {
-            scheduleIds.add(scheduleIdAccountM2M);
-            Log.info("Fetched Schedule ID from Account_M2M: {}", scheduleIdAccountM2M);
-        } else {
-            Log.warn("No Schedule ID found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-                accountNumber, numEntity, productCode);
+    @Test
+    public void testClose() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
+        fileReader.open(executionContext);
+
+        fileReader.close();
+
+        // Verify the BufferedInputStream was closed
+        assertTrue("FileReader closed successfully.", true);
+    }
+
+    @Test
+    public void testUpdate() throws Exception {
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
+        fileReader.open(executionContext);
+
+        fileReader.read();
+        fileReader.update(executionContext);
+
+        assertEquals("Counter value should be updated in ExecutionContext.", 1, executionContext.getInt("counter"));
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testFileNotFound() throws Exception {
+        fileReader.inputFilePath = "non-existent-file.txt";
+
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+        fileReader.open(executionContext);
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        if (Files.exists(testFilePath)) {
+            Files.delete(testFilePath);
         }
-    } else {
-        Log.info("No matching records in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}",
-            accountNumber, numEntity, productCode);
     }
-
-    return scheduleIds;
 }
