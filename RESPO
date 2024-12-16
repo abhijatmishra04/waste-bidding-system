@@ -2,117 +2,175 @@ package com.bofa.sst.batch.core.impl;
 
 import com.bofa.sst.batch.constants.CustaggSQLFactory;
 import org.junit.*;
+import org.junit.runner.RunWith;
 import org.mockito.*;
+import org.mockito.runners.MockitoJUnitRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.*;
 
-import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-public class CustaggWriterTest {
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggProcessorTest {
 
-    private CustaggWriter writer;
+    private CustaggProcessor processor;
 
     @Mock
     private JdbcTemplate jdbcTemplate;
 
-    @Captor
-    private ArgumentCaptor<List<Object[]>> batchParamsCaptor;
+    private HashMap<String, String> entityMap;
 
     @Before
     public void setUp() {
+        entityMap = new HashMap<>();
+        entityMap.put("ENTITY1", "MAPPED_ENTITY1");
+        entityMap.put("ENTITY2", "MAPPED_ENTITY2");
+
+        processor = new CustaggProcessor(entityMap);
         MockitoAnnotations.initMocks(this);
-        writer = new CustaggWriter();
-        ReflectionTestUtils.setField(writer, "jdbcTemplate", jdbcTemplate);
+        ReflectionTestUtils.setField(processor, "jdbcTemplate", jdbcTemplate);
     }
 
     @Test
-    public void testWrite_SuccessWithScheduleIds() throws Exception {
-        // Prepare input records
-        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
-        record1.setScheduleIds(Arrays.asList("SCHD001", "SCHD002"));
+    public void testProcess_SuccessfulProcessing() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("ENTITY1", "ACC12345", "PROD01");
 
-        CustaggProcessedRecordsDTO record2 = new CustaggProcessedRecordsDTO();
-        record2.setScheduleIds(Arrays.asList("SCHD003"));
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("SCHED123");
 
-        List<CustaggProcessedRecordsDTO> records = Arrays.asList(record1, record2);
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("EXEC456");
 
-        // Call the method
-        writer.write(records);
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("INSTR789");
 
-        // Verify batchUpdate is called once
-        verify(jdbcTemplate, times(1)).batchUpdate(eq(CustaggSQLFactory.UPDATE_SCHEDULE_M2M), batchParamsCaptor.capture());
+        CustaggProcessedRecordsDTO result = processor.process(input);
 
-        // Validate batch parameters
-        List<Object[]> capturedParams = batchParamsCaptor.getValue();
-        assertEquals("Batch update should have 3 parameters", 3, capturedParams.size());
-        
-        assertEquals("SCHD001", capturedParams.get(0)[2]);
-        assertEquals("SCHD002", capturedParams.get(1)[2]);
-        assertEquals("SCHD003", capturedParams.get(2)[2]);
+        assertNotNull(result);
+        assertEquals("MAPPED_ENTITY1", result.getMappedEntity());
+        assertEquals("ENTITY1", result.getNumEntity());
+        assertEquals("ACC12345", result.getAccountNumber());
+        assertEquals("PROD01", result.getProductCode());
+        assertTrue(result.getScheduleIds().contains("SCHED123"));
+        assertTrue(result.getTransferExecutionIds().contains("EXEC456"));
 
-        assertNotNull("Timestamp should not be null", capturedParams.get(0)[1]);
-        assertNotNull("Date should not be null", capturedParams.get(0)[0]);
+        verify(jdbcTemplate, times(1)).queryForObject(anyString(), eq(String.class), any(Object[].class));
+        verify(jdbcTemplate, times(1)).update(anyString(), any());
     }
 
     @Test
-    public void testWrite_NoScheduleIds() throws Exception {
-        // Prepare input records with no schedule IDs
-        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
-        record1.setScheduleIds(Collections.emptyList());
-
-        CustaggProcessedRecordsDTO record2 = new CustaggProcessedRecordsDTO();
-        record2.setScheduleIds(null);
-
-        List<CustaggProcessedRecordsDTO> records = Arrays.asList(record1, record2);
-
-        // Call the method
-        writer.write(records);
-
-        // Verify that batchUpdate is not called
-        verify(jdbcTemplate, never()).batchUpdate(anyString(), anyList());
-    }
-
-    @Test
-    public void testWrite_EmptyInputList() throws Exception {
-        // Prepare empty input list
-        List<CustaggProcessedRecordsDTO> records = new ArrayList<>();
-
-        // Call the method
-        writer.write(records);
-
-        // Verify that batchUpdate is not called
-        verify(jdbcTemplate, never()).batchUpdate(anyString(), anyList());
-    }
-
-    @Test
-    public void testWrite_BatchUpdateFails() throws Exception {
-        // Prepare input records
-        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
-        record1.setScheduleIds(Arrays.asList("SCHD001"));
-
-        List<CustaggProcessedRecordsDTO> records = Collections.singletonList(record1);
-
-        // Simulate exception during batch update
-        doThrow(new RuntimeException("Database error")).when(jdbcTemplate).batchUpdate(anyString(), anyList());
+    public void testProcess_EmptyEntityMap() throws Exception {
+        entityMap.clear();
+        CustaggProcessor emptyProcessor = new CustaggProcessor(entityMap);
+        CustaggRecordsDTO input = new CustaggRecordsDTO("ENTITY1", "ACC12345", "PROD01");
 
         try {
-            writer.write(records);
-            fail("Expected RuntimeException due to database error");
-        } catch (RuntimeException e) {
-            assertTrue(e.getMessage().contains("Database error"));
+            emptyProcessor.process(input);
+            fail("Expected IllegalStateException due to empty entity map.");
+        } catch (IllegalStateException e) {
+            assertEquals("HashMap is empty. Check EntityFileReader.", e.getMessage());
         }
+    }
 
-        // Verify batchUpdate was called once
-        verify(jdbcTemplate, times(1)).batchUpdate(anyString(), anyList());
+    @Test
+    public void testProcess_NoMatchInEntityMap() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("NON_EXISTENT_ENTITY", "ACC12345", "PROD01");
+
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_FetchScheduleIdFails() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("ENTITY1", "ACC12345", "PROD01");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn(null);
+
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        assertNotNull(result);
+        assertTrue(result.getScheduleIds().isEmpty());
+    }
+
+    @Test
+    public void testProcess_FetchTransferExecutionIdFails() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("ENTITY1", "ACC12345", "PROD01");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("SCHED123");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn(null);
+
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        assertNotNull(result);
+        assertTrue(result.getTransferExecutionIds().isEmpty());
+    }
+
+    @Test
+    public void testProcess_FetchTransferInstructionFails() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("ENTITY1", "ACC12345", "PROD01");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("SCHED123");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn("EXEC456");
+
+        when(jdbcTemplate.queryForObject(
+                eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                eq(String.class),
+                any(Object[].class)
+        )).thenReturn(null);
+
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        assertNotNull(result);
+        assertTrue(result.getScheduleIds().contains("SCHED123"));
+        assertTrue(result.getTransferExecutionIds().contains("EXEC456"));
+    }
+
+    @Test
+    public void testProcess_NoEntityInFile() throws Exception {
+        CustaggRecordsDTO input = new CustaggRecordsDTO("", "ACC12345", "PROD01");
+
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        assertNull(result);
     }
 
     @After
     public void tearDown() {
-        writer = null;
-        jdbcTemplate = null;
+        // Cleanup if needed
+        entityMap.clear();
     }
 }
