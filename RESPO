@@ -1,127 +1,118 @@
 package com.bofa.sst.batch.core.impl;
 
+import com.bofa.sst.batch.constants.CustaggSQLFactory;
 import org.junit.*;
-import org.mockito.Mockito;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.mockito.*;
+import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.HashMap;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.*;
 
-import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
 
-public class CustaggEntityFileReaderTest {
+public class CustaggWriterTest {
 
-    private CustaggEntityFileReader fileReader;
-    private Path testFilePath;
+    private CustaggWriter writer;
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    @Captor
+    private ArgumentCaptor<List<Object[]>> batchParamsCaptor;
 
     @Before
-    public void setUp() throws Exception {
-        fileReader = new CustaggEntityFileReader();
-        testFilePath = Files.createTempFile("test-entity-file", ".txt");
-        ReflectionTestUtils.setField(fileReader, "filePath", testFilePath.toString());
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        writer = new CustaggWriter();
+        ReflectionTestUtils.setField(writer, "jdbcTemplate", jdbcTemplate);
     }
 
     @Test
-    public void testLoadEntityMap_Success() throws Exception {
-        // Valid file with correct lines
-        Files.write(testFilePath, 
-            ("ABCD1234\n" +
-             "WXYZ5678\n").getBytes());
+    public void testWrite_SuccessWithScheduleIds() throws Exception {
+        // Prepare input records
+        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
+        record1.setScheduleIds(Arrays.asList("SCHD001", "SCHD002"));
 
-        HashMap<String, String> entityMap = fileReader.loadEntityMap();
+        CustaggProcessedRecordsDTO record2 = new CustaggProcessedRecordsDTO();
+        record2.setScheduleIds(Arrays.asList("SCHD003"));
 
-        assertNotNull("Entity map should not be null", entityMap);
-        assertEquals("Entity map should contain 2 entries", 2, entityMap.size());
-        assertEquals("ABCD", entityMap.get("1234"));
-        assertEquals("WXYZ", entityMap.get("5678"));
+        List<CustaggProcessedRecordsDTO> records = Arrays.asList(record1, record2);
+
+        // Call the method
+        writer.write(records);
+
+        // Verify batchUpdate is called once
+        verify(jdbcTemplate, times(1)).batchUpdate(eq(CustaggSQLFactory.UPDATE_SCHEDULE_M2M), batchParamsCaptor.capture());
+
+        // Validate batch parameters
+        List<Object[]> capturedParams = batchParamsCaptor.getValue();
+        assertEquals("Batch update should have 3 parameters", 3, capturedParams.size());
+        
+        assertEquals("SCHD001", capturedParams.get(0)[2]);
+        assertEquals("SCHD002", capturedParams.get(1)[2]);
+        assertEquals("SCHD003", capturedParams.get(2)[2]);
+
+        assertNotNull("Timestamp should not be null", capturedParams.get(0)[1]);
+        assertNotNull("Date should not be null", capturedParams.get(0)[0]);
     }
 
     @Test
-    public void testLoadEntityMap_SkipShortLines() throws Exception {
-        // File with one valid line and one short line
-        Files.write(testFilePath, 
-            ("SHORT\n" +
-             "ABCD1234\n").getBytes());
+    public void testWrite_NoScheduleIds() throws Exception {
+        // Prepare input records with no schedule IDs
+        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
+        record1.setScheduleIds(Collections.emptyList());
 
-        HashMap<String, String> entityMap = fileReader.loadEntityMap();
+        CustaggProcessedRecordsDTO record2 = new CustaggProcessedRecordsDTO();
+        record2.setScheduleIds(null);
 
-        assertNotNull("Entity map should not be null", entityMap);
-        assertEquals("Entity map should contain 1 entry", 1, entityMap.size());
-        assertEquals("ABCD", entityMap.get("1234"));
+        List<CustaggProcessedRecordsDTO> records = Arrays.asList(record1, record2);
+
+        // Call the method
+        writer.write(records);
+
+        // Verify that batchUpdate is not called
+        verify(jdbcTemplate, never()).batchUpdate(anyString(), anyList());
     }
 
     @Test
-    public void testLoadEntityMap_SkipLinesWithMissingValues() throws Exception {
-        // File with missing values in one line
-        Files.write(testFilePath, 
-            ("    1234\n" + // Missing alphaEntity
-             "ABCD    \n" + // Missing numEntity
-             "WXYZ5678\n").getBytes());
+    public void testWrite_EmptyInputList() throws Exception {
+        // Prepare empty input list
+        List<CustaggProcessedRecordsDTO> records = new ArrayList<>();
 
-        HashMap<String, String> entityMap = fileReader.loadEntityMap();
+        // Call the method
+        writer.write(records);
 
-        assertNotNull("Entity map should not be null", entityMap);
-        assertEquals("Entity map should contain 1 entry", 1, entityMap.size());
-        assertEquals("WXYZ", entityMap.get("5678"));
+        // Verify that batchUpdate is not called
+        verify(jdbcTemplate, never()).batchUpdate(anyString(), anyList());
     }
 
     @Test
-    public void testLoadEntityMap_EmptyFile() throws Exception {
-        // Empty file
-        Files.write(testFilePath, "".getBytes());
+    public void testWrite_BatchUpdateFails() throws Exception {
+        // Prepare input records
+        CustaggProcessedRecordsDTO record1 = new CustaggProcessedRecordsDTO();
+        record1.setScheduleIds(Arrays.asList("SCHD001"));
 
-        HashMap<String, String> entityMap = fileReader.loadEntityMap();
+        List<CustaggProcessedRecordsDTO> records = Collections.singletonList(record1);
 
-        assertNotNull("Entity map should not be null", entityMap);
-        assertTrue("Entity map should be empty", entityMap.isEmpty());
-    }
-
-    @Test
-    public void testLoadEntityMap_AllInvalidLines() throws Exception {
-        // File with all invalid lines
-        Files.write(testFilePath, 
-            ("SHORT\n" +
-             "    1234\n" +
-             "ABCD    \n").getBytes());
-
-        HashMap<String, String> entityMap = fileReader.loadEntityMap();
-
-        assertNotNull("Entity map should not be null", entityMap);
-        assertTrue("Entity map should be empty", entityMap.isEmpty());
-    }
-
-    @Test(expected = Exception.class)
-    public void testLoadEntityMap_FileNotFound() throws Exception {
-        // Set a non-existent file path
-        ReflectionTestUtils.setField(fileReader, "filePath", "non-existent-file.txt");
-        fileReader.loadEntityMap();
-    }
-
-    @Test
-    public void testLoadEntityMap_ErrorReadingFile() throws Exception {
-        // Mock BufferedReader to throw IOException
-        CustaggEntityFileReader mockFileReader = Mockito.spy(fileReader);
-
-        doThrow(new IOException("Simulated read error"))
-                .when(mockFileReader)
-                .loadEntityMap();
+        // Simulate exception during batch update
+        doThrow(new RuntimeException("Database error")).when(jdbcTemplate).batchUpdate(anyString(), anyList());
 
         try {
-            mockFileReader.loadEntityMap();
-            fail("Expected exception due to file read error");
-        } catch (Exception e) {
-            assertTrue("Exception message should contain 'Error reading file'", 
-                e.getMessage().contains("Error reading file"));
+            writer.write(records);
+            fail("Expected RuntimeException due to database error");
+        } catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Database error"));
         }
+
+        // Verify batchUpdate was called once
+        verify(jdbcTemplate, times(1)).batchUpdate(anyString(), anyList());
     }
 
     @After
-    public void tearDown() throws Exception {
-        if (Files.exists(testFilePath)) {
-            Files.deleteIfExists(testFilePath);
-        }
+    public void tearDown() {
+        writer = null;
+        jdbcTemplate = null;
     }
 }
