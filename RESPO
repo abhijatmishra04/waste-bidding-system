@@ -1,4 +1,173 @@
-verify(jdbcTemplate, times(1)).update(
-        Mockito.eq(anyString()), 
-        Mockito.any(PreparedStatementSetter.class)
-);
+package com.bofa.sst.batch.core.impl;
+
+import com.bofa.sst.batch.constants.CustaggSQLFactory;
+import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
+import com.bofa.sst.batch.model.CustaggRecordsDTO;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.sql.Timestamp;
+import java.util.*;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggProcessorTest {
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    private Map<String, String> entityMap;
+
+    @InjectMocks
+    private CustaggProcessor processor;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+
+        // Initialize entityMap with mock data
+        entityMap = new HashMap<>();
+        entityMap.put("ENTITY1", "MAPPED_ENTITY1");
+        entityMap.put("ENTITY2", "MAPPED_ENTITY2");
+
+        processor = new CustaggProcessor(entityMap);
+        processor.jdbcTemplate = jdbcTemplate; // Manually inject the mock JdbcTemplate
+    }
+
+    @Test
+    public void testProcess_SuccessfulProcessing() throws Exception {
+        // Arrange
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("ENTITY1");
+        input.setAccountNumber("ACC12345");
+        input.setProductCode("PROD01");
+
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
+                .thenReturn("SCHED123");
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID), eq(String.class), any()))
+                .thenReturn("EXEC123");
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID), eq(String.class), any()))
+                .thenReturn("INSTR123");
+
+        doNothing().when(jdbcTemplate).batchUpdate(eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M), anyList(), anyInt(), any());
+        when(jdbcTemplate.update(eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M), any(), any(), any(), any()))
+                .thenReturn(1);
+
+        // Act
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals("MAPPED_ENTITY1", result.getMappedEntity());
+        assertEquals("ENTITY1", result.getNumEntity());
+        assertEquals("ACC12345", result.getAccountNumber());
+        assertEquals("PROD01", result.getProductCode());
+        assertTrue(result.getScheduleIds().contains("SCHED123"));
+        assertTrue(result.getTransferExecutionIds().contains("EXEC123"));
+
+        verify(jdbcTemplate, times(1)).queryForObject(anyString(), eq(String.class), any());
+        verify(jdbcTemplate, times(1)).batchUpdate(eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M), anyList(), anyInt(), any());
+        verify(jdbcTemplate, times(1)).update(eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M), any(), any(), any(), any());
+    }
+
+    @Test
+    public void testProcess_EmptyEntityMap() {
+        // Arrange
+        processor = new CustaggProcessor(new HashMap<>());
+
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("ENTITY1");
+
+        // Act & Assert
+        try {
+            processor.process(input);
+            fail("Expected IllegalStateException due to empty entity map.");
+        } catch (IllegalStateException e) {
+            assertEquals("HashMap is empty. Check EntityFileReader.", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testProcess_NoMatchInEntityMap() throws Exception {
+        // Arrange
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("UNKNOWN_ENTITY");
+
+        // Act
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        // Assert
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_FetchScheduleIdFails() throws Exception {
+        // Arrange
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("ENTITY1");
+        input.setAccountNumber("ACC12345");
+        input.setProductCode("PROD01");
+
+        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any())).thenThrow(new RuntimeException("DB Error"));
+
+        // Act
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.getScheduleIds().isEmpty());
+        verify(jdbcTemplate, times(2)).queryForObject(anyString(), eq(String.class), any());
+    }
+
+    @Test
+    public void testProcess_FetchTransferExecutionIdFails() throws Exception {
+        // Arrange
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("ENTITY1");
+        input.setAccountNumber("ACC12345");
+        input.setProductCode("PROD01");
+
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
+                .thenReturn("SCHED123");
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID), eq(String.class), any()))
+                .thenThrow(new RuntimeException("Execution ID Fetch Failed"));
+
+        // Act
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.getTransferExecutionIds().isEmpty());
+    }
+
+    @Test
+    public void testProcess_FetchTransferInstructionIdFails() throws Exception {
+        // Arrange
+        CustaggRecordsDTO input = new CustaggRecordsDTO();
+        input.setEntity("ENTITY1");
+        input.setAccountNumber("ACC12345");
+        input.setProductCode("PROD01");
+
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA), eq(String.class), any()))
+                .thenReturn("SCHED123");
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID), eq(String.class), any()))
+                .thenReturn("EXEC123");
+        when(jdbcTemplate.queryForObject(eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID), eq(String.class), any()))
+                .thenThrow(new RuntimeException("Instruction Fetch Failed"));
+
+        // Act
+        CustaggProcessedRecordsDTO result = processor.process(input);
+
+        // Assert
+        assertNotNull(result);
+        verify(jdbcTemplate, times(1)).update(anyString(), any(), any(), any(), any());
+    }
+}
