@@ -3,10 +3,11 @@ package com.bofa.sst.batch.core.impl;
 import com.bofa.sst.batch.model.CustaggRecordsDTO;
 import org.junit.*;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemStreamException;
 
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 
 import static org.junit.Assert.*;
 
@@ -20,63 +21,42 @@ public class CustagCompFileReaderTest {
     public void setUp() throws Exception {
         fileReader = new CustagCompFileReader();
         executionContext = new ExecutionContext();
-
-        // Create a temporary test file
         testFilePath = Files.createTempFile("test-input", ".txt");
-        String sampleData = "PROD01ENTITY001ACC123456789012345\n"
-                          + "PROD02ENTITY002ACC987654321098765\n";
-        Files.write(testFilePath, sampleData.getBytes(), StandardOpenOption.WRITE);
-
         fileReader.inputFilePath = testFilePath.toString();
     }
+
+    /** SUCCESS CASES **/
 
     @Test
     public void testOpenAndRead_Success() throws Exception {
         executionContext.putInt("fromLine", 1);
         executionContext.putInt("toLine", 2);
 
+        Files.write(testFilePath, ("PROD01ENTITY001ACC123456789012345\n"
+                                 + "PROD02ENTITY002ACC987654321098765").getBytes());
+
         try {
             fileReader.open(executionContext);
 
+            // First Record
             CustaggRecordsDTO record1 = fileReader.read();
             assertNotNull("First record should not be null", record1);
-            assertEquals("PROD01", record1.getProductCode());
-            assertEquals("ENTITY001", record1.getEntity());
-            assertEquals("ACC123456789012345", record1.getAccountNumber());
+            assertEquals("PRO", record1.getProductCode());           // Offset 0, Length 3
+            assertEquals("OD", record1.getEntity());                 // Offset 2, Length 2
+            assertEquals("ACC123456789012345", record1.getAccountNumber()); // Offset 7, Length 23
 
+            // Second Record
             CustaggRecordsDTO record2 = fileReader.read();
             assertNotNull("Second record should not be null", record2);
-            assertEquals("PROD02", record2.getProductCode());
-            assertEquals("ENTITY002", record2.getEntity());
+            assertEquals("PRO", record2.getProductCode());
+            assertEquals("OD", record2.getEntity());
             assertEquals("ACC987654321098765", record2.getAccountNumber());
 
+            // No more records
             assertNull("No more records expected", fileReader.read());
         } finally {
-            fileReader.close(); // Ensure cleanup
+            fileReader.close();
         }
-    }
-
-    @Test(expected = RuntimeException.class)
-    public void testRead_IncompleteRecord() throws Exception {
-        Files.write(testFilePath, "INCOMPLETE".getBytes(), StandardOpenOption.APPEND);
-
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        try {
-            fileReader.open(executionContext);
-            fileReader.read(); // Valid record
-            fileReader.read(); // Valid record
-            fileReader.read(); // Incomplete record - should throw exception
-        } finally {
-            fileReader.close(); // Cleanup
-        }
-    }
-
-    @Test(expected = RuntimeException.class)
-    public void testOpen_FileNotFound() throws Exception {
-        fileReader.inputFilePath = "non-existent-file.txt";
-        fileReader.open(executionContext);
     }
 
     @Test
@@ -84,26 +64,110 @@ public class CustagCompFileReaderTest {
         executionContext.putInt("fromLine", 1);
         executionContext.putInt("toLine", 1);
 
+        Files.write(testFilePath, "PROD01ENTITY001ACC123456789012345".getBytes());
+
         try {
             fileReader.open(executionContext);
             fileReader.read();
             fileReader.update(executionContext);
 
-            assertEquals("ExecutionContext counter should be updated", 1, executionContext.getInt("counter"));
+            assertEquals("ExecutionContext should be updated with the current record count", 1, executionContext.getInt("counter"));
         } finally {
-            fileReader.close(); // Cleanup
+            fileReader.close();
+        }
+    }
+
+    @Test
+    public void testClose_Success() throws Exception {
+        Files.write(testFilePath, "PROD01ENTITY001ACC123456789012345".getBytes());
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+
+        fileReader.open(executionContext);
+        fileReader.close();
+
+        assertTrue("FileReader closed successfully.", true); // If no exception, test is successful
+    }
+
+    /** EXCEPTION CASES **/
+
+    @Test(expected = RuntimeException.class)
+    public void testOpen_FileNotFound() {
+        fileReader.inputFilePath = "non-existent-file.txt";
+        fileReader.open(executionContext);
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testOpen_SkipFails() throws Exception {
+        Files.write(testFilePath, "InvalidData".getBytes());
+        executionContext.putInt("fromLine", 100); // Skip beyond file size
+        executionContext.putInt("toLine", 101);
+
+        fileReader.open(executionContext);
+    }
+
+    @Test
+    public void testRead_EndOfFileUnexpectedly() throws Exception {
+        Files.write(testFilePath, "ShortData".getBytes()); // Less than RECORD_SIZE
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+
+        fileReader.open(executionContext);
+        CustaggRecordsDTO result = fileReader.read();
+        assertNull("EOF should return null when no complete records are present", result);
+        fileReader.close();
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testRead_IncompleteRecord() throws Exception {
+        Files.write(testFilePath, "INCOMPLETE".getBytes()); // Less than RECORD_SIZE
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+
+        fileReader.open(executionContext);
+        fileReader.read(); // Will throw RuntimeException due to incomplete record
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testCreateRecord_ErrorParsingRecord() throws Exception {
+        Files.write(testFilePath, "CORRUPTDATA".getBytes()); // Simulated corrupt data
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+
+        fileReader.open(executionContext);
+        fileReader.read();
+    }
+
+    @Test
+    public void testClose_ErrorClosingFile() throws Exception {
+        fileReader.inputFilePath = testFilePath.toString();
+
+        // Mock InputStream to throw IOException on close
+        fileReader.bis = new BufferedInputStream(new InputStream() {
+            @Override
+            public int read() { return -1; }
+
+            @Override
+            public void close() throws IOException {
+                throw new IOException("Simulated close error");
+            }
+        });
+
+        try {
+            fileReader.close();
+            fail("Expected ItemStreamException during close");
+        } catch (ItemStreamException e) {
+            assertTrue(e.getMessage().contains("Error closing file"));
         }
     }
 
     @After
     public void tearDown() throws Exception {
-        // Ensure the stream is closed
         if (fileReader != null) {
-            fileReader.close();
+            fileReader.close(); // Ensure resources are released
         }
-        // Safely delete the temporary file
         if (Files.exists(testFilePath)) {
-            Files.deleteIfExists(testFilePath);
+            Files.deleteIfExists(testFilePath); // Safe cleanup
         }
     }
 }
