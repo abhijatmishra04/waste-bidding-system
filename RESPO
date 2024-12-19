@@ -1,4 +1,4 @@
-package com.bofa.sst.batch.exception;
+package com.bofa.sst.batch.config;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -6,149 +6,132 @@ import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.context.junit4.SpringRunner;
+
+import com.bofa.sst.batch.reader.CustaggCompFileReader;
+import com.bofa.sst.batch.processor.CustaggProcessor;
+import com.bofa.sst.batch.writer.CustaggWriter;
+import com.bofa.sst.batch.partition.CustaggFilePartitioner;
+import com.bofa.sst.batch.listener.CustaggCustomJobListener;
+import com.bofa.sst.batch.listener.CustaggCustomStepListener;
+import com.bofa.sst.batch.policy.CustaggCustomSkipPolicy;
+import com.bofa.sst.batch.repository.M2MDynamicConfigPropertiesRepository;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 @RunWith(SpringRunner.class)
-public class CustaggGlobalExceptionHandlerTest {
+public class CustaggBatchJobConfigurationTest {
 
     @InjectMocks
-    private CustaggGlobalExceptionHandler exceptionHandler;
+    private CustaggBatchJobConfiguration configuration;
 
     @Mock
-    private CustaggJobException jobException;
+    private JobBuilderFactory jobBuilderFactory;
 
     @Mock
-    private CustaggValidationException validationException;
+    private StepBuilderFactory stepBuilderFactory;
 
     @Mock
-    private CustaggDatabaseException databaseException;
+    private CustaggCompFileReader custaggCompFileReader;
+
+    @Mock
+    private CustaggProcessor custaggProcessor;
+
+    @Mock
+    private CustaggWriter custaggWriter;
+
+    @Mock
+    private CustaggFilePartitioner custaggFilePartitioner;
+
+    @Mock
+    private CustaggCustomJobListener customJobListener;
+
+    @Mock
+    private CustaggCustomStepListener customStepListener;
+
+    @Mock
+    private CustaggCustomSkipPolicy customSkipPolicy;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.chunk.size"))
+                .thenReturn("10");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.partition.grid.size"))
+                .thenReturn("5");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.thread.core.pool.size"))
+                .thenReturn("2");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.thread.max.pool.size"))
+                .thenReturn("4");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.queue.capacity"))
+                .thenReturn("10");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.thread.prefix.name"))
+                .thenReturn("TestThread-");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.partition.type"))
+                .thenReturn("SIMPLE");
+
+        configuration.init();
     }
 
-    /**
-     * Test JobException handler when the exception message is non-empty.
-     */
     @Test
-    public void testHandleJobException_WithMessage() {
-        // Arrange
-        when(jobException.getMessage()).thenReturn("Job error occurred");
-        when(jobException.getJobErrorEnum()).thenReturn(JobErrorEnum.JOB_ERROR);
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleJobException(jobException);
-
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("Job error occurred", response.getBody().getDescription());
-        verify(jobException, times(1)).getMessage();
+    public void testJobParameters() {
+        assertNotNull(configuration.jobParameters());
     }
 
-    /**
-     * Test JobException handler when the exception message is empty.
-     */
     @Test
-    public void testHandleJobException_EmptyMessage() {
-        // Arrange
-        when(jobException.getMessage()).thenReturn("");
-        when(jobException.getJobErrorEnum()).thenReturn(JobErrorEnum.JOB_ERROR);
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleJobException(jobException);
-
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals(JobErrorEnum.JOB_ERROR.getDescription(), response.getBody().getDescription());
+    public void testCustaggJob() {
+        Job job = configuration.custaggJob();
+        assertNotNull(job);
     }
 
-    /**
-     * Test ValidationException handler when the exception message is non-empty.
-     */
     @Test
-    public void testHandleValidationException_WithMessage() {
-        // Arrange
-        when(validationException.getMessage()).thenReturn("Validation error occurred");
-        when(validationException.getJobErrorEnum()).thenReturn(JobErrorEnum.VALIDATION_ERROR);
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleValidationException(validationException);
-
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("Validation error occurred", response.getBody().getDescription());
+    public void testCustaggStep() {
+        Step step = configuration.custaggStep();
+        assertNotNull(step);
     }
 
-    /**
-     * Test ValidationException handler when the exception message is empty.
-     */
     @Test
-    public void testHandleValidationException_EmptyMessage() {
-        // Arrange
-        when(validationException.getMessage()).thenReturn("");
-        when(validationException.getJobErrorEnum()).thenReturn(JobErrorEnum.VALIDATION_ERROR);
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleValidationException(validationException);
-
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals(JobErrorEnum.VALIDATION_ERROR.getDescription(), response.getBody().getDescription());
+    public void testProcessCustaggFileStep() {
+        Step step = configuration.processCustaggFileStep();
+        assertNotNull(step);
     }
 
-    /**
-     * Test generic Exception handler.
-     */
     @Test
-    public void testHandleException() {
-        // Arrange
-        Exception exception = new Exception("Internal server error");
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleException(exception);
-
-        // Assert
-        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
-        assertEquals("Internal server error", response.getBody().getDescription());
+    public void testTaskExecutor() {
+        ThreadPoolTaskExecutor taskExecutor = (ThreadPoolTaskExecutor) configuration.taskExecutor();
+        assertNotNull(taskExecutor);
+        assertEquals(2, taskExecutor.getCorePoolSize());
+        assertEquals(4, taskExecutor.getMaxPoolSize());
+        assertEquals(10, taskExecutor.getQueueCapacity());
+        assertEquals("TestThread-", taskExecutor.getThreadNamePrefix());
     }
 
-    /**
-     * Test DatabaseException handler when the exception message is non-empty.
-     */
     @Test
-    public void testHandleDatabaseException_WithMessage() {
-        // Arrange
-        when(databaseException.getMessage()).thenReturn("Database error occurred");
-        when(databaseException.getJobErrorEnum()).thenReturn(JobErrorEnum.DATABASE_ERROR);
-
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleDatabaseException(databaseException);
-
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals("Database error occurred", response.getBody().getDescription());
+    public void testCustaggFilePartitioner() {
+        assertNotNull(configuration.custaggFilePartitioner());
     }
 
-    /**
-     * Test DatabaseException handler when the exception message is empty.
-     */
     @Test
-    public void testHandleDatabaseException_EmptyMessage() {
-        // Arrange
-        when(databaseException.getMessage()).thenReturn("");
-        when(databaseException.getJobErrorEnum()).thenReturn(JobErrorEnum.DATABASE_ERROR);
+    public void testCustomSkipPolicy() {
+        assertNotNull(configuration.customSkipPolicy());
+    }
 
-        // Act
-        ResponseEntity<CustaggJobError> response = exceptionHandler.handleDatabaseException(databaseException);
+    @Test
+    public void testCustomStepListener() {
+        assertNotNull(configuration.customStepListener());
+    }
 
-        // Assert
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertEquals(JobErrorEnum.DATABASE_ERROR.getDescription(), response.getBody().getDescription());
+    @Test
+    public void testCustomJobListener() {
+        assertNotNull(configuration.customJobListener());
     }
 }
