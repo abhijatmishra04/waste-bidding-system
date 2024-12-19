@@ -1,171 +1,180 @@
-    @PostConstruct
-    public void initFileProperties() {
-        try {
-            custaggJobTrigger = dynamicConfigPropRepository
-                    .findPropertyValueByPropertyName(CustaggBatchConstants.CUSTAGG_JOB_TRIGGER);
-            validateProperties();
-        } catch (Exception e) {
-            log.error("Error initializing Custagg Quartz Configuration properties: {}", e.getMessage(), e);
-            throw new ApplicationContextException("Failed to initialize Custagg Quartz Configuration properties", e);
-        }
-    }
-
-    public void validateProperties() {
-        if (custaggJobTrigger == null || custaggJobTrigger.trim().isEmpty()) {
-            throw new IllegalStateException("custaggJobTrigger cronSchedule property must not be null or empty.");
-        }
-    }
-
-
-
-package com.bofa.sst.batch.scheduler.config;
+package com.bofa.sst.batch.service;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.*;
-import org.quartz.*;
-import org.springframework.boot.autoconfigure.quartz.QuartzProperties;
-import org.springframework.context.ApplicationContextException;
-import org.springframework.test.context.junit4.SpringRunner;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.configuration.JobRegistry;
+import org.springframework.batch.core.launch.JobLauncher;
 
-import java.util.Properties;
-
-@RunWith(SpringRunner.class)
-public class CustaggQuartzConfigurationTest {
+public class CustaggBatchJobExecutionServiceTest {
 
     @InjectMocks
-    private CustaggQuartzConfiguration configuration;
+    private CustaggBatchJobExecutionService service;
 
     @Mock
     private JobLauncher jobLauncher;
 
     @Mock
-    private JobLocator jobLocator;
+    private BatchUtil batchUtil;
 
     @Mock
-    private QuartzProperties quartzProperties;
+    private JobRegistry jobRegistry;
 
-    @Mock
-    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+    private BatchLauncherRequest batchLauncherRequest;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        batchLauncherRequest = new BatchLauncherRequest();
+        batchLauncherRequest.setJobName("testJob");
     }
 
     @Test
-    public void testInitFileProperties_success() {
-        // Arrange
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.job.trigger"))
-                .thenReturn("0 0/1 * 1/1 * ? *");
+    public void testStartJob_JobNotEnabled() {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(false);
 
-        // Act
-        configuration.initFileProperties();
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
 
-        // Assert
-        assertEquals("0 0/1 * 1/1 * ? *", configuration.custaggJobTriggerCronSchedule());
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testValidateProperties_emptyTrigger() {
-        // Arrange
-        configuration.custaggJobTrigger = "";
-
-        // Act
-        configuration.validateProperties();
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testValidateProperties_nullTrigger() {
-        // Arrange
-        configuration.custaggJobTrigger = null;
-
-        // Act
-        configuration.validateProperties();
-    }
-
-    @Test(expected = ApplicationContextException.class)
-    public void testInitFileProperties_exceptionThrown() {
-        // Arrange
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.job.trigger"))
-                .thenThrow(new RuntimeException("Error fetching property"));
-
-        // Act
-        configuration.initFileProperties();
+        assertEquals("testJob", response.getJobName());
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertEquals("Job launch failed due to missing required parameters", response.getJobStatusMessage());
+        assertNull(response.getJobExecutionId());
     }
 
     @Test
-    public void testJobRegistryBeanPostProcessor() {
-        // Arrange
-        JobRegistry jobRegistry = mock(JobRegistry.class);
+    public void testStartJob_JobAlreadyRunning() {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(true);
 
-        // Act
-        JobRegistryBeanPostProcessor result = configuration.jobRegistryBeanPostProcessor(jobRegistry);
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
 
-        // Assert
-        assertNotNull(result);
-        assertEquals(jobRegistry, result.getJobRegistry());
+        assertEquals("testJob", response.getJobName());
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertEquals("Job launch failed, it's already running", response.getJobStatusMessage());
+        assertNull(response.getJobExecutionId());
     }
 
     @Test
-    public void testCustaggJobDetail() {
-        // Act
-        JobDetail jobDetail = configuration.custaggJobDetail();
+    public void testStartJob_JobSuccess() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
 
-        // Assert
-        assertNotNull(jobDetail);
-        assertEquals("custaggJob-detail", jobDetail.getKey().getName());
-        assertEquals("custaggJob", jobDetail.getJobDataMap().getString("jobName"));
-        assertEquals(jobLauncher, jobDetail.getJobDataMap().get("jobLauncher"));
-        assertEquals(jobLocator, jobDetail.getJobDataMap().get("jobLocator"));
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
+
+        JobExecution jobExecution = mock(JobExecution.class);
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+        when(jobExecution.getJobInstance()).thenReturn(mock(JobInstance.class));
+        when(jobExecution.getJobInstance().getJobName()).thenReturn("testJob");
+        when(jobExecution.getId()).thenReturn(1L);
+
+        when(jobLauncher.run(eq(job), any(JobParameters.class))).thenReturn(jobExecution);
+
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("testJob", response.getJobName());
+        assertEquals("COMPLETED", response.getJobLaunchStatus());
+        assertEquals("Job Launched Successfully.", response.getJobStatusMessage());
+        assertEquals("1", response.getJobExecutionId());
     }
 
     @Test
-    public void testCustaggJobTrigger() {
-        // Arrange
-        configuration.custaggJobTrigger = "0 0/5 * 1/1 * ? *";
+    public void testStartJob_JobFailure() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
 
-        // Act
-        Trigger trigger = configuration.custaggJobTrigger();
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
 
-        // Assert
-        assertNotNull(trigger);
-        assertEquals("custaggJob-trigger", trigger.getKey().getName());
-        assertEquals("0 0/5 * 1/1 * ? *", ((CronTrigger) trigger).getCronExpression());
+        JobExecution jobExecution = mock(JobExecution.class);
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+        when(jobExecution.getFailureExceptions()).thenReturn(new RuntimeException("Failure").getSuppressed());
+        when(jobExecution.getJobInstance()).thenReturn(mock(JobInstance.class));
+        when(jobExecution.getJobInstance().getJobName()).thenReturn("testJob");
+        when(jobExecution.getId()).thenReturn(1L);
+
+        when(jobLauncher.run(eq(job), any(JobParameters.class))).thenReturn(jobExecution);
+
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("testJob", response.getJobName());
+        assertEquals("FAILED", response.getJobLaunchStatus());
+        assertNotNull(response.getJobStatusMessage());
+        assertEquals("1", response.getJobExecutionId());
     }
 
     @Test
-    public void testSchedulerFactoryBean() throws Exception {
-        // Arrange
-        Properties properties = new Properties();
-        properties.put("someQuartzProperty", "value");
-        when(quartzProperties.getProperties()).thenReturn(properties);
-        System.setProperty("JBOSS_SERVER_NAME", "testServer");
+    public void testStartJob_JobExecutionAlreadyRunningException() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
 
-        configuration.custaggJobTrigger = "0 0/5 * 1/1 * ? *";
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
 
-        // Act
-        SchedulerFactoryBean schedulerFactoryBean = configuration.schedulerFactoryBean();
+        when(jobLauncher.run(eq(job), any(JobParameters.class)))
+                .thenThrow(new JobExecutionAlreadyRunningException("Already running"));
 
-        // Assert
-        assertNotNull(schedulerFactoryBean);
-        assertEquals("testServer", schedulerFactoryBean.getQuartzProperties().get("org.quartz.scheduler.instanceName"));
-        assertTrue(schedulerFactoryBean.isOverwriteExistingJobs());
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertTrue(response.getJobStatusMessage().contains("Already running"));
     }
 
     @Test
-    public void testCustaggJobTriggerCronSchedule() {
-        // Arrange
-        configuration.custaggJobTrigger = "0 0/5 * 1/1 * ? *";
+    public void testStartJob_JobRestartException() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
 
-        // Act
-        String cronSchedule = configuration.custaggJobTriggerCronSchedule();
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
 
-        // Assert
-        assertEquals("0 0/5 * 1/1 * ? *", cronSchedule);
+        when(jobLauncher.run(eq(job), any(JobParameters.class)))
+                .thenThrow(new JobRestartException("Cannot restart"));
+
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertTrue(response.getJobStatusMessage().contains("Cannot restart"));
+    }
+
+    @Test
+    public void testStartJob_JobInstanceAlreadyCompleteException() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
+
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
+
+        when(jobLauncher.run(eq(job), any(JobParameters.class)))
+                .thenThrow(new JobInstanceAlreadyCompleteException("Already completed"));
+
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertTrue(response.getJobStatusMessage().contains("Already completed"));
+    }
+
+    @Test
+    public void testStartJob_JobParametersInvalidException() throws Exception {
+        when(batchUtil.isJobEnabled("testJob")).thenReturn(true);
+        when(batchUtil.isJobRunning("testJob")).thenReturn(false);
+
+        Job job = mock(Job.class);
+        when(jobRegistry.getJob("testJob")).thenReturn(job);
+
+        when(jobLauncher.run(eq(job), any(JobParameters.class)))
+                .thenThrow(new JobParametersInvalidException("Invalid parameters"));
+
+        BatchLauncherResponse response = service.startJob(batchLauncherRequest);
+
+        assertEquals("FAILURE", response.getJobLaunchStatus());
+        assertTrue(response.getJobStatusMessage().contains("Invalid parameters"));
     }
 }
