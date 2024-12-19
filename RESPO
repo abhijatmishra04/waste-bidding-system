@@ -1,1 +1,86 @@
+package com.bofa.sst.batch.partition;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.context.ApplicationContextException;
+
+public class CustaggFilePartitionerTest {
+
+    @InjectMocks
+    private CustaggFilePartitioner partitioner;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropertiesRepository;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+    }
+
+    @Test
+    public void testInitFileProperties_Success() {
+        // Arrange
+        when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName("FILE_PATH_REFERDATA"))
+                .thenReturn("valid/path/to/file");
+
+        // Act
+        partitioner.initFileProperties();
+
+        // Assert
+        assertNotNull(partitioner.filePath);
+        assertEquals("valid/path/to/file", partitioner.filePath);
+    }
+
+    @Test(expected = ApplicationContextException.class)
+    public void testInitFileProperties_Failure() {
+        // Arrange
+        when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName("FILE_PATH_REFERDATA"))
+                .thenThrow(new RuntimeException("Database error"));
+
+        // Act
+        partitioner.initFileProperties();
+
+        // Exception is expected
+    }
+
+    @Test
+    public void testValidateProperties_Success() {
+        // Arrange
+        partitioner.filePath = "valid/path/to/file";
+
+        // Act
+        partitioner.validateProperties();
+
+        // Assert
+        // No exception should be thrown
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testValidateProperties_FilePathIsNull() {
+        // Arrange
+        partitioner.filePath = null;
+
+        // Act
+        partitioner.validateProperties();
+
+        // Exception is expected
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testValidateProperties_FilePathIsEmpty() {
+        // Arrange
+        partitioner.filePath = "   ";
+
+        // Act
+        partitioner.validateProperties();
+
+        // Exception is expected
+    }
+}
 
