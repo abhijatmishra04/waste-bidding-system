@@ -1,30 +1,82 @@
 @PostConstruct
 public void initFileProperties() {
     try {
-        inputFilePath = dynamicConfigPropertiesRepository
-                .findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERDATA);
-
-        // Validate properties
+        filePath = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY);
         validateProperties();
 
-        // Ensure the file is from today
-        File inputFile = new File(inputFilePath);
-        if (!inputFile.exists()) {
-            throw new IllegalStateException("File does not exist at path: " + inputFilePath);
+        // Ensure only today's file is processed
+        File file = new File(filePath);
+        if (!file.exists()) {
+            throw new IllegalStateException("File does not exist at the specified path: " + filePath);
         }
-
-        // Check if the file's last modified date matches today's date
-        Instant lastModifiedInstant = Instant.ofEpochMilli(inputFile.lastModified());
-        LocalDate fileDate = lastModifiedInstant.atZone(ZoneId.systemDefault()).toLocalDate();
+        long lastModified = file.lastModified();
+        LocalDate fileDate = Instant.ofEpochMilli(lastModified)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate();
         LocalDate today = LocalDate.now();
 
         if (!fileDate.equals(today)) {
-            throw new IllegalStateException("File is not from today. Last modified date: " + fileDate);
+            throw new IllegalStateException("File is not from today. File date: " + fileDate);
         }
 
-        Log.info("File validation successful. File is from today.");
     } catch (Exception e) {
-        Log.error("Error initializing CustaggCompFileReader properties: {}", e.getMessage(), e);
-        throw new ApplicationContextException("Failed to initialize CustaggCompFileReader properties", e);
+        Log.error("Error initializing CustaggEntityFileReader properties: {}", e.getMessage(), e);
+        throw new ApplicationContextException("Failed to initialize CustaggEntityFileReader properties", e);
     }
+}
+
+
+@Test
+public void testInitFileProperties_withValidFile() throws Exception {
+    // Arrange
+    String validFilePath = "validFilePath";
+    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
+            .thenReturn(validFilePath);
+
+    File validFile = mock(File.class);
+    when(validFile.exists()).thenReturn(true);
+    when(validFile.lastModified()).thenReturn(Instant.now().toEpochMilli()); // Today's file
+
+    PowerMockito.whenNew(File.class).withArguments(validFilePath).thenReturn(validFile);
+
+    // Act
+    entityFileReader.initFileProperties();
+
+    // Assert
+    assertNotNull(entityFileReader.filePath);
+    assertEquals(validFilePath, entityFileReader.filePath);
+}
+
+@Test(expected = IllegalStateException.class)
+public void testInitFileProperties_withNonExistentFile() throws Exception {
+    // Arrange
+    String invalidFilePath = "invalidFilePath";
+    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
+            .thenReturn(invalidFilePath);
+
+    File invalidFile = mock(File.class);
+    when(invalidFile.exists()).thenReturn(false);
+
+    PowerMockito.whenNew(File.class).withArguments(invalidFilePath).thenReturn(invalidFile);
+
+    // Act
+    entityFileReader.initFileProperties();
+}
+
+@Test(expected = IllegalStateException.class)
+public void testInitFileProperties_withOldFile() throws Exception {
+    // Arrange
+    String validFilePath = "validFilePath";
+    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
+            .thenReturn(validFilePath);
+
+    File oldFile = mock(File.class);
+    when(oldFile.exists()).thenReturn(true);
+    when(oldFile.lastModified()).thenReturn(Instant.now().minus(2, ChronoUnit.DAYS).toEpochMilli()); // Not today's file
+
+    PowerMockito.whenNew(File.class).withArguments(validFilePath).thenReturn(oldFile);
+
+    // Act
+    entityFileReader.initFileProperties();
 }
