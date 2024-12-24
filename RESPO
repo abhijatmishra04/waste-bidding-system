@@ -1,1 +1,48 @@
 
+Description
+This query updates the schedule_m2m table to:
+
+Set the CLS_DT (closure date) to the current local date and time (LocalDateTime.now()).
+Set the UPDT_TS (update timestamp) to the current timestamp (Timestamp.from(Instant.now())).
+Change the schedule status (schd_stat) to 'S02', marking the schedule as inactive.
+This query is typically executed when a schedule is closed or marked as inactive as part of a cleanup or finalization process.
+
+Precondition
+To execute this query:
+
+Identify the schd_id of the schedule to be updated. This could come from the previous queries that fetched active or relevant schedules.
+Ensure that the schedule_m2m table allows updates for the specified schd_id.
+Verify that the update logic aligns with marking the schedule as inactive (schd_stat = 'S02'), signaling the closure of the schedule.
+
+
+
+Description
+This query updates the transfer_execution_m2m table to:
+
+Mark the action indicator (act_indct) as 'F', indicating that the payment has failed.
+Set the updt_by field to 'Custagg', which represents the process or user responsible for the update.
+Update the updt_ts field to the current system time (System.currentTimeMillis()).
+Perform the update for the specific xfer_exeq_m2m_id, which is fetched by the earlier query that retrieves transfer execution IDs (xfer_exeq_m2m_id) for unprocessed or failed payments.
+Precondition
+To execute this query:
+
+The xfer_exeq_m2m_id must be obtained from the earlier query, which fetches IDs where the payment is in progress or has not been marked as failed.
+Ensure that the transfer_execution_m2m table allows updates for the corresponding xfer_exeq_m2m_id.
+
+
+
+This query updates the transfer_instruction_m2m table to:
+
+Set the schd_stat to 'H02', indicating a specific schedule state (likely processed or marked for retry).
+Set the updt_by field to 'Custagg', indicating that the update was performed by the Custagg process or system.
+Set the updt_ts field to the current system timestamp (System.currentTimeMillis()), marking the exact time of the update.
+The update is performed for a specific xfer_instr_id, which identifies the transfer instruction to be updated.
+Precondition
+To execute this query:
+
+Identify the xfer_instr_id: Ensure the specific transfer instruction ID is passed into the query. This ID is typically fetched from previous queries for pending or unprocessed instructions.
+Verify Schedule Status Update Logic:
+Confirm that updating the schedule status (schd_stat = 'H02') aligns with the desired business workflow.
+Ensure that the record being updated is in a state where this change is appropriate.
+Validate Update Source: Ensure the updt_by = 'Custagg' reflects the correct system or user performing the update.
+Verify that marking the payment as failed (act_indct = 'F') is a valid outcome based on the business logic and system requirements.
