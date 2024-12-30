@@ -1,82 +1,446 @@
-@PostConstruct
-public void initFileProperties() {
-    try {
-        filePath = dynamicConfigPropertiesRepository
-                .findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY);
-        validateProperties();
+### Java Project Architecture Overview ###
 
-        // Ensure only today's file is processed
-        File file = new File(filePath);
-        if (!file.exists()) {
-            throw new IllegalStateException("File does not exist at the specified path: " + filePath);
-        }
-        long lastModified = file.lastModified();
-        LocalDate fileDate = Instant.ofEpochMilli(lastModified)
-                .atZone(ZoneId.systemDefault())
-                .toLocalDate();
-        LocalDate today = LocalDate.now();
+Class: Application
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\Application.java
+Component Type: Unknown
+Annotations: SpringBootApplication, ComponentScan, EnableTransactionManagement 
+Fields:
+Methods:
+  - void main(String args)
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-        if (!fileDate.equals(today)) {
-            throw new IllegalStateException("File is not from today. File date: " + fileDate);
-        }
+Class: JpaConfig
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\JpaConfig.java
+Component Type: Unknown
+Annotations: Configuration, EnableTransactionManagement, EnableJpaRepositories 
+Fields:
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-    } catch (Exception e) {
-        Log.error("Error initializing CustaggEntityFileReader properties: {}", e.getMessage(), e);
-        throw new ApplicationContextException("Failed to initialize CustaggEntityFileReader properties", e);
-    }
-}
+Class: SwaggerConfig
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\SwaggerConfig.java
+Component Type: Unknown
+Annotations: Configuration, EnableSwagger2 
+Fields:
+Methods:
+  - Docket bookingApi()
+  - ApiInfo apiInfo()
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
+Class: AirportNotFoundException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\airport\AirportNotFoundException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResourceNotFoundException (inheritance)
 
-@Test
-public void testInitFileProperties_withValidFile() throws Exception {
-    // Arrange
-    String validFilePath = "validFilePath";
-    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
-            .thenReturn(validFilePath);
+Class: AirportServiceImpl
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\airport\AirportServiceImpl.java
+Component Type: Service
+Annotations: Service, Transactional 
+Fields:
+  - airportRepo : AirportRepository (Annotations: Autowired)
+Methods:
+  - Airport getAirportById(String airportId)
+  - List getAllAirports()
+Inter-Service Calls:
+  - Calls service: AirportRepository
+Relationships:
+  - implements -> AirportService (interface_implementation)
 
-    File validFile = mock(File.class);
-    when(validFile.exists()).thenReturn(true);
-    when(validFile.lastModified()).thenReturn(Instant.now().toEpochMilli()); // Today's file
+Class: BookingNotFoundException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\BookingNotFoundException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResourceNotFoundException (inheritance)
 
-    PowerMockito.whenNew(File.class).withArguments(validFilePath).thenReturn(validFile);
+Class: BookingNotFoundForPassengerException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\BookingNotFoundForPassengerException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResourceNotFoundException (inheritance)
 
-    // Act
-    entityFileReader.initFileProperties();
+Class: BookingServiceImpl
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\BookingServiceImpl.java
+Component Type: Service
+Annotations: Service, Transactional 
+Fields:
+  - logger : Logger (Annotations: None)
+  - bookingRepo : FlightBookingRepository (Annotations: Autowired)
+  - passengerRepo : PassengerRepository (Annotations: Autowired)
+  ...and 1 more fields
+Methods:
+  - FlightBooking getBooking(String bookingId)
+  - List getAllBookingsByPassenger(String passengerId)
+  - void createSampleBookings()
+  ...and 3 more methods
+Inter-Service Calls:
+  - Calls service: FlightBookingRepository
+  - Calls service: PassengerRepository
+  ...and 1 more service calls
+Relationships:
+  - implements -> BookingService (interface_implementation)
 
-    // Assert
-    assertNotNull(entityFileReader.filePath);
-    assertEquals(validFilePath, entityFileReader.filePath);
-}
+Class: FlightBookingModel
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\FlightBookingModel.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - id : String (Annotations: None)
+  - passenger : PassengerModel (Annotations: None)
+  - flights : List (Annotations: None)
+Methods:
+  - String getId()
+  - void setId(String id)
+  - PassengerModel getPassenger()
+  ...and 3 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-@Test(expected = IllegalStateException.class)
-public void testInitFileProperties_withNonExistentFile() throws Exception {
-    // Arrange
-    String invalidFilePath = "invalidFilePath";
-    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
-            .thenReturn(invalidFilePath);
+Class: FlightBookingSummaryModel
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\FlightBookingSummaryModel.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - bookingId : String (Annotations: None)
+  - lastName : String (Annotations: None)
+  - departure : String (Annotations: None)
+Methods:
+  - String getBookingId()
+  - void setBookingId(String bookingId)
+  - String getLastName()
+  ...and 3 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-    File invalidFile = mock(File.class);
-    when(invalidFile.exists()).thenReturn(false);
+Class: FlightModel
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\FlightModel.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - departure : String (Annotations: None)
+  - arrival : String (Annotations: None)
+  - departureDate : String (Annotations: None)
+  ...and 1 more fields
+Methods:
+  - String getDeparture()
+  - void setDeparture(String departure)
+  - String getArrival()
+  ...and 5 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-    PowerMockito.whenNew(File.class).withArguments(invalidFilePath).thenReturn(invalidFile);
+Class: PassengerModel
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\PassengerModel.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - firstName : String (Annotations: None)
+  - lastName : String (Annotations: None)
+  - email : String (Annotations: None)
+Methods:
+  - String getFirstName()
+  - void setFirstName(String firstName)
+  - String getLastName()
+  ...and 3 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-    // Act
-    entityFileReader.initFileProperties();
-}
+Class: ToFlightBookingModelConverter
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\converter\ToFlightBookingModelConverter.java
+Component Type: Component
+Annotations: Component 
+Fields:
+Methods:
+  - FlightBookingModel convert(FlightBooking source)
+Inter-Service Calls:
+  - None
+Relationships:
+  - implements -> Converter (interface_implementation)
 
-@Test(expected = IllegalStateException.class)
-public void testInitFileProperties_withOldFile() throws Exception {
-    // Arrange
-    String validFilePath = "validFilePath";
-    when(dynamicConfigPropertiesRepository.findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PATH_REFERENTITY))
-            .thenReturn(validFilePath);
+Class: ToFlightBookingModelMinimalConverter
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\booking\model\converter\ToFlightBookingModelMinimalConverter.java
+Component Type: Component
+Annotations: Component 
+Fields:
+Methods:
+  - FlightBookingSummaryModel convert(FlightBooking source)
+Inter-Service Calls:
+  - None
+Relationships:
+  - implements -> Converter (interface_implementation)
 
-    File oldFile = mock(File.class);
-    when(oldFile.exists()).thenReturn(true);
-    when(oldFile.lastModified()).thenReturn(Instant.now().minus(2, ChronoUnit.DAYS).toEpochMilli()); // Not today's file
+Class: DataLoader
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\boot\DataLoader.java
+Component Type: Component
+Annotations: Component, Transactional 
+Fields:
+  - logger : Logger (Annotations: None)
+  - passengersFile : String (Annotations: None)
+  - airportsFile : String (Annotations: None)
+  ...and 3 more fields
+Methods:
+  - CommandLineRunner loadPassengers(PassengerRepository passengerRepo)
+  - CommandLineRunner loadAirports(AirportRepository airoprtRepo)
+  - CommandLineRunner loadFlights(FlightRepository flightRepo)
+  ...and 2 more methods
+Inter-Service Calls:
+  - Calls service: ResourceLoader
+  - Calls service: BookingService
+Relationships:
+  - None
 
-    PowerMockito.whenNew(File.class).withArguments(validFilePath).thenReturn(oldFile);
+Class: Airport
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\entity\Airport.java
+Component Type: Unknown
+Annotations: Entity 
+Fields:
+  - iataCode : String (Annotations: Id)
+  - name : String (Annotations: None)
+  - countryIsoCode : String (Annotations: None)
+Methods:
+  - String getIataCode()
+  - void setIataCode(String iataCode)
+  - String getName()
+  ...and 3 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
 
-    // Act
-    entityFileReader.initFileProperties();
-}
+Class: Flight
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\entity\Flight.java
+Component Type: Unknown
+Annotations: Entity 
+Fields:
+  - id : String (Annotations: Id, GeneratedValue, GenericGenerator)
+  - departure : String (Annotations: None)
+  - arrival : String (Annotations: None)
+  ...and 3 more fields
+Methods:
+  - String getId()
+  - void setId(String id)
+  - String getDeparture()
+  ...and 10 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
+Class: FlightBooking
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\entity\FlightBooking.java
+Component Type: Unknown
+Annotations: Entity 
+Fields:
+  - id : String (Annotations: Id, GeneratedValue, GenericGenerator)
+  - passenger : Passenger (Annotations: ManyToOne)
+  - flights : Set (Annotations: ManyToMany, JoinTable)
+Methods:
+  - String getId()
+  - void setId(String id)
+  - Passenger getPassenger()
+  ...and 4 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
+Class: Passenger
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\entity\Passenger.java
+Component Type: Unknown
+Annotations: Entity, Table 
+Fields:
+  - id : String (Annotations: Id, GeneratedValue, GenericGenerator)
+  - firstName : String (Annotations: Column)
+  - lastName : String (Annotations: None)
+  ...and 1 more fields
+Methods:
+  - String getId()
+  - void setId(String id)
+  - String getFirstName()
+  ...and 6 more methods
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
+Class: DateUtil
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\util\DateUtil.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - GlobalDateFormatter : DateTimeFormatter (Annotations: None)
+Methods:
+  - LocalDateTime toLocalDateTime(String strDate)
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
+Class: StringSequenceIdGenerator
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\domain\util\StringSequenceIdGenerator.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - prefix : String (Annotations: None)
+Methods:
+  - Serializable generate(SharedSessionContractImplementor session, Object obj)
+  - void configure(Type type, Properties properties, ServiceRegistry serviceRegistry)
+Inter-Service Calls:
+  - None
+Relationships:
+  - implements -> IdentifierGenerator (interface_implementation)
+  - implements -> Configurable (interface_implementation)
+
+Class: FlightNotFoundException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\flight\FlightNotFoundException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResourceNotFoundException (inheritance)
+
+Class: FlightServiceImpl
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\flight\FlightServiceImpl.java
+Component Type: Service
+Annotations: Service, Transactional 
+Fields:
+  - flightRepo : FlightRepository (Annotations: Autowired)
+Methods:
+  - Flight getFlightById(String flightId)
+  - List getAllFlights()
+Inter-Service Calls:
+  - Calls service: FlightRepository
+Relationships:
+  - implements -> FlightService (interface_implementation)
+
+Class: PassengerNotFoundException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\passenger\PassengerNotFoundException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResourceNotFoundException (inheritance)
+
+Class: PassengerServiceImpl
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\passenger\PassengerServiceImpl.java
+Component Type: Service
+Annotations: Service, Transactional 
+Fields:
+  - passengerRepo : PassengerRepository (Annotations: Autowired)
+Methods:
+  - Passenger getPassengerById(String passengerId)
+  - List getAllPassengers()
+Inter-Service Calls:
+  - Calls service: PassengerRepository
+Relationships:
+  - implements -> PassengerService (interface_implementation)
+
+Class: ResourceNotFoundException
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\system\ResourceNotFoundException.java
+Component Type: Unknown
+Annotations: None
+Fields:
+  - serialVersionUID : long (Annotations: None)
+Methods:
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> RuntimeException (inheritance)
+
+Class: RestResponseEntityExceptionHandler
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\main\java\com\dxbair\services\flightbooking\system\RestResponseEntityExceptionHandler.java
+Component Type: Unknown
+Annotations: ControllerAdvice 
+Fields:
+Methods:
+  - ResponseEntity handleConflict(RuntimeException ex, WebRequest request)
+Inter-Service Calls:
+  - None
+Relationships:
+  - inherits -> ResponseEntityExceptionHandler (inheritance)
+
+Class: ApplicationTests
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\test\java\com\dxbair\services\flightbooking\test\ApplicationTests.java
+Component Type: Unknown
+Annotations: RunWith, SpringBootTest 
+Fields:
+Methods:
+  - void contextLoads()
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
+Class: BookingTest
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\test\java\com\dxbair\services\flightbooking\test\BookingTest.java
+Component Type: Unknown
+Annotations: RunWith, SpringBootTest 
+Fields:
+  - logger : Logger (Annotations: None)
+  - restTemplate : TestRestTemplate (Annotations: Autowired)
+Methods:
+  - void getBookingByValidId_OK()
+  - void getBookingByInValidId_NOT_FOUND()
+  - void getBookingsByValidPassengerId_OK()
+  ...and 2 more methods
+Inter-Service Calls:
+  - Calls service: TestRestTemplate
+Relationships:
+  - None
+
+Class: DataGenerator
+File Path: C:\Users\abhij\Documents\flight-booking-master\src\test\java\com\dxbair\services\flightbooking\test\util\DataGenerator.java
+Component Type: Unknown
+Annotations: None
+Fields:
+Methods:
+  - void main(String args)
+  - void generateDataToFile(String inputFile, String outputFile, Function dataBuilder)
+Inter-Service Calls:
+  - None
+Relationships:
+  - None
+
