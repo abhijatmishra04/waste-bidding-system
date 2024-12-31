@@ -1,84 +1,121 @@
-@Test
-public void testOpen_nullDirectoryPath() throws Exception {
-    // Mock ExecutionContext with null directoryPath
-    Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-    Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn(null);
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn("mockPrefix");
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggCompFileReaderTest {
 
-    try {
-        // Call the method under test
-        reader.open(mockExecutionContext);
-        Assert.fail("Expected a NullPointerException to be thrown");
-    } catch (NullPointerException e) {
-        // Assert that NullPointerException is thrown
-        Assert.assertNotNull(e);
+    @InjectMocks
+    private CustaggCompFileReader reader; // Class under test
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository mockRepository; // Mocked dependency
+
+    @Mock
+    private ExecutionContext mockExecutionContext; // Mocked ExecutionContext
+
+    @Before
+    public void setUp() {
+        // Use ReflectionTestUtils to inject the private field 'inputFilePath'
+        ReflectionTestUtils.setField(reader, "inputFilePath", "mocked/file/path");
     }
-}
 
-@Test
-public void testOpen_nullFilePrefix() throws Exception {
-    // Mock ExecutionContext with null filePrefixReferData
-    Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-    Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn("mocked/directory");
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn(null);
+    @Test
+    public void testOpen_success() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("mockPrefix");
 
-    try {
         // Call the method under test
         reader.open(mockExecutionContext);
-        Assert.fail("Expected a NullPointerException to be thrown");
-    } catch (NullPointerException e) {
-        // Assert that NullPointerException is thrown
-        Assert.assertNotNull(e);
+
+        // Verify behavior and logs
+        Assert.assertEquals(1, ReflectionTestUtils.getField(reader, "startLine"));
+        Assert.assertEquals(5, ReflectionTestUtils.getField(reader, "endLine"));
     }
-}
 
-@Test
-public void testOpen_nullFilePathForReferData() throws Exception {
-    // Mock ExecutionContext values
-    Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-    Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn("mocked/directory");
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn("mockPrefix");
+    @Test(expected = ItemStreamException.class)
+    public void testOpen_fileNotFound() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("nonexistentFile");
 
-    // Mock FileUtils to return null
-    Mockito.mockStatic(FileUtils.class);
-    Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
-           .thenReturn(null);
-
-    try {
-        // Call the method under test
+        // Call the method under test (expecting an exception)
         reader.open(mockExecutionContext);
-        Assert.fail("Expected a NullPointerException to be thrown");
-    } catch (NullPointerException e) {
-        // Assert that NullPointerException is thrown
-        Assert.assertNotNull(e);
     }
-}
 
-@Test
-public void testOpen_nullInputStream() throws Exception {
-    // Mock ExecutionContext values
-    Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
-    Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn("mocked/directory");
-    Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn("mockPrefix");
+    @Test
+    public void testRead_success() throws Exception {
+        // Set private fields using ReflectionTestUtils
+        ReflectionTestUtils.setField(reader, "bis", new ByteArrayInputStream(new byte[100]));
+        ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 10);
+        ReflectionTestUtils.setField(reader, "currentRecord", 0);
 
-    // Mock FileUtils to return a valid file path
-    Mockito.mockStatic(FileUtils.class);
-    Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
-           .thenReturn("mocked/file/path");
-
-    // Simulate the FileInputStream being null
-    ReflectionTestUtils.setField(reader, "bis", null);
-
-    try {
         // Call the method under test
-        reader.open(mockExecutionContext);
-        Assert.fail("Expected a NullPointerException to be thrown");
-    } catch (NullPointerException e) {
-        // Assert that NullPointerException is thrown
-        Assert.assertNotNull(e);
+        CustaggRecordsDTO result = reader.read();
+
+        // Verify the result
+        Assert.assertNotNull(result);
+        Mockito.verifyZeroInteractions(mockRepository);
+    }
+
+    @Test
+    public void testRead_endOfPartition() throws Exception {
+        // Set private fields using ReflectionTestUtils
+        ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 0);
+        ReflectionTestUtils.setField(reader, "currentRecord", 1);
+
+        // Call the method under test
+        CustaggRecordsDTO result = reader.read();
+
+        // Verify that null is returned for the end of partition
+        Assert.assertNull(result);
+    }
+
+    @Test
+    public void testCreateRecord_success() throws Exception {
+        // Mock the input byte array
+        byte[] mockBytes = new byte[100];
+        ReflectionTestUtils.setField(reader, "bis", new ByteArrayInputStream(mockBytes));
+
+        // Call the private method using reflection
+        Method createRecordMethod = CustaggCompFileReader.class.getDeclaredMethod("createRecord", byte[].class);
+        createRecordMethod.setAccessible(true);
+        CustaggRecordsDTO result = (CustaggRecordsDTO) createRecordMethod.invoke(reader, mockBytes);
+
+        // Verify the created DTO object
+        Assert.assertNotNull(result);
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testCreateRecord_failure() throws Exception {
+        // Mock the input byte array
+        byte[] mockBytes = new byte[100];
+
+        // Simulate failure by throwing an exception
+        Mockito.doThrow(new RuntimeException()).when(mockRepository).findById(Mockito.any());
+
+        // Call the private method using reflection
+        Method createRecordMethod = CustaggCompFileReader.class.getDeclaredMethod("createRecord", byte[].class);
+        createRecordMethod.setAccessible(true);
+        createRecordMethod.invoke(reader, mockBytes);
+    }
+
+    @Test
+    public void testParseField() throws Exception {
+        // Mock a byte array input
+        byte[] mockBytes = new byte[100];
+
+        // Call the private method using reflection
+        Method parseFieldMethod = CustaggCompFileReader.class.getDeclaredMethod("parseField", byte[].class, int.class, int.class);
+        parseFieldMethod.setAccessible(true);
+        byte[] result = (byte[]) parseFieldMethod.invoke(reader, mockBytes, 0, 10);
+
+        // Verify the result
+        Assert.assertNotNull(result);
     }
 }
