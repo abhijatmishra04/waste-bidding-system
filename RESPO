@@ -1,79 +1,114 @@
-@Test
-public void testRead_success() throws Exception {
-    // Mock the BufferedInputStream to return valid data
-    byte[] mockData = new byte[CustaggBatchConstants.RECORD_SIZE];
-    ReflectionTestUtils.setField(reader, "bis", new ByteArrayInputStream(mockData));
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggCompFileReaderTest {
 
-    // Set the private fields for tracking record counts
-    ReflectionTestUtils.setField(reader, "currentRecord", 0);
-    ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 1);
+    @InjectMocks
+    private CustaggCompFileReader reader; // Class under test
 
-    // Call the method under test
-    CustaggRecordsDTO result = reader.read();
+    @Mock
+    private ExecutionContext mockExecutionContext;
 
-    // Verify the result is not null and record parsing was successful
-    Assert.assertNotNull(result);
-    Mockito.verifyNoInteractions(mockRepository); // Assuming repository isn't used here
-}
+    @Mock
+    private M2MDynamicConfigPropertiesRepository mockRepository;
 
-@Test
-public void testRead_endOfPartition() throws Exception {
-    // Set the private fields to simulate the end of the partition
-    ReflectionTestUtils.setField(reader, "currentRecord", 1);
-    ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 1);
+    @Mock
+    private FileUtils fileUtils; // If FileUtils is static, mock its behavior using Mockito.mockStatic.
 
-    // Call the method under test
-    CustaggRecordsDTO result = reader.read();
+    @Before
+    public void setUp() {
+        // Use ReflectionTestUtils to set private fields
+        ReflectionTestUtils.setField(reader, "dynamicConfigPropertiesRepository", mockRepository);
+    }
 
-    // Verify the method returns null when the partition ends
-    Assert.assertNull(result);
-}
+    @Test
+    public void testOpen_success() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("mockPrefix");
 
-@Test
-public void testRead_endOfFile() throws Exception {
-    // Mock the BufferedInputStream to simulate EOF by returning -1
-    BufferedInputStream mockInputStream = Mockito.mock(BufferedInputStream.class);
-    Mockito.when(mockInputStream.read(Mockito.any(byte[].class))).thenReturn(-1);
-    ReflectionTestUtils.setField(reader, "bis", mockInputStream);
+        // Mock FileUtils to return a valid file path
+        Mockito.mockStatic(FileUtils.class);
+        Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+               .thenReturn("mocked/file/path");
 
-    // Set the private fields for tracking record counts
-    ReflectionTestUtils.setField(reader, "currentRecord", 0);
-    ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 1);
+        // Call the method under test
+        reader.open(mockExecutionContext);
 
-    // Call the method under test
-    CustaggRecordsDTO result = reader.read();
+        // Verify the state of the reader
+        Assert.assertEquals(1, ReflectionTestUtils.getField(reader, "startLine"));
+        Assert.assertEquals(5, ReflectionTestUtils.getField(reader, "endLine"));
+    }
 
-    // Verify the method returns null at EOF
-    Assert.assertNull(result);
-}
+    @Test(expected = ItemStreamException.class)
+    public void testOpen_fileNotFound() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("mockPrefix");
 
-@Test(expected = RuntimeException.class)
-public void testRead_incompleteRecord() throws Exception {
-    // Mock the BufferedInputStream to return fewer bytes than RECORD_SIZE
-    byte[] mockData = new byte[CustaggBatchConstants.RECORD_SIZE - 1];
-    BufferedInputStream mockInputStream = Mockito.mock(BufferedInputStream.class);
-    Mockito.when(mockInputStream.read(Mockito.any(byte[].class))).thenReturn(mockData.length);
-    ReflectionTestUtils.setField(reader, "bis", mockInputStream);
+        // Mock FileUtils to return a non-existent file path
+        Mockito.mockStatic(FileUtils.class);
+        Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+               .thenReturn("nonexistent/file/path");
 
-    // Set the private fields for tracking record counts
-    ReflectionTestUtils.setField(reader, "currentRecord", 0);
-    ReflectionTestUtils.setField(reader, "numberOfRecordsToRead", 1);
+        // Call the method under test (expecting an exception)
+        reader.open(mockExecutionContext);
+    }
 
-    // Call the method under test and expect an exception
-    reader.read();
-}
+    @Test(expected = RuntimeException.class)
+    public void testOpen_skipBytesError() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(2);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("mockPrefix");
 
-@Test
-public void testRead_nullStream() throws Exception {
-    // Set BufferedInputStream to null to test how it behaves
-    ReflectionTestUtils.setField(reader, "bis", null);
+        // Mock FileUtils to return a valid file path
+        Mockito.mockStatic(FileUtils.class);
+        Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+               .thenReturn("mocked/file/path");
 
-    // Call the method under test
-    try {
-        reader.read();
-        Assert.fail("Expected a NullPointerException to be thrown");
-    } catch (NullPointerException e) {
-        // Verify that NullPointerException is thrown
-        Assert.assertNotNull(e);
+        // Mock BufferedInputStream to simulate a skipping error
+        BufferedInputStream mockInputStream = Mockito.mock(BufferedInputStream.class);
+        Mockito.when(mockInputStream.skip(Mockito.anyLong())).thenReturn(0L); // Simulate skip failure
+        ReflectionTestUtils.setField(reader, "bis", mockInputStream);
+
+        // Call the method under test (expecting an exception)
+        reader.open(mockExecutionContext);
+    }
+
+    @Test
+    public void testOpen_incompleteRecords() throws Exception {
+        // Mock ExecutionContext values
+        Mockito.when(mockExecutionContext.getInt("fromLine")).thenReturn(1);
+        Mockito.when(mockExecutionContext.getInt("toLine")).thenReturn(5);
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.DIRECTORY_PATH))
+               .thenReturn("mocked/directory");
+        Mockito.when(mockExecutionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA))
+               .thenReturn("mockPrefix");
+
+        // Mock FileUtils to return a valid file path
+        Mockito.mockStatic(FileUtils.class);
+        Mockito.when(FileUtils.findTodaysFiles("mocked/directory", "mockPrefix", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+               .thenReturn("mocked/file/path");
+
+        // Mock BufferedInputStream
+        byte[] mockData = new byte[50];
+        BufferedInputStream mockInputStream = new BufferedInputStream(new ByteArrayInputStream(mockData));
+        ReflectionTestUtils.setField(reader, "bis", mockInputStream);
+
+        // Call the method under test
+        reader.open(mockExecutionContext);
+
+        // Verify the state of the reader
+        Assert.assertNotNull(ReflectionTestUtils.getField(reader, "bis"));
     }
 }
