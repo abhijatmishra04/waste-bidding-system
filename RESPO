@@ -1,57 +1,59 @@
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+
 @Component
-@StepScope
-@Log4j2
-public class CustaggFileValidationTasklet implements Tasklet {
+public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+
+    private HashMap<String, String> entityMap;
 
     @Override
-    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
-        ExecutionContext executionContext = chunkContext.getStepContext().getStepExecution().getJobExecution().getExecutionContext();
-
-        String directoryPath = executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH);
-        String filePrefixReferEntry = executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY);
-
-        Log.info("Custagg :: FileValidator :: execute() :: directoryPath ::{} and filePrefix ::{}", directoryPath, filePrefixReferEntry);
-
-        if (directoryPath == null || filePrefixReferEntry == null) {
-            throw new IllegalStateException("Directory path or file prefix is missing in the execution context");
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
+        if (entityMap == null || entityMap.isEmpty()) {
+            throw new IllegalStateException("Entity map is not available or is empty.");
         }
 
-        String filePathForReferEntry = FileUtils.findTodaysFiles(directoryPath, filePrefixReferEntry, CustaggBatchConstants.LOCK_FILE_EXTENSION);
-        HashMap<String, String> entityMap = new HashMap<>();
+        // Extract data from the item
+        String entityFromFile = item.getEntity().trim();
+        String accountNumber = item.getAccountNumber();
+        String productCode = item.getProductCode();
 
-        try (BufferedReader br = new BufferedReader(new FileReader(filePathForReferEntry))) {
-            String line;
-            int lineNumber = 0;
+        Log.trace("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
+                entityFromFile, accountNumber, productCode);
 
-            while ((line = br.readLine()) != null) {
-                lineNumber++;
-                if (line.length() < 8) {
-                    Log.debug("EntityFileReader: Skipping line {} - Line is too short: {}", lineNumber, line);
-                    continue;
-                }
+        // Validate and enrich the record using the entityMap
+        String mappedEntity = entityMap.get(entityFromFile);
 
-                String alphaEntity = line.substring(0, 4).trim();
-                String numEntity = line.substring(4, 8).trim();
-
-                if (numEntity.isEmpty() || alphaEntity.isEmpty()) {
-                    Log.debug("EntityFileReader: Skipping line {} - Missing values: {}", lineNumber, line);
-                    continue;
-                }
-
-                entityMap.put(numEntity, alphaEntity);
-                Log.debug("EntityFileReader: Processed line {} - NumEntity: {}, AlphaEntity: {}", lineNumber, numEntity, alphaEntity);
-            }
-        } catch (IOException e) {
-            Log.error("EntityFileReader: Error reading file at path: {}", filePathForReferEntry, e);
-            throw new Exception("Error reading file", e);
+        if (mappedEntity == null) {
+            throw new IllegalArgumentException("No mapped entity found for: " + entityFromFile);
         }
 
-        Log.info("FileValidator: Successfully created entity map with {} entries.", entityMap.size());
+        CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
+        enrichedRecord.setMappedEntity(mappedEntity);
+        enrichedRecord.setNumEntity(entityFromFile);
+        enrichedRecord.setAccountNumber(accountNumber);
+        enrichedRecord.setProductCode(productCode);
 
-        // Save the map into the ExecutionContext for downstream processors to use
-        executionContext.put("entityMap", entityMap);
+        Log.debug("CustaggProcessor: Enriched record details: {}", enrichedRecord);
 
-        Log.info("FileValidator: Entity map added to ExecutionContext.");
-        return RepeatStatus.FINISHED;
+        return enrichedRecord;
+    }
+
+    /**
+     * This method retrieves the entityMap from the ExecutionContext before processing starts.
+     */
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        // Retrieve the entity map from the ExecutionContext
+        entityMap = (HashMap<String, String>) stepExecution.getExecutionContext().get("entityMap");
+
+        if (entityMap == null || entityMap.isEmpty()) {
+            Log.error("CustaggProcessor: Entity map is empty or not present in ExecutionContext.");
+            throw new IllegalStateException("Entity map is not available or is empty.");
+        }
+
+        Log.info("CustaggProcessor: Retrieved entity map with {} entries from ExecutionContext.", entityMap.size());
     }
 }
