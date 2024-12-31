@@ -1,35 +1,101 @@
-@Test
-public void testOpenAndRead_Success() throws Exception {
-    // Set execution context values
-    executionContext.putInt("fromLine", 1);
-    executionContext.putInt("toLine", 2);
+package com.bofa.sst.batch.core.impl;
 
-    // Add expected keys in the ExecutionContext
-    executionContext.putString("directoryPath", testFilePath.getParent().toString());
-    executionContext.putString("filePrefixReferData", "test-input");
-    executionContext.putString("LOCK_FILE_EXTENSION", ".txt"); // If applicable in the implementation
+import org.junit.*;
+import org.mockito.Mockito;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ExecutionContext;
 
-    try {
-        // Open the file reader
-        fileReader.open(executionContext);
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
 
-        // Read first record
-        CustaggRecordsDTO record1 = fileReader.read();
-        assertNotNull("First record should not be null", record1);
-        assertEquals("PRO", record1.getProductCode());
-        assertEquals("ENTITY001", record1.getEntity());
-        assertEquals("ACC123456789012345", record1.getAccountNumber());
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
 
-        // Read second record
-        CustaggRecordsDTO record2 = fileReader.read();
-        assertNotNull("Second record should not be null", record2);
-        assertEquals("PRO", record2.getProductCode());
-        assertEquals("ENTITY002", record2.getEntity());
-        assertEquals("ACC987654321098765", record2.getAccountNumber());
+public class CustaggFileValidationTaskletTest {
 
-        // Ensure no more records are available
-        assertNull("No more records expected", fileReader.read());
-    } finally {
-        fileReader.close();
+    private CustaggFileValidationTasklet tasklet;
+    private StepContribution stepContribution;
+    private ChunkContext chunkContext;
+    private ExecutionContext executionContext;
+    private Path tempDirectory;
+    private Path referDataFile;
+    private Path referEntryFile;
+
+    @Before
+    public void setUp() throws Exception {
+        // Initialize Tasklet
+        tasklet = new CustaggFileValidationTasklet();
+
+        // Mock StepContribution and ChunkContext
+        stepContribution = mock(StepContribution.class);
+        chunkContext = mock(ChunkContext.class);
+        StepExecution stepExecution = mock(StepExecution.class);
+        JobExecution jobExecution = mock(JobExecution.class);
+        executionContext = new ExecutionContext();
+
+        // Set up mocks
+        when(chunkContext.getStepContext().getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+
+        // Create temporary files
+        tempDirectory = Files.createTempDirectory("test-dir");
+        referDataFile = tempDirectory.resolve("testReferData.dat");
+        referEntryFile = tempDirectory.resolve("testReferEntry.dat");
+
+        // Write mock data to files
+        Files.write(referDataFile, "DATA01".getBytes());
+        Files.write(referEntryFile, "ENTY1234\nENTY5678".getBytes());
+
+        // Populate ExecutionContext
+        executionContext.putString(CustaggBatchConstants.DIRECTORY_PATH, tempDirectory.toString());
+        executionContext.putString(CustaggBatchConstants.FILE_PREFIX_REFERDATA, "testReferData");
+        executionContext.putString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY, "testReferEntry");
+    }
+
+    @Test
+    public void testExecute_Success() throws Exception {
+        // Execute the tasklet
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+
+        // Verify the tasklet completed successfully
+        assertEquals(RepeatStatus.FINISHED, status);
+
+        // Verify entityMap was created and added to ExecutionContext
+        @SuppressWarnings("unchecked")
+        Map<String, String> entityMap = (Map<String, String>) executionContext.get("entityMap");
+        assertNotNull(entityMap);
+        assertEquals(2, entityMap.size());
+        assertEquals("ENTY", entityMap.get("1234"));
+        assertEquals("ENTY", entityMap.get("5678"));
+    }
+
+    @Test(expected = FileNotFoundException.class)
+    public void testExecute_FileNotFound() throws Exception {
+        // Remove the referDataFile to simulate missing file
+        Files.deleteIfExists(referDataFile);
+
+        // Execute the tasklet
+        tasklet.execute(stepContribution, chunkContext);
+    }
+
+    @Test(expected = Exception.class)
+    public void testExecute_InvalidFileContent() throws Exception {
+        // Write invalid content to referEntryFile
+        Files.write(referEntryFile, "INVALID_CONTENT".getBytes(), StandardOpenOption.TRUNCATE_EXISTING);
+
+        // Execute the tasklet
+        tasklet.execute(stepContribution, chunkContext);
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        // Cleanup temporary files
+        Files.deleteIfExists(referDataFile);
+        Files.deleteIfExists(referEntryFile);
+        Files.deleteIfExists(tempDirectory);
     }
 }
