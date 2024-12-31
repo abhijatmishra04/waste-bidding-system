@@ -5,6 +5,9 @@ public class CustaggProcessorTest {
     private CustaggProcessor processor;
 
     @Mock
+    private JdbcTemplate mockJdbcTemplate;
+
+    @Mock
     private StepExecution mockStepExecution;
 
     @Mock
@@ -16,38 +19,83 @@ public class CustaggProcessorTest {
     }
 
     @Test
-    public void testBeforeStep_validEntityMap() {
+    public void testProcess_successfullyMappedEntity() throws Exception {
         HashMap<String, String> mockEntityMap = new HashMap<>();
-        mockEntityMap.put("key1", "value1");
-        mockEntityMap.put("key2", "value2");
+        mockEntityMap.put("entityFromFile", "mappedEntity");
 
-        Mockito.when(mockExecutionContext.get("entityMap")).thenReturn(mockEntityMap);
+        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
 
-        processor.beforeStep(mockStepExecution);
+        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
+        mockInput.setEntityFromFile("entityFromFile");
+        mockInput.setAccountNumber("12345");
+        mockInput.setProductCode("P001");
 
-        Assert.assertEquals(mockEntityMap, ReflectionTestUtils.getField(processor, "entityMap"));
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+        List<String> transferExecutionIds = Arrays.asList("TRANS1", "TRANS2");
+
+        Mockito.when(processor.fetchScheduleIds(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
+                .thenReturn(scheduleIds);
+        Mockito.when(processor.fetchAndUpdateTransferExecutionIds(Mockito.anyList()))
+                .thenReturn(transferExecutionIds);
+
+        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals("mappedEntity", result.getMappedEntity());
+        Assert.assertEquals("entityFromFile", result.getNumEntity());
+        Assert.assertEquals("12345", result.getAccountNumber());
+        Assert.assertEquals("P001", result.getProductCode());
+        Assert.assertEquals(scheduleIds, result.getScheduleIds());
+        Assert.assertEquals(transferExecutionIds, result.getTransferExecutionIds());
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testBeforeStep_nullEntityMap() {
-        Mockito.when(mockExecutionContext.get("entityMap")).thenReturn(null);
-        processor.beforeStep(mockStepExecution);
-    }
+    public void testProcess_emptyEntityMap() throws Exception {
+        HashMap<String, String> emptyEntityMap = new HashMap<>();
+        ReflectionTestUtils.setField(processor, "entityMap", emptyEntityMap);
 
-    @Test(expected = IllegalStateException.class)
-    public void testBeforeStep_emptyEntityMap() {
-        HashMap<String, String> mockEntityMap = new HashMap<>();
-        Mockito.when(mockExecutionContext.get("entityMap")).thenReturn(mockEntityMap);
-        processor.beforeStep(mockStepExecution);
+        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
+        mockInput.setEntityFromFile("entityFromFile");
+        mockInput.setAccountNumber("12345");
+        mockInput.setProductCode("P001");
+
+        processor.process(mockInput);
     }
 
     @Test
-    public void testBeforeStep_logInfo() {
+    public void testProcess_entityNotFound() throws Exception {
         HashMap<String, String> mockEntityMap = new HashMap<>();
-        mockEntityMap.put("key1", "value1");
+        mockEntityMap.put("differentEntity", "mappedEntity");
 
-        Mockito.when(mockExecutionContext.get("entityMap")).thenReturn(mockEntityMap);
+        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
 
-        processor.beforeStep(mockStepExecution);
+        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
+        mockInput.setEntityFromFile("entityFromFile");
+        mockInput.setAccountNumber("12345");
+        mockInput.setProductCode("P001");
+
+        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+
+        Assert.assertNull(result);
+    }
+
+    @Test
+    public void testProcess_emptyScheduleIds() throws Exception {
+        HashMap<String, String> mockEntityMap = new HashMap<>();
+        mockEntityMap.put("entityFromFile", "mappedEntity");
+
+        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
+
+        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
+        mockInput.setEntityFromFile("entityFromFile");
+        mockInput.setAccountNumber("12345");
+        mockInput.setProductCode("P001");
+
+        Mockito.when(processor.fetchScheduleIds(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
+                .thenReturn(Collections.emptyList());
+
+        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+
+        Assert.assertNull(result);
     }
 }
