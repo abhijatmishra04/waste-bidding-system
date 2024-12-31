@@ -1,41 +1,62 @@
-private void fetchAndUpdateTransferInstructionIds(List<String> scheduleIds) {
-    for (String scheduleId : scheduleIds) {
-        try {
-            // Fetch the transfer instruction ID using only the schedule ID
-            String transferInstructionId = jdbcTemplate.queryForObject(
-                CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID,
-                String.class,
-                new Object[]{scheduleId}
-            );
+private List<String> fetchScheduleIdsUsingAccountBoa(String accountNumber, String numEntity, String productCode) {
+    try {
+        Log.trace("Executing query to fetch Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
 
-            // Update transfer instruction M2M if a valid transferInstructionId is found
-            if (transferInstructionId != null) {
-                updateTransferInstruction(transferInstructionId);
-                Log.trace("Updated Transfer Instruction M2M for ID: {}", transferInstructionId);
-            } else {
-                Log.warn("No Transfer Instruction ID found for Schedule ID: {}", scheduleId);
-            }
-        } catch (DataAccessException e) {
-            Log.error("Error fetching Transfer Instruction ID for Schedule ID: {}. Exception: {}", scheduleId, e.getMessage(), e);
-        } catch (Exception e) {
-            Log.error("Unexpected error fetching Transfer Instruction ID for Schedule ID: {}. Exception: {}", scheduleId, e.getMessage(), e);
-        }
+        return jdbcTemplate.query(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA,
+            new Object[]{accountNumber, numEntity, productCode},
+            (rs, rowNum) -> rs.getString("schd_id")
+        );
+    } catch (DataAccessException e) {
+        Log.error("Database access error while fetching Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
+        return Collections.emptyList();
+    } catch (Exception e) {
+        Log.error("Unexpected error while fetching Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
+        return Collections.emptyList();
     }
 }
 
-private void updateTransferInstruction(String transferInstructionId) {
+private List<String> fetchScheduleIdsUsingAccountM2M(String accountNumber, String numEntity, String productCode) {
     try {
-        jdbcTemplate.update(
-            CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M,
-            "H02", // New Status
-            "Custagg", // Updated By
-            new Timestamp(System.currentTimeMillis()), // Updated Timestamp
-            transferInstructionId
+        Log.trace("Executing query to fetch Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+
+        return jdbcTemplate.query(
+            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M,
+            new Object[]{accountNumber, numEntity, productCode},
+            (rs, rowNum) -> rs.getString("schd_id")
         );
-        Log.debug("Successfully updated Transfer Instruction M2M for ID: {}", transferInstructionId);
     } catch (DataAccessException e) {
-        Log.error("Error updating Transfer Instruction M2M for ID: {}. Exception: {}", transferInstructionId, e.getMessage(), e);
+        Log.error("Database access error while fetching Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
+        return Collections.emptyList();
     } catch (Exception e) {
-        Log.error("Unexpected error updating Transfer Instruction M2M for ID: {}. Exception: {}", transferInstructionId, e.getMessage(), e);
+        Log.error("Unexpected error while fetching Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
+        return Collections.emptyList();
     }
+}
+
+
+
+
+private List<String> fetchScheduleIds(String accountNumber, String numEntity, String productCode) {
+    List<String> scheduleIds = new ArrayList<>();
+
+    // Fetch schedule IDs from Account_BOA
+    List<String> scheduleIdsFromBoa = fetchScheduleIdsUsingAccountBoa(accountNumber, numEntity, productCode);
+    if (!scheduleIdsFromBoa.isEmpty()) {
+        scheduleIds.addAll(scheduleIdsFromBoa);
+        Log.debug("Fetched Schedule IDs from Account_BOA: {}", scheduleIdsFromBoa);
+    } else {
+        Log.debug("No Schedule IDs found in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+    }
+
+    // Fetch schedule IDs from Account_M2M
+    List<String> scheduleIdsFromM2M = fetchScheduleIdsUsingAccountM2M(accountNumber, numEntity, productCode);
+    if (!scheduleIdsFromM2M.isEmpty()) {
+        scheduleIds.addAll(scheduleIdsFromM2M);
+        Log.debug("Fetched Schedule IDs from Account_M2M: {}", scheduleIdsFromM2M);
+    } else {
+        Log.debug("No Schedule IDs found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+    }
+
+    return scheduleIds;
 }
