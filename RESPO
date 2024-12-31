@@ -1,17 +1,5 @@
-@Component
+@Bean
 @StepScope
-public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
-
-    private final CustaggEntityFileReader entityFileReader;
-
-    @Autowired
-    public CustaggProcessor(CustaggEntityFileReader entityFileReader) {
-        this.entityFileReader = entityFileReader;
-    }
-
-    @Override
-    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
-        HashMap<String, String> entityMap = entityFileReader.loadEntityMap();
-        // Use entityMap as needed
-    }
+public CustaggProcessor custaggProcessor(CustaggEntityFileReader entityFileReader) {
+    return new CustaggProcessor(entityFileReader);
 }
