@@ -9,105 +9,142 @@ public class CustaggProcessorTest {
 
     @Before
     public void setUp() {
-        // Setup can be used for initializing shared objects or mocked behavior
+        // Setup shared mocks if needed
     }
 
     @Test
-    public void testFetchScheduleIds_success() {
-        String accountNumber = "12345";
-        String numEntity = "ENTITY1";
-        String productCode = "PRODUCT1";
+    public void testFetchAndUpdateTransferExecutionIds_success() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
 
-        List<String> boaScheduleIds = Arrays.asList("BOA1", "BOA2");
-        List<String> m2mScheduleIds = Arrays.asList("M2M1", "M2M2");
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenReturn("EXEC1", "EXEC2");
 
-        Mockito.doReturn(boaScheduleIds)
-                .when(processor).fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
-        Mockito.doReturn(m2mScheduleIds)
-                .when(processor).fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
-
-        List<String> result = processor.fetchScheduleIds(accountNumber, numEntity, productCode);
+        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
 
         Assert.assertNotNull(result);
-        Assert.assertEquals(4, result.size());
-        Assert.assertTrue(result.containsAll(boaScheduleIds));
-        Assert.assertTrue(result.containsAll(m2mScheduleIds));
+        Assert.assertEquals(2, result.size());
+        Assert.assertEquals(transferExecutionIds, result);
     }
 
     @Test
-    public void testFetchScheduleIds_nullResults() {
-        String accountNumber = "12345";
-        String numEntity = "ENTITY1";
-        String productCode = "PRODUCT1";
+    public void testFetchAndUpdateTransferExecutionIds_noTransferExecutionId() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
 
-        Mockito.doReturn(null)
-                .when(processor).fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
-        Mockito.doReturn(null)
-                .when(processor).fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenReturn(null);
 
-        List<String> result = processor.fetchScheduleIds(accountNumber, numEntity, productCode);
+        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
 
         Assert.assertNotNull(result);
         Assert.assertTrue(result.isEmpty());
     }
 
     @Test
-    public void testFetchScheduleIdUsingAccountBoa_success() {
-        String accountNumber = "12345";
-        String numEntity = "ENTITY1";
-        String productCode = "PRODUCT1";
+    public void testFetchAndUpdateTransferExecutionIds_exception() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
 
-        List<String> boaScheduleIds = Arrays.asList("BOA1", "BOA2");
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenThrow(new RuntimeException("Mocked Exception"));
 
-        Mockito.when(mockJdbcTemplate.query(
-                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
-                        Mockito.any(RowMapper.class),
-                        Mockito.eq(accountNumber),
-                        Mockito.eq(numEntity),
-                        Mockito.eq(productCode)))
-                .thenReturn(boaScheduleIds);
-
-        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
 
         Assert.assertNotNull(result);
-        Assert.assertEquals(boaScheduleIds, result);
+        Assert.assertTrue(result.isEmpty());
     }
 
     @Test
-    public void testFetchScheduleIdUsingAccountBoa_dataAccessException() {
-        String accountNumber = "12345";
-        String numEntity = "ENTITY1";
-        String productCode = "PRODUCT1";
+    public void testUpdateTransferExecution_success() {
+        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
 
-        Mockito.when(mockJdbcTemplate.query(
-                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
-                        Mockito.any(RowMapper.class),
-                        Mockito.eq(accountNumber),
-                        Mockito.eq(numEntity),
-                        Mockito.eq(productCode)))
-                .thenThrow(new DataAccessException("Mocked Data Access Exception") {});
+        Mockito.doNothing().when(mockJdbcTemplate).batchUpdate(
+                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
+                Mockito.anyList());
 
-        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        processor.updateTransferExecution(transferExecutionIds);
 
-        Assert.assertNull(result);
+        Mockito.verify(mockJdbcTemplate, Mockito.times(1)).batchUpdate(
+                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
+                Mockito.anyList());
     }
 
     @Test
-    public void testFetchScheduleIdUsingAccountBoa_genericException() {
-        String accountNumber = "12345";
-        String numEntity = "ENTITY1";
-        String productCode = "PRODUCT1";
+    public void testUpdateTransferExecution_exception() {
+        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
 
-        Mockito.when(mockJdbcTemplate.query(
-                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
-                        Mockito.any(RowMapper.class),
-                        Mockito.eq(accountNumber),
-                        Mockito.eq(numEntity),
-                        Mockito.eq(productCode)))
-                .thenThrow(new RuntimeException("Mocked Generic Exception"));
+        Mockito.doThrow(new RuntimeException("Mocked Exception"))
+            .when(mockJdbcTemplate).batchUpdate(
+                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
+                Mockito.anyList());
 
-        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        try {
+            processor.updateTransferExecution(transferExecutionIds);
+            Assert.fail("Expected RuntimeException to be thrown");
+        } catch (RuntimeException e) {
+            Assert.assertEquals("Mocked Exception", e.getMessage());
+        }
+    }
 
-        Assert.assertNull(result);
+    @Test
+    public void testFetchAndUpdateTransferInstructionIds_success() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenReturn("INSTR1", "INSTR2");
+
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+        Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class));
+    }
+
+    @Test
+    public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenReturn(null);
+
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+        Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class));
+    }
+
+    @Test
+    public void testFetchAndUpdateTransferInstructionIds_exception() {
+        List<String> scheduleIds = Arrays.asList("SCHED1");
+
+        Mockito.when(mockJdbcTemplate.queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)))
+            .thenThrow(new RuntimeException("Mocked Exception"));
+
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+        Mockito.verify(mockJdbcTemplate, Mockito.times(1)).queryForObject(
+                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class));
     }
 }
