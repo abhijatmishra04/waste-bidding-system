@@ -1,84 +1,148 @@
 @RunWith(MockitoJUnitRunner.class)
-public class FileUtilsTest {
+public class CustaggFileValidationTaskletTest {
+
+    @InjectMocks
+    private CustaggFileValidationTasklet tasklet;
 
     @Mock
-    private File mockDirectory;
+    private StepContribution mockStepContribution;
 
     @Mock
-    private File[] mockFiles;
+    private ChunkContext mockChunkContext;
+
+    @Mock
+    private ExecutionContext mockExecutionContext;
+
+    @Mock
+    private FileUtils mockFileUtils;
 
     @Before
     public void setUp() {
-        // Setup common mocks if needed
+        // Mock ChunkContext and ExecutionContext setup
+        Mockito.when(mockChunkContext.getStepContext().getStepExecution().getExecutionContext())
+                .thenReturn(mockExecutionContext);
     }
 
     @Test
-    public void testFindTodaysFiles_directoryNull() {
-        String result = FileUtils.findTodaysFiles(null, "filePrefix", ".txt");
-        Assert.assertNull(result);
+    public void testExecute_success() throws Exception {
+        // Mock values for execution context
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
+                .thenReturn("validPath");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERDATA)))
+                .thenReturn("prefix1");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
+                .thenReturn("prefix2");
+
+        // Mock FileUtils methods
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix1"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn("filePath1");
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix2"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn("filePath2");
+
+        // Mock BufferedReader for reading file content
+        BufferedReader mockReader = Mockito.mock(BufferedReader.class);
+        Mockito.when(mockReader.readLine())
+                .thenReturn("1234ALPHA", "5678BETA", null);
+
+        Mockito.whenNew(FileReader.class).withAnyArguments().thenReturn(mockReader);
+
+        // Execute tasklet
+        RepeatStatus status = tasklet.execute(mockStepContribution, mockChunkContext);
+
+        // Assertions
+        Assert.assertEquals(RepeatStatus.FINISHED, status);
+        Mockito.verify(mockExecutionContext).put(Mockito.eq("entityMap"), Mockito.anyMap());
+        Mockito.verify(mockStepContribution).setExitStatus(ExitStatus.COMPLETED);
     }
 
     @Test
-    public void testFindTodaysFiles_directoryDoesNotExist() {
-        Mockito.when(mockDirectory.exists()).thenReturn(false);
+    public void testExecute_missingFilePath() throws Exception {
+        // Mock missing file paths
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
+                .thenReturn("validPath");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERDATA)))
+                .thenReturn("prefix1");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
+                .thenReturn("prefix2");
 
-        String result = FileUtils.findTodaysFiles("invalidPath", "filePrefix", ".txt");
-        Assert.assertNull(result);
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix1"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn(null);
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix2"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn(null);
+
+        try {
+            tasklet.execute(mockStepContribution, mockChunkContext);
+            Assert.fail("Expected FileNotFoundException to be thrown");
+        } catch (FileNotFoundException e) {
+            Assert.assertTrue(e.getMessage().contains("Could not find the file on this directory path"));
+        }
     }
 
     @Test
-    public void testFindTodaysFiles_noMatchingFiles() {
-        Mockito.when(mockDirectory.exists()).thenReturn(true);
-        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
-                .thenReturn(new File[0]);
+    public void testExecute_fileReadError() throws Exception {
+        // Mock file paths
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
+                .thenReturn("validPath");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
+                .thenReturn("prefix2");
 
-        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
-        Assert.assertNull(result);
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix2"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn("filePath2");
+
+        // Mock FileReader to throw IOException
+        Mockito.whenNew(FileReader.class).withAnyArguments().thenThrow(new IOException("Mocked IOException"));
+
+        try {
+            tasklet.execute(mockStepContribution, mockChunkContext);
+            Assert.fail("Expected Exception to be thrown");
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Error reading file"));
+        }
     }
 
     @Test
-    public void testFindTodaysFiles_matchingFiles() {
-        Mockito.when(mockDirectory.exists()).thenReturn(true);
+    public void testExecute_skipInvalidLines() throws Exception {
+        // Mock values for execution context
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
+                .thenReturn("validPath");
+        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
+                .thenReturn("prefix2");
 
-        File mockFile1 = Mockito.mock(File.class);
-        File mockFile2 = Mockito.mock(File.class);
+        // Mock file paths
+        Mockito.when(mockFileUtils.findTodaysFiles(
+                        Mockito.eq("validPath"),
+                        Mockito.eq("prefix2"),
+                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
+                .thenReturn("filePath2");
 
-        Mockito.when(mockFile1.getName()).thenReturn("filePrefix_20250101.txt");
-        Mockito.when(mockFile1.lastModified()).thenReturn(200L);
+        // Mock BufferedReader for reading file content
+        BufferedReader mockReader = Mockito.mock(BufferedReader.class);
+        Mockito.when(mockReader.readLine())
+                .thenReturn("1234ALPHA", "SHORT", "    ", null);
 
-        Mockito.when(mockFile2.getName()).thenReturn("filePrefix_20250101.txt");
-        Mockito.when(mockFile2.lastModified()).thenReturn(100L);
+        Mockito.whenNew(FileReader.class).withAnyArguments().thenReturn(mockReader);
 
-        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
-                .thenReturn(new File[]{mockFile1, mockFile2});
+        // Execute tasklet
+        RepeatStatus status = tasklet.execute(mockStepContribution, mockChunkContext);
 
-        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
-
-        Assert.assertNotNull(result);
-        Assert.assertEquals(mockFile1.getAbsolutePath(), result);
-    }
-
-    @Test
-    public void testFindTodaysFiles_matchingFilesSorted() {
-        Mockito.when(mockDirectory.exists()).thenReturn(true);
-
-        File mockFile1 = Mockito.mock(File.class);
-        File mockFile2 = Mockito.mock(File.class);
-
-        Mockito.when(mockFile1.getName()).thenReturn("filePrefix_20250101.txt");
-        Mockito.when(mockFile1.lastModified()).thenReturn(200L);
-        Mockito.when(mockFile1.getAbsolutePath()).thenReturn("/path/to/file1.txt");
-
-        Mockito.when(mockFile2.getName()).thenReturn("filePrefix_20250101.txt");
-        Mockito.when(mockFile2.lastModified()).thenReturn(100L);
-        Mockito.when(mockFile2.getAbsolutePath()).thenReturn("/path/to/file2.txt");
-
-        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
-                .thenReturn(new File[]{mockFile1, mockFile2});
-
-        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
-
-        Assert.assertNotNull(result);
-        Assert.assertEquals("/path/to/file1.txt", result); // File with latest modification date
+        // Assertions
+        Assert.assertEquals(RepeatStatus.FINISHED, status);
+        Mockito.verify(mockExecutionContext).put(Mockito.eq("entityMap"), Mockito.anyMap());
+        Mockito.verify(mockStepContribution).setExitStatus(ExitStatus.COMPLETED);
     }
 }
