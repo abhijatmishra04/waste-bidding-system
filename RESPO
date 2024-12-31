@@ -1,128 +1,84 @@
-@Test
-public void testFetchAndUpdateTransferInstructionIds_success() {
-    List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+@RunWith(MockitoJUnitRunner.class)
+public class FileUtilsTest {
 
-    Mockito.when(mockJdbcTemplate.queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class)))
-        .thenAnswer(invocation -> {
-            Object[] args = invocation.getArgument(2);
-            if ("SCHED1".equals(args[0])) {
-                return "INSTR1";
-            } else if ("SCHED2".equals(args[0])) {
-                return "INSTR2";
-            }
-            return null;
-        });
+    @Mock
+    private File mockDirectory;
 
-    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+    @Mock
+    private File[] mockFiles;
 
-    Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class));
-}
-
-@Test
-public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
-    List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-    Mockito.when(mockJdbcTemplate.queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class)))
-        .thenReturn(null);
-
-    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-    Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class));
-}
-
-@Test
-public void testFetchAndUpdateTransferInstructionIds_exception() {
-    List<String> scheduleIds = Arrays.asList("SCHED1");
-
-    Mockito.when(mockJdbcTemplate.queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class)))
-        .thenThrow(new RuntimeException("Mocked Exception"));
-
-    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).queryForObject(
-            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-            Mockito.eq(String.class),
-            Mockito.any(Object[].class));
-}
-
-
-
-
-
-
-
-
-
-
-@Test
-public void testUpdateTransferInstruction_success() {
-    String transferInstructionId = "INSTR1";
-
-    Mockito.when(mockJdbcTemplate.update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any()))
-        .thenReturn(1);
-
-    processor.updateTransferInstruction(transferInstructionId);
-
-    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any());
-}
-
-@Test
-public void testUpdateTransferInstruction_dataAccessException() {
-    String transferInstructionId = "INSTR1";
-
-    Mockito.when(mockJdbcTemplate.update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any()))
-        .thenThrow(new DataAccessException("Mocked Data Access Exception") {});
-
-    try {
-        processor.updateTransferInstruction(transferInstructionId);
-        Assert.fail("Expected DataAccessException to be thrown");
-    } catch (DataAccessException e) {
-        Assert.assertEquals("Mocked Data Access Exception", e.getMessage());
+    @Before
+    public void setUp() {
+        // Setup common mocks if needed
     }
 
-    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any());
-}
-
-@Test
-public void testUpdateTransferInstruction_exception() {
-    String transferInstructionId = "INSTR1";
-
-    Mockito.when(mockJdbcTemplate.update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any()))
-        .thenThrow(new RuntimeException("Mocked Generic Exception"));
-
-    try {
-        processor.updateTransferInstruction(transferInstructionId);
-        Assert.fail("Expected RuntimeException to be thrown");
-    } catch (RuntimeException e) {
-        Assert.assertEquals("Mocked Generic Exception", e.getMessage());
+    @Test
+    public void testFindTodaysFiles_directoryNull() {
+        String result = FileUtils.findTodaysFiles(null, "filePrefix", ".txt");
+        Assert.assertNull(result);
     }
 
-    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
-            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
-            Mockito.any());
+    @Test
+    public void testFindTodaysFiles_directoryDoesNotExist() {
+        Mockito.when(mockDirectory.exists()).thenReturn(false);
+
+        String result = FileUtils.findTodaysFiles("invalidPath", "filePrefix", ".txt");
+        Assert.assertNull(result);
+    }
+
+    @Test
+    public void testFindTodaysFiles_noMatchingFiles() {
+        Mockito.when(mockDirectory.exists()).thenReturn(true);
+        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
+                .thenReturn(new File[0]);
+
+        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
+        Assert.assertNull(result);
+    }
+
+    @Test
+    public void testFindTodaysFiles_matchingFiles() {
+        Mockito.when(mockDirectory.exists()).thenReturn(true);
+
+        File mockFile1 = Mockito.mock(File.class);
+        File mockFile2 = Mockito.mock(File.class);
+
+        Mockito.when(mockFile1.getName()).thenReturn("filePrefix_20250101.txt");
+        Mockito.when(mockFile1.lastModified()).thenReturn(200L);
+
+        Mockito.when(mockFile2.getName()).thenReturn("filePrefix_20250101.txt");
+        Mockito.when(mockFile2.lastModified()).thenReturn(100L);
+
+        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
+                .thenReturn(new File[]{mockFile1, mockFile2});
+
+        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals(mockFile1.getAbsolutePath(), result);
+    }
+
+    @Test
+    public void testFindTodaysFiles_matchingFilesSorted() {
+        Mockito.when(mockDirectory.exists()).thenReturn(true);
+
+        File mockFile1 = Mockito.mock(File.class);
+        File mockFile2 = Mockito.mock(File.class);
+
+        Mockito.when(mockFile1.getName()).thenReturn("filePrefix_20250101.txt");
+        Mockito.when(mockFile1.lastModified()).thenReturn(200L);
+        Mockito.when(mockFile1.getAbsolutePath()).thenReturn("/path/to/file1.txt");
+
+        Mockito.when(mockFile2.getName()).thenReturn("filePrefix_20250101.txt");
+        Mockito.when(mockFile2.lastModified()).thenReturn(100L);
+        Mockito.when(mockFile2.getAbsolutePath()).thenReturn("/path/to/file2.txt");
+
+        Mockito.when(mockDirectory.listFiles(Mockito.any(FilenameFilter.class)))
+                .thenReturn(new File[]{mockFile1, mockFile2});
+
+        String result = FileUtils.findTodaysFiles("validPath", "filePrefix", ".txt");
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals("/path/to/file1.txt", result); // File with latest modification date
+    }
 }
