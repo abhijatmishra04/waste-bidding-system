@@ -1,62 +1,17 @@
-private List<String> fetchScheduleIdsUsingAccountBoa(String accountNumber, String numEntity, String productCode) {
-    try {
-        Log.trace("Executing query to fetch Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+@Component
+@StepScope
+public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
 
-        return jdbcTemplate.query(
-            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA,
-            new Object[]{accountNumber, numEntity, productCode},
-            (rs, rowNum) -> rs.getString("schd_id")
-        );
-    } catch (DataAccessException e) {
-        Log.error("Database access error while fetching Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
-        return Collections.emptyList();
-    } catch (Exception e) {
-        Log.error("Unexpected error while fetching Schedule IDs from Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
-        return Collections.emptyList();
-    }
-}
+    private final CustaggEntityFileReader entityFileReader;
 
-private List<String> fetchScheduleIdsUsingAccountM2M(String accountNumber, String numEntity, String productCode) {
-    try {
-        Log.trace("Executing query to fetch Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
-
-        return jdbcTemplate.query(
-            CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M,
-            new Object[]{accountNumber, numEntity, productCode},
-            (rs, rowNum) -> rs.getString("schd_id")
-        );
-    } catch (DataAccessException e) {
-        Log.error("Database access error while fetching Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
-        return Collections.emptyList();
-    } catch (Exception e) {
-        Log.error("Unexpected error while fetching Schedule IDs from Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}. Exception: {}", accountNumber, numEntity, productCode, e.getMessage(), e);
-        return Collections.emptyList();
-    }
-}
-
-
-
-
-private List<String> fetchScheduleIds(String accountNumber, String numEntity, String productCode) {
-    List<String> scheduleIds = new ArrayList<>();
-
-    // Fetch schedule IDs from Account_BOA
-    List<String> scheduleIdsFromBoa = fetchScheduleIdsUsingAccountBoa(accountNumber, numEntity, productCode);
-    if (!scheduleIdsFromBoa.isEmpty()) {
-        scheduleIds.addAll(scheduleIdsFromBoa);
-        Log.debug("Fetched Schedule IDs from Account_BOA: {}", scheduleIdsFromBoa);
-    } else {
-        Log.debug("No Schedule IDs found in Account_BOA for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+    @Autowired
+    public CustaggProcessor(CustaggEntityFileReader entityFileReader) {
+        this.entityFileReader = entityFileReader;
     }
 
-    // Fetch schedule IDs from Account_M2M
-    List<String> scheduleIdsFromM2M = fetchScheduleIdsUsingAccountM2M(accountNumber, numEntity, productCode);
-    if (!scheduleIdsFromM2M.isEmpty()) {
-        scheduleIds.addAll(scheduleIdsFromM2M);
-        Log.debug("Fetched Schedule IDs from Account_M2M: {}", scheduleIdsFromM2M);
-    } else {
-        Log.debug("No Schedule IDs found in Account_M2M for AccountNumber: {}, NumEntity: {}, ProductCode: {}", accountNumber, numEntity, productCode);
+    @Override
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
+        HashMap<String, String> entityMap = entityFileReader.loadEntityMap();
+        // Use entityMap as needed
     }
-
-    return scheduleIds;
 }
