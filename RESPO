@@ -1,127 +1,35 @@
-package com.bofa.sst.batch.core.impl;
+@Test
+public void testOpenAndRead_Success() throws Exception {
+    // Set execution context values
+    executionContext.putInt("fromLine", 1);
+    executionContext.putInt("toLine", 2);
 
-import com.bofa.sst.batch.core.CustaggRecordsDTO;
-import org.junit.*;
-import org.springframework.batch.item.ExecutionContext;
+    // Add expected keys in the ExecutionContext
+    executionContext.putString("directoryPath", testFilePath.getParent().toString());
+    executionContext.putString("filePrefixReferData", "test-input");
+    executionContext.putString("LOCK_FILE_EXTENSION", ".txt"); // If applicable in the implementation
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-
-import static org.junit.Assert.*;
-
-public class CustaggCompFileReaderTest {
-
-    private CustaggCompFileReader fileReader;
-    private ExecutionContext executionContext;
-    private Path testFilePath;
-
-    @Before
-    public void setUp() throws Exception {
-        fileReader = new CustaggCompFileReader();
-        executionContext = new ExecutionContext();
-
-        // Create a temporary test file
-        testFilePath = Files.createTempFile("test-input", ".txt");
-        String sampleData = "PROD01ENTITY001ACC123456789012345\n" +
-                            "PROD02ENTITY002ACC987654321098765\n";
-        Files.write(testFilePath, sampleData.getBytes(), StandardOpenOption.WRITE);
-
-        // Set the input file path in the reader
-        fileReader.inputFilePath = testFilePath.toString();
-    }
-
-    @Test
-    public void testOpenAndRead_Success() throws Exception {
-        // Set execution context values
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 2);
-
-        try {
-            // Open the file reader
-            fileReader.open(executionContext);
-
-            // Read first record
-            CustaggRecordsDTO record1 = fileReader.read();
-            assertNotNull("First record should not be null", record1);
-            assertEquals("PRO", record1.getProductCode());
-            assertEquals("ENTITY001", record1.getEntity());
-            assertEquals("ACC123456789012345", record1.getAccountNumber());
-
-            // Read second record
-            CustaggRecordsDTO record2 = fileReader.read();
-            assertNotNull("Second record should not be null", record2);
-            assertEquals("PRO", record2.getProductCode());
-            assertEquals("ENTITY002", record2.getEntity());
-            assertEquals("ACC987654321098765", record2.getAccountNumber());
-
-            // Ensure no more records are available
-            assertNull("No more records expected", fileReader.read());
-        } finally {
-            fileReader.close();
-        }
-    }
-
-    @Test(expected = RuntimeException.class)
-    public void testRead_IncompleteRecord() throws Exception {
-        // Add an incomplete record to the file
-        Files.write(testFilePath, "INCOMPLETE".getBytes(), StandardOpenOption.APPEND);
-
-        // Set execution context values
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        try {
-            // Open the file reader and read records
-            fileReader.open(executionContext);
-            fileReader.read(); // First record
-            fileReader.read(); // Second record
-            fileReader.read(); // Incomplete record (should throw exception)
-        } finally {
-            fileReader.close();
-        }
-    }
-
-    @Test(expected = RuntimeException.class)
-    public void testOpen_FileNotFound() throws Exception {
-        // Set an invalid file path
-        fileReader.inputFilePath = "non-existent-file.txt";
-
-        // Attempt to open the file
+    try {
+        // Open the file reader
         fileReader.open(executionContext);
-    }
 
-    @Test
-    public void testUpdateExecutionContext() throws Exception {
-        // Set execution context values
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 1);
+        // Read first record
+        CustaggRecordsDTO record1 = fileReader.read();
+        assertNotNull("First record should not be null", record1);
+        assertEquals("PRO", record1.getProductCode());
+        assertEquals("ENTITY001", record1.getEntity());
+        assertEquals("ACC123456789012345", record1.getAccountNumber());
 
-        try {
-            // Open the file reader
-            fileReader.open(executionContext);
+        // Read second record
+        CustaggRecordsDTO record2 = fileReader.read();
+        assertNotNull("Second record should not be null", record2);
+        assertEquals("PRO", record2.getProductCode());
+        assertEquals("ENTITY002", record2.getEntity());
+        assertEquals("ACC987654321098765", record2.getAccountNumber());
 
-            // Read one record
-            fileReader.read();
-
-            // Update execution context
-            fileReader.update(executionContext);
-
-            // Verify the counter in the execution context
-            assertEquals("ExecutionContext counter should be updated", 1, executionContext.getInt("counter"));
-        } finally {
-            fileReader.close();
-        }
-    }
-
-    @After
-    public void tearDown() throws Exception {
-        if (fileReader != null) {
-            fileReader.close();
-        }
-        if (Files.exists(testFilePath)) {
-            Files.deleteIfExists(testFilePath);
-        }
+        // Ensure no more records are available
+        assertNull("No more records expected", fileReader.read());
+    } finally {
+        fileReader.close();
     }
 }
