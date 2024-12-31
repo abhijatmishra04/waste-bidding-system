@@ -7,94 +7,106 @@ public class CustaggProcessorTest {
     @Mock
     private JdbcTemplate mockJdbcTemplate;
 
-    @Mock
-    private StepExecution mockStepExecution;
-
-    @Mock
-    private ExecutionContext mockExecutionContext;
-
     @Before
     public void setUp() {
-        Mockito.when(mockStepExecution.getExecutionContext()).thenReturn(mockExecutionContext);
+        // Setup can be used for initializing shared objects or mocked behavior
     }
 
     @Test
-    public void testProcess_successfullyMappedEntity() throws Exception {
-        HashMap<String, String> mockEntityMap = new HashMap<>();
-        mockEntityMap.put("entityFromFile", "mappedEntity");
+    public void testFetchScheduleIds_success() {
+        String accountNumber = "12345";
+        String numEntity = "ENTITY1";
+        String productCode = "PRODUCT1";
 
-        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
+        List<String> boaScheduleIds = Arrays.asList("BOA1", "BOA2");
+        List<String> m2mScheduleIds = Arrays.asList("M2M1", "M2M2");
 
-        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
-        mockInput.setEntityFromFile("entityFromFile");
-        mockInput.setAccountNumber("12345");
-        mockInput.setProductCode("P001");
+        Mockito.doReturn(boaScheduleIds)
+                .when(processor).fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        Mockito.doReturn(m2mScheduleIds)
+                .when(processor).fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
 
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-        List<String> transferExecutionIds = Arrays.asList("TRANS1", "TRANS2");
-
-        Mockito.when(processor.fetchScheduleIds(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
-                .thenReturn(scheduleIds);
-        Mockito.when(processor.fetchAndUpdateTransferExecutionIds(Mockito.anyList()))
-                .thenReturn(transferExecutionIds);
-
-        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+        List<String> result = processor.fetchScheduleIds(accountNumber, numEntity, productCode);
 
         Assert.assertNotNull(result);
-        Assert.assertEquals("mappedEntity", result.getMappedEntity());
-        Assert.assertEquals("entityFromFile", result.getNumEntity());
-        Assert.assertEquals("12345", result.getAccountNumber());
-        Assert.assertEquals("P001", result.getProductCode());
-        Assert.assertEquals(scheduleIds, result.getScheduleIds());
-        Assert.assertEquals(transferExecutionIds, result.getTransferExecutionIds());
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testProcess_emptyEntityMap() throws Exception {
-        HashMap<String, String> emptyEntityMap = new HashMap<>();
-        ReflectionTestUtils.setField(processor, "entityMap", emptyEntityMap);
-
-        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
-        mockInput.setEntityFromFile("entityFromFile");
-        mockInput.setAccountNumber("12345");
-        mockInput.setProductCode("P001");
-
-        processor.process(mockInput);
+        Assert.assertEquals(4, result.size());
+        Assert.assertTrue(result.containsAll(boaScheduleIds));
+        Assert.assertTrue(result.containsAll(m2mScheduleIds));
     }
 
     @Test
-    public void testProcess_entityNotFound() throws Exception {
-        HashMap<String, String> mockEntityMap = new HashMap<>();
-        mockEntityMap.put("differentEntity", "mappedEntity");
+    public void testFetchScheduleIds_nullResults() {
+        String accountNumber = "12345";
+        String numEntity = "ENTITY1";
+        String productCode = "PRODUCT1";
 
-        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
+        Mockito.doReturn(null)
+                .when(processor).fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+        Mockito.doReturn(null)
+                .when(processor).fetchScheduleIdUsingAccountM2M(accountNumber, numEntity, productCode);
 
-        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
-        mockInput.setEntityFromFile("entityFromFile");
-        mockInput.setAccountNumber("12345");
-        mockInput.setProductCode("P001");
+        List<String> result = processor.fetchScheduleIds(accountNumber, numEntity, productCode);
 
-        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+        Assert.assertNotNull(result);
+        Assert.assertTrue(result.isEmpty());
+    }
+
+    @Test
+    public void testFetchScheduleIdUsingAccountBoa_success() {
+        String accountNumber = "12345";
+        String numEntity = "ENTITY1";
+        String productCode = "PRODUCT1";
+
+        List<String> boaScheduleIds = Arrays.asList("BOA1", "BOA2");
+
+        Mockito.when(mockJdbcTemplate.query(
+                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                        Mockito.any(RowMapper.class),
+                        Mockito.eq(accountNumber),
+                        Mockito.eq(numEntity),
+                        Mockito.eq(productCode)))
+                .thenReturn(boaScheduleIds);
+
+        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals(boaScheduleIds, result);
+    }
+
+    @Test
+    public void testFetchScheduleIdUsingAccountBoa_dataAccessException() {
+        String accountNumber = "12345";
+        String numEntity = "ENTITY1";
+        String productCode = "PRODUCT1";
+
+        Mockito.when(mockJdbcTemplate.query(
+                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                        Mockito.any(RowMapper.class),
+                        Mockito.eq(accountNumber),
+                        Mockito.eq(numEntity),
+                        Mockito.eq(productCode)))
+                .thenThrow(new DataAccessException("Mocked Data Access Exception") {});
+
+        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
 
         Assert.assertNull(result);
     }
 
     @Test
-    public void testProcess_emptyScheduleIds() throws Exception {
-        HashMap<String, String> mockEntityMap = new HashMap<>();
-        mockEntityMap.put("entityFromFile", "mappedEntity");
+    public void testFetchScheduleIdUsingAccountBoa_genericException() {
+        String accountNumber = "12345";
+        String numEntity = "ENTITY1";
+        String productCode = "PRODUCT1";
 
-        ReflectionTestUtils.setField(processor, "entityMap", mockEntityMap);
+        Mockito.when(mockJdbcTemplate.query(
+                        Mockito.eq(CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA),
+                        Mockito.any(RowMapper.class),
+                        Mockito.eq(accountNumber),
+                        Mockito.eq(numEntity),
+                        Mockito.eq(productCode)))
+                .thenThrow(new RuntimeException("Mocked Generic Exception"));
 
-        CustaggRecordsDTO mockInput = new CustaggRecordsDTO();
-        mockInput.setEntityFromFile("entityFromFile");
-        mockInput.setAccountNumber("12345");
-        mockInput.setProductCode("P001");
-
-        Mockito.when(processor.fetchScheduleIds(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
-                .thenReturn(Collections.emptyList());
-
-        CustaggProcessedRecordsDTO result = processor.process(mockInput);
+        List<String> result = processor.fetchScheduleIdUsingAccountBoa(accountNumber, numEntity, productCode);
 
         Assert.assertNull(result);
     }
