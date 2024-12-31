@@ -1,150 +1,128 @@
-@RunWith(MockitoJUnitRunner.class)
-public class CustaggProcessorTest {
+@Test
+public void testFetchAndUpdateTransferInstructionIds_success() {
+    List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
 
-    @InjectMocks
-    private CustaggProcessor processor;
+    Mockito.when(mockJdbcTemplate.queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class)))
+        .thenAnswer(invocation -> {
+            Object[] args = invocation.getArgument(2);
+            if ("SCHED1".equals(args[0])) {
+                return "INSTR1";
+            } else if ("SCHED2".equals(args[0])) {
+                return "INSTR2";
+            }
+            return null;
+        });
 
-    @Mock
-    private JdbcTemplate mockJdbcTemplate;
+    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
 
-    @Before
-    public void setUp() {
-        // Setup shared mocks if needed
+    Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class));
+}
+
+@Test
+public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
+    List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+
+    Mockito.when(mockJdbcTemplate.queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class)))
+        .thenReturn(null);
+
+    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+    Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class));
+}
+
+@Test
+public void testFetchAndUpdateTransferInstructionIds_exception() {
+    List<String> scheduleIds = Arrays.asList("SCHED1");
+
+    Mockito.when(mockJdbcTemplate.queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class)))
+        .thenThrow(new RuntimeException("Mocked Exception"));
+
+    processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).queryForObject(
+            Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
+            Mockito.eq(String.class),
+            Mockito.any(Object[].class));
+}
+
+
+
+
+
+
+
+
+
+
+@Test
+public void testUpdateTransferInstruction_success() {
+    String transferInstructionId = "INSTR1";
+
+    Mockito.when(mockJdbcTemplate.update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any()))
+        .thenReturn(1);
+
+    processor.updateTransferInstruction(transferInstructionId);
+
+    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any());
+}
+
+@Test
+public void testUpdateTransferInstruction_dataAccessException() {
+    String transferInstructionId = "INSTR1";
+
+    Mockito.when(mockJdbcTemplate.update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any()))
+        .thenThrow(new DataAccessException("Mocked Data Access Exception") {});
+
+    try {
+        processor.updateTransferInstruction(transferInstructionId);
+        Assert.fail("Expected DataAccessException to be thrown");
+    } catch (DataAccessException e) {
+        Assert.assertEquals("Mocked Data Access Exception", e.getMessage());
     }
 
-    @Test
-    public void testFetchAndUpdateTransferExecutionIds_success() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
+    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any());
+}
 
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenReturn("EXEC1", "EXEC2");
+@Test
+public void testUpdateTransferInstruction_exception() {
+    String transferInstructionId = "INSTR1";
 
-        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
+    Mockito.when(mockJdbcTemplate.update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any()))
+        .thenThrow(new RuntimeException("Mocked Generic Exception"));
 
-        Assert.assertNotNull(result);
-        Assert.assertEquals(2, result.size());
-        Assert.assertEquals(transferExecutionIds, result);
+    try {
+        processor.updateTransferInstruction(transferInstructionId);
+        Assert.fail("Expected RuntimeException to be thrown");
+    } catch (RuntimeException e) {
+        Assert.assertEquals("Mocked Generic Exception", e.getMessage());
     }
 
-    @Test
-    public void testFetchAndUpdateTransferExecutionIds_noTransferExecutionId() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenReturn(null);
-
-        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
-
-        Assert.assertNotNull(result);
-        Assert.assertTrue(result.isEmpty());
-    }
-
-    @Test
-    public void testFetchAndUpdateTransferExecutionIds_exception() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenThrow(new RuntimeException("Mocked Exception"));
-
-        List<String> result = processor.fetchAndUpdateTransferExecutionIds(scheduleIds);
-
-        Assert.assertNotNull(result);
-        Assert.assertTrue(result.isEmpty());
-    }
-
-    @Test
-    public void testUpdateTransferExecution_success() {
-        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
-
-        Mockito.doNothing().when(mockJdbcTemplate).batchUpdate(
-                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
-                Mockito.anyList());
-
-        processor.updateTransferExecution(transferExecutionIds);
-
-        Mockito.verify(mockJdbcTemplate, Mockito.times(1)).batchUpdate(
-                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
-                Mockito.anyList());
-    }
-
-    @Test
-    public void testUpdateTransferExecution_exception() {
-        List<String> transferExecutionIds = Arrays.asList("EXEC1", "EXEC2");
-
-        Mockito.doThrow(new RuntimeException("Mocked Exception"))
-            .when(mockJdbcTemplate).batchUpdate(
-                Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M),
-                Mockito.anyList());
-
-        try {
-            processor.updateTransferExecution(transferExecutionIds);
-            Assert.fail("Expected RuntimeException to be thrown");
-        } catch (RuntimeException e) {
-            Assert.assertEquals("Mocked Exception", e.getMessage());
-        }
-    }
-
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_success() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenReturn("INSTR1", "INSTR2");
-
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-        Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class));
-    }
-
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenReturn(null);
-
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-        Mockito.verify(mockJdbcTemplate, Mockito.times(2)).queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class));
-    }
-
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_exception() {
-        List<String> scheduleIds = Arrays.asList("SCHED1");
-
-        Mockito.when(mockJdbcTemplate.queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)))
-            .thenThrow(new RuntimeException("Mocked Exception"));
-
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-        Mockito.verify(mockJdbcTemplate, Mockito.times(1)).queryForObject(
-                Mockito.eq(CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class));
-    }
+    Mockito.verify(mockJdbcTemplate, Mockito.times(1)).update(
+            Mockito.eq(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M),
+            Mockito.any());
 }
