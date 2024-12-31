@@ -1,5 +1,57 @@
-@Bean
+@Component
 @StepScope
-public CustaggProcessor custaggProcessor(CustaggEntityFileReader entityFileReader) {
-    return new CustaggProcessor(entityFileReader);
+@Log4j2
+public class CustaggFileValidationTasklet implements Tasklet {
+
+    @Override
+    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+        ExecutionContext executionContext = chunkContext.getStepContext().getStepExecution().getJobExecution().getExecutionContext();
+
+        String directoryPath = executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH);
+        String filePrefixReferEntry = executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY);
+
+        Log.info("Custagg :: FileValidator :: execute() :: directoryPath ::{} and filePrefix ::{}", directoryPath, filePrefixReferEntry);
+
+        if (directoryPath == null || filePrefixReferEntry == null) {
+            throw new IllegalStateException("Directory path or file prefix is missing in the execution context");
+        }
+
+        String filePathForReferEntry = FileUtils.findTodaysFiles(directoryPath, filePrefixReferEntry, CustaggBatchConstants.LOCK_FILE_EXTENSION);
+        HashMap<String, String> entityMap = new HashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePathForReferEntry))) {
+            String line;
+            int lineNumber = 0;
+
+            while ((line = br.readLine()) != null) {
+                lineNumber++;
+                if (line.length() < 8) {
+                    Log.debug("EntityFileReader: Skipping line {} - Line is too short: {}", lineNumber, line);
+                    continue;
+                }
+
+                String alphaEntity = line.substring(0, 4).trim();
+                String numEntity = line.substring(4, 8).trim();
+
+                if (numEntity.isEmpty() || alphaEntity.isEmpty()) {
+                    Log.debug("EntityFileReader: Skipping line {} - Missing values: {}", lineNumber, line);
+                    continue;
+                }
+
+                entityMap.put(numEntity, alphaEntity);
+                Log.debug("EntityFileReader: Processed line {} - NumEntity: {}, AlphaEntity: {}", lineNumber, numEntity, alphaEntity);
+            }
+        } catch (IOException e) {
+            Log.error("EntityFileReader: Error reading file at path: {}", filePathForReferEntry, e);
+            throw new Exception("Error reading file", e);
+        }
+
+        Log.info("FileValidator: Successfully created entity map with {} entries.", entityMap.size());
+
+        // Save the map into the ExecutionContext for downstream processors to use
+        executionContext.put("entityMap", entityMap);
+
+        Log.info("FileValidator: Entity map added to ExecutionContext.");
+        return RepeatStatus.FINISHED;
+    }
 }
