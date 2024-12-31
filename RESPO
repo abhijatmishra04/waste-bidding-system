@@ -1,59 +1,127 @@
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.stereotype.Component;
+package com.bofa.sst.batch.core.impl;
 
-import java.util.HashMap;
+import com.bofa.sst.batch.core.CustaggRecordsDTO;
+import org.junit.*;
+import org.springframework.batch.item.ExecutionContext;
 
-@Component
-public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
-    private HashMap<String, String> entityMap;
+import static org.junit.Assert.*;
 
-    @Override
-    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
-        if (entityMap == null || entityMap.isEmpty()) {
-            throw new IllegalStateException("Entity map is not available or is empty.");
-        }
+public class CustaggCompFileReaderTest {
 
-        // Extract data from the item
-        String entityFromFile = item.getEntity().trim();
-        String accountNumber = item.getAccountNumber();
-        String productCode = item.getProductCode();
+    private CustaggCompFileReader fileReader;
+    private ExecutionContext executionContext;
+    private Path testFilePath;
 
-        Log.trace("CustaggProcessor: Processing record - Entity: {}, AccountNumber: {}, ProductCode: {}",
-                entityFromFile, accountNumber, productCode);
+    @Before
+    public void setUp() throws Exception {
+        fileReader = new CustaggCompFileReader();
+        executionContext = new ExecutionContext();
 
-        // Validate and enrich the record using the entityMap
-        String mappedEntity = entityMap.get(entityFromFile);
+        // Create a temporary test file
+        testFilePath = Files.createTempFile("test-input", ".txt");
+        String sampleData = "PROD01ENTITY001ACC123456789012345\n" +
+                            "PROD02ENTITY002ACC987654321098765\n";
+        Files.write(testFilePath, sampleData.getBytes(), StandardOpenOption.WRITE);
 
-        if (mappedEntity == null) {
-            throw new IllegalArgumentException("No mapped entity found for: " + entityFromFile);
-        }
-
-        CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
-        enrichedRecord.setMappedEntity(mappedEntity);
-        enrichedRecord.setNumEntity(entityFromFile);
-        enrichedRecord.setAccountNumber(accountNumber);
-        enrichedRecord.setProductCode(productCode);
-
-        Log.debug("CustaggProcessor: Enriched record details: {}", enrichedRecord);
-
-        return enrichedRecord;
+        // Set the input file path in the reader
+        fileReader.inputFilePath = testFilePath.toString();
     }
 
-    /**
-     * This method retrieves the entityMap from the ExecutionContext before processing starts.
-     */
-    @BeforeStep
-    public void beforeStep(StepExecution stepExecution) {
-        // Retrieve the entity map from the ExecutionContext
-        entityMap = (HashMap<String, String>) stepExecution.getExecutionContext().get("entityMap");
+    @Test
+    public void testOpenAndRead_Success() throws Exception {
+        // Set execution context values
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 2);
 
-        if (entityMap == null || entityMap.isEmpty()) {
-            Log.error("CustaggProcessor: Entity map is empty or not present in ExecutionContext.");
-            throw new IllegalStateException("Entity map is not available or is empty.");
+        try {
+            // Open the file reader
+            fileReader.open(executionContext);
+
+            // Read first record
+            CustaggRecordsDTO record1 = fileReader.read();
+            assertNotNull("First record should not be null", record1);
+            assertEquals("PRO", record1.getProductCode());
+            assertEquals("ENTITY001", record1.getEntity());
+            assertEquals("ACC123456789012345", record1.getAccountNumber());
+
+            // Read second record
+            CustaggRecordsDTO record2 = fileReader.read();
+            assertNotNull("Second record should not be null", record2);
+            assertEquals("PRO", record2.getProductCode());
+            assertEquals("ENTITY002", record2.getEntity());
+            assertEquals("ACC987654321098765", record2.getAccountNumber());
+
+            // Ensure no more records are available
+            assertNull("No more records expected", fileReader.read());
+        } finally {
+            fileReader.close();
         }
+    }
 
-        Log.info("CustaggProcessor: Retrieved entity map with {} entries from ExecutionContext.", entityMap.size());
+    @Test(expected = RuntimeException.class)
+    public void testRead_IncompleteRecord() throws Exception {
+        // Add an incomplete record to the file
+        Files.write(testFilePath, "INCOMPLETE".getBytes(), StandardOpenOption.APPEND);
+
+        // Set execution context values
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        try {
+            // Open the file reader and read records
+            fileReader.open(executionContext);
+            fileReader.read(); // First record
+            fileReader.read(); // Second record
+            fileReader.read(); // Incomplete record (should throw exception)
+        } finally {
+            fileReader.close();
+        }
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testOpen_FileNotFound() throws Exception {
+        // Set an invalid file path
+        fileReader.inputFilePath = "non-existent-file.txt";
+
+        // Attempt to open the file
+        fileReader.open(executionContext);
+    }
+
+    @Test
+    public void testUpdateExecutionContext() throws Exception {
+        // Set execution context values
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 1);
+
+        try {
+            // Open the file reader
+            fileReader.open(executionContext);
+
+            // Read one record
+            fileReader.read();
+
+            // Update execution context
+            fileReader.update(executionContext);
+
+            // Verify the counter in the execution context
+            assertEquals("ExecutionContext counter should be updated", 1, executionContext.getInt("counter"));
+        } finally {
+            fileReader.close();
+        }
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        if (fileReader != null) {
+            fileReader.close();
+        }
+        if (Files.exists(testFilePath)) {
+            Files.deleteIfExists(testFilePath);
+        }
     }
 }
