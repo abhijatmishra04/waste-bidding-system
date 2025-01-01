@@ -1,54 +1,73 @@
+import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
+
+import org.junit.Before;
 import org.junit.Test;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.item.ExecutionContext;
 
-public class FileUtilsTest {
+public class CustaggCustomJobListenerTest {
 
-    private String createTempDirectoryWithFile(String filePrefix, String extension) throws IOException {
-        File tempDir = Files.createTempDirectory("testDir").toFile();
-        String dateSuffix = new SimpleDateFormat("yyyyMMdd").format(new Date());
-        File testFile = new File(tempDir, filePrefix + dateSuffix + "." + extension);
-        assertTrue(testFile.createNewFile());
-        return tempDir.getAbsolutePath();
+    @InjectMocks
+    private CustaggCustomJobListener jobListener;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
     }
 
     @Test
-    public void testLockFile() throws IOException {
-        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
-        boolean isLocked = FileUtils.lockFile(directoryPath, "testFile", "txt");
-        assertTrue(isLocked);
+    public void testBeforeJob() {
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.directory.path"))
+                .thenReturn("/mock/path");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.prefix.referdata"))
+                .thenReturn("referData");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.prefix.referentry"))
+                .thenReturn("referEntry");
+
+        jobListener.beforeJob(jobExecution);
+
+        verify(executionContext).put("DIRECTORY_PATH", "/mock/path");
+        verify(executionContext).putString("FILE_PREFIX_REFERDATA", "referData");
+        verify(executionContext).putString("FILE_PREFIX_REFERENTRY", "referEntry");
     }
 
     @Test
-    public void testUnlockFile() throws IOException {
-        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
-        FileUtils.lockFile(directoryPath, "testFile", "txt");
-        boolean isUnlocked = FileUtils.unlockFile(directoryPath, "testFile", "txt");
-        assertTrue(isUnlocked);
+    public void testAfterJob_Success() {
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+
+        jobListener.afterJob(jobExecution);
+
+        verify(jobExecution).setExitStatus(new org.springframework.batch.core.ExitStatus(
+                "COMPLETED",
+                "Job Launched Successfully..."
+        ));
     }
 
     @Test
-    public void testArchiveFile() throws IOException {
-        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
-        boolean isArchived = FileUtils.archiveFile(directoryPath, "testFile", "txt");
-        assertTrue(isArchived);
-    }
+    public void testAfterJob_Failure() {
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+        when(jobExecution.getFailureExceptions()).thenReturn(new java.util.ArrayList<>());
 
-    @Test
-    public void testErrorFile() throws IOException {
-        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
-        boolean isError = FileUtils.errorFile(directoryPath, "testFile", "txt");
-        assertTrue(isError);
-    }
+        jobListener.afterJob(jobExecution);
 
-    @Test
-    public void testIsTodayFilePresent() throws IOException {
-        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
-        boolean isPresent = FileUtils.isTodayFilePresent(directoryPath, "testFile", "txt");
-        assertTrue(isPresent);
+        verify(jobExecution).setExitStatus(new org.springframework.batch.core.ExitStatus(
+                "FAILED",
+                ""
+        ));
     }
 }
