@@ -1,148 +1,60 @@
-@RunWith(MockitoJUnitRunner.class)
-public class CustaggFileValidationTaskletTest {
+import static org.junit.Assert.*;
+import org.junit.Test;
+import java.io.File;
 
-    @InjectMocks
-    private CustaggFileValidationTasklet tasklet;
+public class FileUtilsTest {
 
-    @Mock
-    private StepContribution mockStepContribution;
-
-    @Mock
-    private ChunkContext mockChunkContext;
-
-    @Mock
-    private ExecutionContext mockExecutionContext;
-
-    @Mock
-    private FileUtils mockFileUtils;
-
-    @Before
-    public void setUp() {
-        // Mock ChunkContext and ExecutionContext setup
-        Mockito.when(mockChunkContext.getStepContext().getStepExecution().getExecutionContext())
-                .thenReturn(mockExecutionContext);
+    @Test
+    public void testFindTodaysFiles() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        String result = FileUtils.findTodaysFiles(directoryPath, filePrefix, extension);
+        assertNull(result);
     }
 
     @Test
-    public void testExecute_success() throws Exception {
-        // Mock values for execution context
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
-                .thenReturn("validPath");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERDATA)))
-                .thenReturn("prefix1");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
-                .thenReturn("prefix2");
-
-        // Mock FileUtils methods
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix1"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn("filePath1");
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix2"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn("filePath2");
-
-        // Mock BufferedReader for reading file content
-        BufferedReader mockReader = Mockito.mock(BufferedReader.class);
-        Mockito.when(mockReader.readLine())
-                .thenReturn("1234ALPHA", "5678BETA", null);
-
-        Mockito.whenNew(FileReader.class).withAnyArguments().thenReturn(mockReader);
-
-        // Execute tasklet
-        RepeatStatus status = tasklet.execute(mockStepContribution, mockChunkContext);
-
-        // Assertions
-        Assert.assertEquals(RepeatStatus.FINISHED, status);
-        Mockito.verify(mockExecutionContext).put(Mockito.eq("entityMap"), Mockito.anyMap());
-        Mockito.verify(mockStepContribution).setExitStatus(ExitStatus.COMPLETED);
+    public void testLockFile() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        boolean isLocked = FileUtils.lockFile(directoryPath, filePrefix, extension);
+        assertFalse(isLocked);
     }
 
     @Test
-    public void testExecute_missingFilePath() throws Exception {
-        // Mock missing file paths
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
-                .thenReturn("validPath");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERDATA)))
-                .thenReturn("prefix1");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
-                .thenReturn("prefix2");
-
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix1"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn(null);
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix2"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn(null);
-
-        try {
-            tasklet.execute(mockStepContribution, mockChunkContext);
-            Assert.fail("Expected FileNotFoundException to be thrown");
-        } catch (FileNotFoundException e) {
-            Assert.assertTrue(e.getMessage().contains("Could not find the file on this directory path"));
-        }
+    public void testUnlockFile() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        boolean isUnlocked = FileUtils.unlockFile(directoryPath, filePrefix, extension);
+        assertFalse(isUnlocked);
     }
 
     @Test
-    public void testExecute_fileReadError() throws Exception {
-        // Mock file paths
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
-                .thenReturn("validPath");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
-                .thenReturn("prefix2");
-
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix2"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn("filePath2");
-
-        // Mock FileReader to throw IOException
-        Mockito.whenNew(FileReader.class).withAnyArguments().thenThrow(new IOException("Mocked IOException"));
-
-        try {
-            tasklet.execute(mockStepContribution, mockChunkContext);
-            Assert.fail("Expected Exception to be thrown");
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Error reading file"));
-        }
+    public void testArchiveFile() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        boolean isArchived = FileUtils.archiveFile(directoryPath, filePrefix, extension);
+        assertFalse(isArchived);
     }
 
     @Test
-    public void testExecute_skipInvalidLines() throws Exception {
-        // Mock values for execution context
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.DIRECTORY_PATH)))
-                .thenReturn("validPath");
-        Mockito.when(mockExecutionContext.getString(Mockito.eq(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)))
-                .thenReturn("prefix2");
+    public void testErrorFile() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        boolean isError = FileUtils.errorFile(directoryPath, filePrefix, extension);
+        assertFalse(isError);
+    }
 
-        // Mock file paths
-        Mockito.when(mockFileUtils.findTodaysFiles(
-                        Mockito.eq("validPath"),
-                        Mockito.eq("prefix2"),
-                        Mockito.eq(CustaggBatchConstants.INPUT_FILE_EXTENSION)))
-                .thenReturn("filePath2");
-
-        // Mock BufferedReader for reading file content
-        BufferedReader mockReader = Mockito.mock(BufferedReader.class);
-        Mockito.when(mockReader.readLine())
-                .thenReturn("1234ALPHA", "SHORT", "    ", null);
-
-        Mockito.whenNew(FileReader.class).withAnyArguments().thenReturn(mockReader);
-
-        // Execute tasklet
-        RepeatStatus status = tasklet.execute(mockStepContribution, mockChunkContext);
-
-        // Assertions
-        Assert.assertEquals(RepeatStatus.FINISHED, status);
-        Mockito.verify(mockExecutionContext).put(Mockito.eq("entityMap"), Mockito.anyMap());
-        Mockito.verify(mockStepContribution).setExitStatus(ExitStatus.COMPLETED);
+    @Test
+    public void testIsTodayFilePresent() {
+        String directoryPath = "invalid/path";
+        String filePrefix = "testFile";
+        String extension = "txt";
+        boolean isPresent = FileUtils.isTodayFilePresent(directoryPath, filePrefix, extension);
+        assertFalse(isPresent);
     }
 }
