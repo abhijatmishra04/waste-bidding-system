@@ -1,63 +1,72 @@
 import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
 
-import org.junit.Before;
 import org.junit.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.item.ExecutionContext;
+import org.mockito.Mockito;
+import java.util.Arrays;
+import java.util.List;
 
-public class CustaggCustomJobListenerTest {
+public class ProcessorTest {
 
-    @InjectMocks
-    private CustaggCustomJobListener jobListener;
+    @Test
+    public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
 
-    @Mock
-    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+        Mockito.when(jdbcTemplate.queryForObject(
+                anyString(), 
+                eq(String.class), 
+                any(Object[].class)))
+            .thenReturn(null);
 
-    @Mock
-    private JobExecution jobExecution;
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
 
-    @Mock
-    private ExecutionContext executionContext;
-
-    @Before
-    public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        Mockito.verify(jdbcTemplate, Mockito.times(2)).queryForObject(
+                anyString(),
+                eq(String.class),
+                any(Object[].class));
     }
 
     @Test
-    public void testBeforeJob() {
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
-                .thenReturn("mockValue");
+    public void testFetchAndUpdateTransferInstructionIds_exception() {
+        List<String> scheduleIds = Arrays.asList("SCHED1");
 
-        jobListener.beforeJob(jobExecution);
+        Mockito.when(jdbcTemplate.queryForObject(
+                anyString(), 
+                eq(String.class), 
+                any(Object[].class)))
+            .thenThrow(new RuntimeException("Mocked Exception"));
 
-        verify(executionContext).put("DIRECTORY_PATH", "mockValue");
-        verify(executionContext).putString("FILE_PREFIX_REFERDATA", "mockValue");
-        verify(executionContext).putString("FILE_PREFIX_REFERENTRY", "mockValue");
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+
+        Mockito.verify(jdbcTemplate, Mockito.times(1)).queryForObject(
+                anyString(),
+                eq(String.class),
+                any(Object[].class));
     }
 
     @Test
-    public void testAfterJob_Success() {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+    public void testFetchAndUpdateTransferInstructionIds_success() {
+        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
 
-        jobListener.afterJob(jobExecution);
+        Mockito.when(jdbcTemplate.queryForObject(
+                anyString(),
+                eq(String.class),
+                any(Object[].class)))
+            .thenAnswer(invocation -> {
+                Object[] args = invocation.getArgument(2);
+                if ("SCHED1".equals(args[0])) {
+                    return "INSTR1";
+                } else if ("SCHED2".equals(args[0])) {
+                    return "INSTR2";
+                }
+                return null;
+            });
 
-        verify(jobExecution).setExitStatus(any());
-    }
+        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
 
-    @Test
-    public void testAfterJob_Failure() {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-        when(jobExecution.getFailureExceptions()).thenReturn(new java.util.ArrayList<>());
-
-        jobListener.afterJob(jobExecution);
-
-        verify(jobExecution).setExitStatus(any());
+        Mockito.verify(jdbcTemplate, Mockito.times(2)).queryForObject(
+                anyString(),
+                eq(String.class),
+                any(Object[].class));
     }
 }
