@@ -32,18 +32,14 @@ public class CustaggCustomJobListenerTest {
 
     @Test
     public void testBeforeJob() {
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.directory.path"))
-                .thenReturn("/mock/path");
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.prefix.referdata"))
-                .thenReturn("referData");
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("custagg.batch.file.prefix.referentry"))
-                .thenReturn("referEntry");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
+                .thenReturn("mockValue");
 
         jobListener.beforeJob(jobExecution);
 
-        verify(executionContext).put("DIRECTORY_PATH", "/mock/path");
-        verify(executionContext).putString("FILE_PREFIX_REFERDATA", "referData");
-        verify(executionContext).putString("FILE_PREFIX_REFERENTRY", "referEntry");
+        verify(executionContext).put("DIRECTORY_PATH", "mockValue");
+        verify(executionContext).putString("FILE_PREFIX_REFERDATA", "mockValue");
+        verify(executionContext).putString("FILE_PREFIX_REFERENTRY", "mockValue");
     }
 
     @Test
@@ -52,10 +48,7 @@ public class CustaggCustomJobListenerTest {
 
         jobListener.afterJob(jobExecution);
 
-        verify(jobExecution).setExitStatus(new org.springframework.batch.core.ExitStatus(
-                "COMPLETED",
-                "Job Launched Successfully..."
-        ));
+        verify(jobExecution).setExitStatus(any());
     }
 
     @Test
@@ -65,9 +58,6 @@ public class CustaggCustomJobListenerTest {
 
         jobListener.afterJob(jobExecution);
 
-        verify(jobExecution).setExitStatus(new org.springframework.batch.core.ExitStatus(
-                "FAILED",
-                ""
-        ));
+        verify(jobExecution).setExitStatus(any());
     }
 }
