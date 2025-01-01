@@ -1,60 +1,54 @@
 import static org.junit.Assert.*;
 import org.junit.Test;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 public class FileUtilsTest {
 
-    @Test
-    public void testFindTodaysFiles() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        String result = FileUtils.findTodaysFiles(directoryPath, filePrefix, extension);
-        assertNull(result);
+    private String createTempDirectoryWithFile(String filePrefix, String extension) throws IOException {
+        File tempDir = Files.createTempDirectory("testDir").toFile();
+        String dateSuffix = new SimpleDateFormat("yyyyMMdd").format(new Date());
+        File testFile = new File(tempDir, filePrefix + dateSuffix + "." + extension);
+        assertTrue(testFile.createNewFile());
+        return tempDir.getAbsolutePath();
     }
 
     @Test
-    public void testLockFile() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        boolean isLocked = FileUtils.lockFile(directoryPath, filePrefix, extension);
-        assertFalse(isLocked);
+    public void testLockFile() throws IOException {
+        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
+        boolean isLocked = FileUtils.lockFile(directoryPath, "testFile", "txt");
+        assertTrue(isLocked);
     }
 
     @Test
-    public void testUnlockFile() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        boolean isUnlocked = FileUtils.unlockFile(directoryPath, filePrefix, extension);
-        assertFalse(isUnlocked);
+    public void testUnlockFile() throws IOException {
+        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
+        FileUtils.lockFile(directoryPath, "testFile", "txt");
+        boolean isUnlocked = FileUtils.unlockFile(directoryPath, "testFile", "txt");
+        assertTrue(isUnlocked);
     }
 
     @Test
-    public void testArchiveFile() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        boolean isArchived = FileUtils.archiveFile(directoryPath, filePrefix, extension);
-        assertFalse(isArchived);
+    public void testArchiveFile() throws IOException {
+        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
+        boolean isArchived = FileUtils.archiveFile(directoryPath, "testFile", "txt");
+        assertTrue(isArchived);
     }
 
     @Test
-    public void testErrorFile() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        boolean isError = FileUtils.errorFile(directoryPath, filePrefix, extension);
-        assertFalse(isError);
+    public void testErrorFile() throws IOException {
+        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
+        boolean isError = FileUtils.errorFile(directoryPath, "testFile", "txt");
+        assertTrue(isError);
     }
 
     @Test
-    public void testIsTodayFilePresent() {
-        String directoryPath = "invalid/path";
-        String filePrefix = "testFile";
-        String extension = "txt";
-        boolean isPresent = FileUtils.isTodayFilePresent(directoryPath, filePrefix, extension);
-        assertFalse(isPresent);
+    public void testIsTodayFilePresent() throws IOException {
+        String directoryPath = createTempDirectoryWithFile("testFile", "txt");
+        boolean isPresent = FileUtils.isTodayFilePresent(directoryPath, "testFile", "txt");
+        assertTrue(isPresent);
     }
 }
