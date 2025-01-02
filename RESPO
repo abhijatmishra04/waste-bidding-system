@@ -1,72 +1,66 @@
-import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
+@Override
+public Map<String, ExecutionContext> partition(int gridSize) {
+    Log.info("CustaggFilePartitioner ::: Partitioning has started...");
 
-import org.junit.Test;
-import org.mockito.Mockito;
-import java.util.Arrays;
-import java.util.List;
+    Map<String, ExecutionContext> partitions = new HashMap<>();
 
-public class ProcessorTest {
+    try {
+        // Fetch properties dynamically using ExecutionContext or dynamicConfigPropertiesRepository
+        String directoryPath = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName(CustaggBatchConstants.DIRECTORY_PATH);
+        String filePrefixReferData = dynamicConfigPropertiesRepository
+                .findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PREFIX_REFERDATA);
 
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_noInstructionId() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
+        // Initialize the file based on directoryPath and filePrefixReferData
+        String filePathForReferData = FileUtils.findTodaysFiles(directoryPath, filePrefixReferData, 
+                CustaggBatchConstants.LOCK_FILE_EXTENSION);
+        
+        File file = new File(filePathForReferData);
 
-        Mockito.when(jdbcTemplate.queryForObject(
-                anyString(), 
-                eq(String.class), 
-                any(Object[].class)))
-            .thenReturn(null);
+        if (!file.exists() || file.length() == 0) {
+            Log.info("File does not exist or is empty at the provided path: {}", filePathForReferData);
+            return partitions;
+        }
 
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
+        long fileSize = file.length();
+        Log.info("File size: {} bytes", fileSize);
 
-        Mockito.verify(jdbcTemplate, Mockito.times(2)).queryForObject(
-                anyString(),
-                eq(String.class),
-                any(Object[].class));
+        int totalRecords = (int) (fileSize / CustaggBatchConstants.RECORD_SIZE);
+        if (totalRecords == 0) {
+            Log.info("No records found in the file. Skipping partitioning.");
+            return partitions;
+        }
+
+        int recordsPerPartition = totalRecords / gridSize;
+        int remainingRecords = totalRecords % gridSize;
+
+        // Create partitions
+        int startLine = 0;
+        for (int i = 0; i < gridSize; i++) {
+            ExecutionContext context = new ExecutionContext();
+
+            int endLine = startLine + recordsPerPartition - 1;
+            if (i == gridSize - 1) {
+                // Add remaining records to the last partition
+                endLine += remainingRecords;
+            }
+
+            // Set properties in ExecutionContext
+            context.putString("directoryPath", directoryPath);
+            context.putString("filePrefixReferData", filePrefixReferData);
+            context.putInt("fromLine", startLine);
+            context.putInt("toLine", endLine);
+            context.putString("filePath", filePathForReferData);
+
+            partitions.put("partition" + i, context);
+
+            Log.info("Partition {} created: Start Line: {}, End Line: {}", i, startLine, endLine);
+            startLine = endLine + 1;
+        }
+    } catch (Exception e) {
+        Log.error("Error while creating partitions in CustaggFilePartitioner: {}", e.getMessage(), e);
+        throw new IllegalStateException("Failed to create partitions.", e);
     }
 
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_exception() {
-        List<String> scheduleIds = Arrays.asList("SCHED1");
-
-        Mockito.when(jdbcTemplate.queryForObject(
-                anyString(), 
-                eq(String.class), 
-                any(Object[].class)))
-            .thenThrow(new RuntimeException("Mocked Exception"));
-
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-        Mockito.verify(jdbcTemplate, Mockito.times(1)).queryForObject(
-                anyString(),
-                eq(String.class),
-                any(Object[].class));
-    }
-
-    @Test
-    public void testFetchAndUpdateTransferInstructionIds_success() {
-        List<String> scheduleIds = Arrays.asList("SCHED1", "SCHED2");
-
-        Mockito.when(jdbcTemplate.queryForObject(
-                anyString(),
-                eq(String.class),
-                any(Object[].class)))
-            .thenAnswer(invocation -> {
-                Object[] args = invocation.getArgument(2);
-                if ("SCHED1".equals(args[0])) {
-                    return "INSTR1";
-                } else if ("SCHED2".equals(args[0])) {
-                    return "INSTR2";
-                }
-                return null;
-            });
-
-        processor.fetchAndUpdateTransferInstructionIds(scheduleIds);
-
-        Mockito.verify(jdbcTemplate, Mockito.times(2)).queryForObject(
-                anyString(),
-                eq(String.class),
-                any(Object[].class));
-    }
+    return partitions;
 }
