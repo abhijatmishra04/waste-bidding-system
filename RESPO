@@ -1,66 +1,68 @@
-@Override
-public Map<String, ExecutionContext> partition(int gridSize) {
-    Log.info("CustaggFilePartitioner ::: Partitioning has started...");
+1. Initialization Phase
+Entity Map Retrieval:
+The beforeStep method is executed before the record processing begins.
+The processor retrieves the entityMap from the Execution Context, where it was stored during a previous step (e.g., File Validation Tasklet).
+If the map is missing or empty, the job logs an error and throws an exception, ensuring that no further processing occurs without necessary reference data.
+2. Processing Each Record
+For each input record (instance of CustaggRecordsDTO), the following steps are performed:
+a. Extract Input Fields:
+Extract key fields required for further processing:
+Entity (item.getEntity()): Represents the unique identifier of the entity in the record.
+Account Number (item.getAccountNumber()): Customer's account number.
+Product Code (item.getProductCode()): Represents the product/service code associated with the customer.
+These fields are trimmed to remove unwanted whitespaces.
+b. Entity Map Validation:
+Validate the entityMap to ensure it is not empty.
+If the map is empty, log an error and stop the processing of the current record.
+c. Entity Mapping:
+Use the entity field from the input record to look up its corresponding mapped entity in the entityMap (key-value lookup).
+If no matching entity is found:
+Log an error.
+Skip further processing for this record and return null.
+3. Enrich the Record
+If a mapped entity is found, create a new output DTO (CustaggProcessedRecordsDTO).
+Populate the following fields:
+Mapped Entity (from the entityMap lookup).
+Original fields like entity, accountNumber, and productCode.
+4. Database Queries
+Fetch Schedule IDs:
 
-    Map<String, ExecutionContext> partitions = new HashMap<>();
+The method fetchScheduleIds(accountNumber, entity, productCode) is called.
+Internally, this method executes two queries:
+Account_BOA Table Query:
+Query: CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_BOA
+Parameters: accountNumber, entity, productCode.
+Returns schedule IDs related to the input fields from the Account_BOA table.
+Account_M2M Table Query:
+Query: CustaggSQLFactory.FETCH_SCHEDULE_ID_ACCOUNT_M2M
+Parameters: Same as above.
+Returns schedule IDs from the Account_M2M table.
+The returned schedule IDs are logged for debugging purposes.
+Fetch Transfer Execution IDs:
 
-    try {
-        // Fetch properties dynamically using ExecutionContext or dynamicConfigPropertiesRepository
-        String directoryPath = dynamicConfigPropertiesRepository
-                .findPropertyValueByPropertyName(CustaggBatchConstants.DIRECTORY_PATH);
-        String filePrefixReferData = dynamicConfigPropertiesRepository
-                .findPropertyValueByPropertyName(CustaggBatchConstants.FILE_PREFIX_REFERDATA);
+Using the retrieved schedule IDs, the method fetchAndUpdateTransferExecutionIds(scheduleIds) is called.
+For each schedule ID, the following occurs:
+A query is executed:
+Query: CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID.
+Parameter: scheduleId.
+Returns a list of transfer execution IDs.
+If transfer execution IDs are found:
+They are added to a list and logged for debugging.
+Update Transfer Execution:
 
-        // Initialize the file based on directoryPath and filePrefixReferData
-        String filePathForReferData = FileUtils.findTodaysFiles(directoryPath, filePrefixReferData, 
-                CustaggBatchConstants.LOCK_FILE_EXTENSION);
-        
-        File file = new File(filePathForReferData);
+If transfer execution IDs are retrieved, the method updateTransferExecution(transferExecutionIds) is called.
+This method:
+Executes a batch update query to mark the retrieved transfer execution IDs as processed in the database.
+Logs the batch update result.
+Fetch Transfer Instruction IDs:
 
-        if (!file.exists() || file.length() == 0) {
-            Log.info("File does not exist or is empty at the provided path: {}", filePathForReferData);
-            return partitions;
-        }
+The method fetchAndUpdateTransferInstructionIds(scheduleIds) is called for each schedule ID.
+For each schedule ID:
+Query: CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID.
+Parameters: scheduleId.
+Returns a transfer instruction ID, which is updated in the database.
+Update Transfer Instruction:
 
-        long fileSize = file.length();
-        Log.info("File size: {} bytes", fileSize);
-
-        int totalRecords = (int) (fileSize / CustaggBatchConstants.RECORD_SIZE);
-        if (totalRecords == 0) {
-            Log.info("No records found in the file. Skipping partitioning.");
-            return partitions;
-        }
-
-        int recordsPerPartition = totalRecords / gridSize;
-        int remainingRecords = totalRecords % gridSize;
-
-        // Create partitions
-        int startLine = 0;
-        for (int i = 0; i < gridSize; i++) {
-            ExecutionContext context = new ExecutionContext();
-
-            int endLine = startLine + recordsPerPartition - 1;
-            if (i == gridSize - 1) {
-                // Add remaining records to the last partition
-                endLine += remainingRecords;
-            }
-
-            // Set properties in ExecutionContext
-            context.putString("directoryPath", directoryPath);
-            context.putString("filePrefixReferData", filePrefixReferData);
-            context.putInt("fromLine", startLine);
-            context.putInt("toLine", endLine);
-            context.putString("filePath", filePathForReferData);
-
-            partitions.put("partition" + i, context);
-
-            Log.info("Partition {} created: Start Line: {}, End Line: {}", i, startLine, endLine);
-            startLine = endLine + 1;
-        }
-    } catch (Exception e) {
-        Log.error("Error while creating partitions in CustaggFilePartitioner: {}", e.getMessage(), e);
-        throw new IllegalStateException("Failed to create partitions.", e);
-    }
-
-    return partitions;
-}
+If transfer instruction IDs are retrieved, the method updateTransferInstruction(transferInstructionId) is called.
+This method:
+Updates the transfer instruction table to mark the instruction as processed.
