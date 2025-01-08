@@ -1,14 +1,40 @@
-1. Get the current date and time:
-   - Use `ZonedDateTime.now(ZoneId.systemDefault())` to retrieve the current date and time in the system's default time zone.
-   - This ensures the timestamp aligns with the server's local time.
-
-2. Convert the current date and time to a database-friendly format:
-   - Use `Timestamp.valueOf(now.toLocalDateTime())` to convert the `ZonedDateTime` object into a `Timestamp` object.
-   - This step is necessary for storing the date-time value in a database or other systems that use `Timestamp`.
-
-3. Set the calculated timestamp in the staging table:
-   - Call the method `setSchdCreatTs(calculatedSchdCreatTs)` on the `stagingTable` object.
-   - This sets the "Scheduled Creation Timestamp" (`SchdCreatTs`) in the staging table with the calculated value.
-
-4. Ensure the data is ready for further operations or persistence:
-   - The `stagingTable` now has the current timestamp stored in the `SchdCreatTs` field, ready for subsequent use in the application or database.
+Field Name	Start Position	End Position
+recordType	1	1
+cciNo	2	12
+xferRefId	13	24
+frstTranDt	25	32
+nxtTranDt	33	40
+schdCreatTs	41	66
+lstTranDt	67	74
+frqCd	75	77
+pmtAm	78	92
+rcurAmTyp	93	112
+casgFlag	113	113
+cardFlag	114	114
+accNo	115	149
+ent	150	154
+prodCd	155	159
+accTyp	160	174
+frstNm	175	294
+lstNm	295	414
+trgtAccNo	415	449
+trgtEnt	450	454
+trgtProdCd	455	459
+trgtAccTyp	460	474
+trgtFrstNm	475	594
+trgtLstNm	595	714
+domain	715	724
+recipe2NTType	725	734
+deliveryMethod	735	754
+ltrTyp	755	769
+sentBy	770	801
+accDtype	802	804
+phnNo	805	807
+bacCorRspL1	808	810
+bacCorRspL2	811	813
+bacCorRspCty	814	816
+clsd	817	826
+spaces	827	829
+callTracId	830	865
+spaces	866	871
+filler	872	900
