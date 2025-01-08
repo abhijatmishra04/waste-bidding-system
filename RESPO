@@ -1,19 +1,14 @@
-1. Initialize target object.
-2. Set transaction-related fields:
-    - Set transaction reference ID using DTO.
-    - Set first transaction date, next transaction date, last transaction date, and closed date using DTO values.
-3. Set schedule and recurrence details:
-    - Set schedule frequency code.
-    - Set recurring amount type.
-4. Set entity and product codes:
-    - Set "from" entity and product codes.
-    - Set "to" entity and product codes.
-5. Set account and customer details:
-    - Set account type, account number, first name, and last name.
-    - Repeat for "from" and "to" entities.
-6. Set additional financial details:
-    - Set additional escrow, additional principal, grace days, warning code, and late charge amount.
-7. Set payment details:
-    - Set payment plan flag and due date.
-8. Set routing details:
-    - Set routing number.
+1. Get the current date and time:
+   - Use `ZonedDateTime.now(ZoneId.systemDefault())` to retrieve the current date and time in the system's default time zone.
+   - This ensures the timestamp aligns with the server's local time.
+
+2. Convert the current date and time to a database-friendly format:
+   - Use `Timestamp.valueOf(now.toLocalDateTime())` to convert the `ZonedDateTime` object into a `Timestamp` object.
+   - This step is necessary for storing the date-time value in a database or other systems that use `Timestamp`.
+
+3. Set the calculated timestamp in the staging table:
+   - Call the method `setSchdCreatTs(calculatedSchdCreatTs)` on the `stagingTable` object.
+   - This sets the "Scheduled Creation Timestamp" (`SchdCreatTs`) in the staging table with the calculated value.
+
+4. Ensure the data is ready for further operations or persistence:
+   - The `stagingTable` now has the current timestamp stored in the `SchdCreatTs` field, ready for subsequent use in the application or database.
