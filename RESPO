@@ -1,40 +1,69 @@
-Field Name	Start Position	End Position
-recordType	1	1
-cciNo	2	12
-xferRefId	13	24
-frstTranDt	25	32
-nxtTranDt	33	40
-schdCreatTs	41	66
-lstTranDt	67	74
-frqCd	75	77
-pmtAm	78	92
-rcurAmTyp	93	112
-casgFlag	113	113
-cardFlag	114	114
-accNo	115	149
-ent	150	154
-prodCd	155	159
-accTyp	160	174
-frstNm	175	294
-lstNm	295	414
-trgtAccNo	415	449
-trgtEnt	450	454
-trgtProdCd	455	459
-trgtAccTyp	460	474
-trgtFrstNm	475	594
-trgtLstNm	595	714
-domain	715	724
-recipe2NTType	725	734
-deliveryMethod	735	754
-ltrTyp	755	769
-sentBy	770	801
-accDtype	802	804
-phnNo	805	807
-bacCorRspL1	808	810
-bacCorRspL2	811	813
-bacCorRspCty	814	816
-clsd	817	826
-spaces	827	829
-callTracId	830	865
-spaces	866	871
-filler	872	900
+
+Here is the detailed explanation of the processing and specific behavior like how hangingDays are calculated and how requests are routed to different writers for the test cases:
+
+Detailed Test Cases
+TC001: Validate that the job triggers successfully via Quartz Scheduler
+Precondition: Ensure the job is deployed and the scheduler is configured correctly. The Quartz Scheduler should be operational and ready to trigger jobs at the defined interval or on manual execution.
+Processing Details: The job is triggered either manually (via Postman or command) or automatically via Quartz Scheduler. The scheduler checks for configured cron expressions to start the job.
+Test Steps:
+Trigger the job manually using Postman or check if the scheduler triggers the job as per schedule.
+Monitor the logs to confirm that the job has started.
+Verify that the job's execution ID is generated and logged.
+Expected Result: The job should start successfully, and logs should confirm execution initiation.
+TC002: Validate input file processing
+Precondition: Input file should exist in the specified directory with valid data.
+Processing Details: The batch job reads the input file and processes records. It parses the fields based on configured schema, such as field ranges and field names defined in the configuration. Errors during file reading or parsing are logged.
+Test Steps:
+Place a valid input file in the specified directory.
+Trigger the job manually or via the scheduler.
+Check the logs to ensure the file is read correctly.
+Validate that the file contents are successfully loaded into RetrievalDTO.
+Expected Result: The input file should be processed successfully, and data should load into the RetrievalDTO.
+TC003: Validate record classification into writers
+Precondition: Valid input records should have varying hangingDays values.
+Processing Details:
+HangingDays Calculation:
+dueDate is extracted from the input record.
+currentDate is calculated dynamically using LocalDate.now().
+The difference between dueDate and currentDate is calculated using ChronoUnit.DAYS.
+Adjustments are made for weekends: If the dueDate falls on a Sunday, the calculation subtracts an additional day.
+Routing to Writers:
+Records are classified into different categories based on the hangingDays value:
+1-7 days: Routed to dayPlusOneWriter.
+8-25 days: Routed to moreThan7DaysWriter.
+25+ days: Routed to moreThan25DaysWriter.
+The routing uses a ClassifierCompositeItemWriter, which checks hangingDays and directs the record to the appropriate writer.
+Test Steps:
+Trigger the job with a valid input file.
+Monitor the logs to verify the hangingDays calculation.
+Check the output files (dayPlusOneWriter.txt, moreThan7DaysWriter.txt, moreThan25DaysWriter.txt) to confirm proper classification.
+Expected Result: Records should be written to the correct output files based on the hangingDays.
+TC004: Validate file aggregation
+Precondition: Individual output files (e.g., dayPlusOneWriter.txt) should exist in the directory.
+Processing Details:
+After the classified files are written, the job runs an aggregation step.
+All classified files are appended into a single aggregated file.
+The headers and footers are dynamically generated for the aggregated file, including total record counts.
+Test Steps:
+Run the job to generate classified files.
+Trigger the aggregation step manually or via configuration.
+Verify the aggregated file content, including headers and footers.
+Expected Result: Aggregated file should include all content from classified files with accurate headers and footers.
+TC005: Handle missing input files gracefully
+Precondition: No input file is present in the directory.
+Processing Details: If no input file is found, the job should log the error and terminate gracefully without crashing. This prevents unnecessary execution and downstream errors.
+Test Steps:
+Remove input files from the directory.
+Trigger the job manually or via the scheduler.
+Check the logs for the error message, e.g., "File not found."
+Expected Result: The job should log the error and terminate gracefully.
+TC006: Validate email notification after file aggregation
+Precondition: Aggregated file is successfully created, and email service is configured correctly.
+Processing Details: Once the aggregated file is created:
+The notification service sends an email to predefined recipients.
+The email includes details like file path and total record counts.
+Test Steps:
+Trigger the job and let the aggregation step complete.
+Monitor the email inbox for the notification.
+Verify the email content for accuracy (file name, record counts).
+Expected Result: Email notification is sent successfully with correct details.
