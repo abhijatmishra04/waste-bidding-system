@@ -1,69 +1,74 @@
+sst_bp_m2m_udaprequest
+Task	Status
+Read from tables, transform, and insert into staging. Generate output file and transfer via NDM.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst-bp-m2m-udap-req-war.	Completed
+Integrated sst-bp-m2m-udap-res-war.	Completed
+Refactor Oracle Data Model changes.	Pending
+Autosys Configuration.	Pending
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for sst_bp_m2m_udaprequest.	Pending
+Create test execution for sst_bp_m2m_udaprequest.	Pending
 
-Here is the detailed explanation of the processing and specific behavior like how hangingDays are calculated and how requests are routed to different writers for the test cases:
 
-Detailed Test Cases
-TC001: Validate that the job triggers successfully via Quartz Scheduler
-Precondition: Ensure the job is deployed and the scheduler is configured correctly. The Quartz Scheduler should be operational and ready to trigger jobs at the defined interval or on manual execution.
-Processing Details: The job is triggered either manually (via Postman or command) or automatically via Quartz Scheduler. The scheduler checks for configured cron expressions to start the job.
-Test Steps:
-Trigger the job manually using Postman or check if the scheduler triggers the job as per schedule.
-Monitor the logs to confirm that the job has started.
-Verify that the job's execution ID is generated and logged.
-Expected Result: The job should start successfully, and logs should confirm execution initiation.
-TC002: Validate input file processing
-Precondition: Input file should exist in the specified directory with valid data.
-Processing Details: The batch job reads the input file and processes records. It parses the fields based on configured schema, such as field ranges and field names defined in the configuration. Errors during file reading or parsing are logged.
-Test Steps:
-Place a valid input file in the specified directory.
-Trigger the job manually or via the scheduler.
-Check the logs to ensure the file is read correctly.
-Validate that the file contents are successfully loaded into RetrievalDTO.
-Expected Result: The input file should be processed successfully, and data should load into the RetrievalDTO.
-TC003: Validate record classification into writers
-Precondition: Valid input records should have varying hangingDays values.
-Processing Details:
-HangingDays Calculation:
-dueDate is extracted from the input record.
-currentDate is calculated dynamically using LocalDate.now().
-The difference between dueDate and currentDate is calculated using ChronoUnit.DAYS.
-Adjustments are made for weekends: If the dueDate falls on a Sunday, the calculation subtracts an additional day.
-Routing to Writers:
-Records are classified into different categories based on the hangingDays value:
-1-7 days: Routed to dayPlusOneWriter.
-8-25 days: Routed to moreThan7DaysWriter.
-25+ days: Routed to moreThan25DaysWriter.
-The routing uses a ClassifierCompositeItemWriter, which checks hangingDays and directs the record to the appropriate writer.
-Test Steps:
-Trigger the job with a valid input file.
-Monitor the logs to verify the hangingDays calculation.
-Check the output files (dayPlusOneWriter.txt, moreThan7DaysWriter.txt, moreThan25DaysWriter.txt) to confirm proper classification.
-Expected Result: Records should be written to the correct output files based on the hangingDays.
-TC004: Validate file aggregation
-Precondition: Individual output files (e.g., dayPlusOneWriter.txt) should exist in the directory.
-Processing Details:
-After the classified files are written, the job runs an aggregation step.
-All classified files are appended into a single aggregated file.
-The headers and footers are dynamically generated for the aggregated file, including total record counts.
-Test Steps:
-Run the job to generate classified files.
-Trigger the aggregation step manually or via configuration.
-Verify the aggregated file content, including headers and footers.
-Expected Result: Aggregated file should include all content from classified files with accurate headers and footers.
-TC005: Handle missing input files gracefully
-Precondition: No input file is present in the directory.
-Processing Details: If no input file is found, the job should log the error and terminate gracefully without crashing. This prevents unnecessary execution and downstream errors.
-Test Steps:
-Remove input files from the directory.
-Trigger the job manually or via the scheduler.
-Check the logs for the error message, e.g., "File not found."
-Expected Result: The job should log the error and terminate gracefully.
-TC006: Validate email notification after file aggregation
-Precondition: Aggregated file is successfully created, and email service is configured correctly.
-Processing Details: Once the aggregated file is created:
-The notification service sends an email to predefined recipients.
-The email includes details like file path and total record counts.
-Test Steps:
-Trigger the job and let the aggregation step complete.
-Monitor the email inbox for the notification.
-Verify the email content for accuracy (file name, record counts).
-Expected Result: Email notification is sent successfully with correct details.
+collectionlettersjob
+Task	Status
+Read from tables, apply business rules, and generate letters.	Completed
+Handle weekday/weekend logic and aggregate output files.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst-bp-m2m-msp-letters-collection-war.	Completed
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for collectionlettersjob.	Pending
+Create test execution for collectionlettersjob.	Pending
+
+
+custagg Batch Job
+Task	Status
+Read from tables, transform, and update multiple tables.	Completed
+Archive successfully processed files and log errors in landingZone/error.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst_bp_m2m_custagg-war.	Completed
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for custagg.	Pending
+Create test execution for custagg.	Pending
+
+
+SDAResponse Batch Job
+Task	Status
+Validate and read from file, transform, and update tables.	Completed
+Log changes and archive successfully processed files.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst-bp-m2m-sda-res-war.	Completed
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for SDAResponse.	Pending
+Create test execution for SDAResponse.	Pending
+
+
+cca_autopay_report
+Task	Status
+Read from tables, process business logic, and write to output files.	Completed
+Generate files for Query 1, Query 2, and Query 3, and aggregate them.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst-bp-m2m-cca-autopay-report-war.	Completed
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for cca_autopay_report.	Pending
+Create test execution for cca_autopay_report.	Pending
+
+SDPHangingReport Batch Job
+Task	Status
+Read input file, calculate HangingDays, and classify records based on business logic.	Completed
+Apply weekend adjustments for dueDate calculations.	Completed
+Route records to respective writers (1-7, 8-25, 25+ days) using ClassifierCompositeItemWriter.	Completed
+Aggregate classified files into a single output with dynamic headers, footers, and record counts.	Completed
+Send email notification after generating the aggregated file.	Completed
+Added JUnit tests to increase code coverage to 80%.	Completed
+Created sst-bp-m2m-sdp-hanging-report-war.	Completed
+Modified changes to include core module (SST_2.0).	Completed
+Add OraODS data model changes.	Pending
+Create LLD document for SDPHangingReport.	Pending
+Create test execution for SDPHangingReport.	Pending
