@@ -1,1 +1,27 @@
+switch (dto.getRecurAmtType()) {
+    case "MIN":
+        stagingTable.setPmtAm(new BigDecimal("M"));
+        break;
+
+    case "STMT_BAL":
+        stagingTable.setPmtAm(new BigDecimal("S"));
+        break;
+
+    case "ISB":
+        stagingTable.setPmtAm(new BigDecimal("I"));
+        break;
+
+    case "CONST_RECUR":
+        Log.trace("ENTERED INTO SWITCH CASE CONST_RECUR {}", dto.getProcessCode());
+        if (dto.getAdditionalAmt() != null) {
+            stagingTable.setPmtAm(dto.getAdditionalAmt());
+        } else {
+            stagingTable.setPmtAm(BigDecimal.ZERO);
+        }
+        break;
+
+    default:
+        Log.trace("Unsupported recurAmtType: {}", dto.getRecurAmtType());
+        break;
+}
 
