@@ -1,27 +1,83 @@
-switch (dto.getRecurAmtType()) {
-    case "MIN":
-        stagingTable.setPmtAm(new BigDecimal("M"));
-        break;
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+    ExecutionContext context = chunkContext.getStepContext().getStepExecution().getJobExecution().getExecutionContext();
+    log.info("The file aggregator output directory path is set to: {}", sourceDir);
 
-    case "STMT_BAL":
-        stagingTable.setPmtAm(new BigDecimal("S"));
-        break;
+    validateDirectoryPath(sourceDir);
 
-    case "ISB":
-        stagingTable.setPmtAm(new BigDecimal("I"));
-        break;
+    List<String> letterTypes = List.of("NN3", "NN5", "NN8", "NN14", "NN28", "NN30");
 
-    case "CONST_RECUR":
-        Log.trace("ENTERED INTO SWITCH CASE CONST_RECUR {}", dto.getProcessCode());
-        if (dto.getAdditionalAmt() != null) {
-            stagingTable.setPmtAm(dto.getAdditionalAmt());
-        } else {
-            stagingTable.setPmtAm(BigDecimal.ZERO);
-        }
-        break;
+    // Create a StringBuilder to hold the content of the final aggregated letter
+    StringBuilder finalAggregatedContent = new StringBuilder();
 
-    default:
-        Log.trace("Unsupported recurAmtType: {}", dto.getRecurAmtType());
-        break;
+    for (String letterType : letterTypes) {
+        aggregateFilesForLetterType(sourceDir, letterType, finalAggregatedContent);
+    }
+
+    // Write the final aggregated letter to its file
+    Path finalOutputPath = Paths.get(sourceDir).resolve("Final_Aggregated_Letter.txt");
+    try {
+        Files.write(finalOutputPath, finalAggregatedContent.toString().getBytes());
+        log.info("Final aggregated letter written to file: {}", finalOutputPath.getFileName());
+    } catch (IOException e) {
+        log.error("Error writing final aggregated letter to file: {}", finalOutputPath.getFileName(), e);
+    }
+
+    return RepeatStatus.FINISHED;
 }
 
+
+public void aggregateFilesForLetterType(String sourceDir, String letterType, StringBuilder finalAggregatedContent) throws IOException {
+    Path sourcePath = Paths.get(sourceDir).toAbsolutePath();
+    log.trace("Resolved sourcePath: {}", sourcePath.toString());
+
+    Pattern pattern = Pattern.compile(CollectionLettersBatchConstants.PATTERN_1 + letterType + CollectionLettersBatchConstants.PATTERN_2);
+    try (Stream<Path> filesStream = Files.list(sourcePath)) {
+        List<Path> matchingFiles = filesStream
+                .filter(path -> pattern.matcher(path.getFileName().toString()).matches())
+                .sorted()
+                .collect(Collectors.toList());
+
+        if (matchingFiles.isEmpty()) {
+            log.warn("No files found for letter type: {}", letterType);
+            return;
+        }
+
+        // Create a StringBuilder for the current letter type
+        StringBuilder aggregatedContent = new StringBuilder();
+        String header = String.format(CollectionLettersBatchConstants.HEADER_FORMAT,
+                LocalDateTime.now().format(CollectionLettersBatchConstants.HEADER_DATE_FORMAT));
+        aggregatedContent.append(header).append(System.lineSeparator());
+
+        int totalRecordsCount = 0;
+        for (Path filePath : matchingFiles) {
+            try {
+                List<String> lines = Files.readAllLines(filePath);
+                if (lines.size() > 2) {
+                    for (int i = 1; i < lines.size(); i++) { // Skip header line
+                        aggregatedContent.append(lines.get(i)).append(System.lineSeparator());
+                        totalRecordsCount++;
+                    }
+                }
+            } catch (IOException e) {
+                log.error("Error reading file: {}", filePath.getFileName(), e);
+            }
+        }
+
+        // Add a trailer to the aggregated content
+        String trailer = String.format(CollectionLettersBatchConstants.TRAILER_FORMAT1, totalRecordsCount);
+        aggregatedContent.append(trailer).append(System.lineSeparator());
+
+        // Write the aggregated letter to its file
+        Path outputPath = sourcePath.resolve(letterType + "_Letter.txt");
+        try {
+            Files.write(outputPath, aggregatedContent.toString().getBytes());
+            log.trace("Aggregated content written to file: {}", outputPath.getFileName());
+        } catch (IOException e) {
+            log.error("Error writing to output file: {}", outputPath.getFileName(), e);
+        }
+
+        // Append the aggregated content of this letter type to the final aggregated letter
+        finalAggregatedContent.append(aggregatedContent).append(System.lineSeparator());
+    }
+}
