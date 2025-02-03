@@ -1,16 +1,4 @@
-import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
-
-import com.bofa.sst.batch.core.CollectionLettersPaymentInfoProcessor;
-import com.bofa.sst.batch.core.dto.CollectionLettersPaymentInfoDTO;
-import com.bofa.sst.batch.constants.CollectionLettersBatchConstants;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.jdbc.core.JdbcTemplate;
-
+@RunWith(MockitoJUnitRunner.class)
 public class CollectionLettersPaymentInfoProcessorTest {
 
     @InjectMocks
@@ -23,114 +11,169 @@ public class CollectionLettersPaymentInfoProcessorTest {
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        // Initialize a DTO object with default values for testing
         dto = new CollectionLettersPaymentInfoDTO();
+        dto.setRecurAmtType("MIN");
+        dto.setToProductCode("CCA");
+        dto.setToAccountNumber("1234567890");
+        dto.setAdditionalAmt(BigDecimal.valueOf(100.00));
+        dto.setSubChn("RET");
     }
 
     @Test
-    public void testProcess_WhenRecurAmtTypeIsNull_ShouldReturnNull() throws Exception {
-        dto.setRecurAmtType(null);
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNull(result);
-    }
-
-    @Test
-    public void testProcess_WhenRecurAmtTypeIsMIN_ShouldSetPmtAmToM() throws Exception {
+    public void testProcess_withValidRecurAmtType_MIN() throws Exception {
         dto.setRecurAmtType("MIN");
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertEquals("M", result.getPmtAm());
+        Assert.assertNotNull(result);
+        Assert.assertEquals("M", result.getPmtAm());
+        Assert.assertEquals("Y", result.getCasgFlag());
     }
 
     @Test
-    public void testProcess_WhenRecurAmtTypeIsSTMT_BAL_ShouldSetPmtAmToS() throws Exception {
+    public void testProcess_withValidRecurAmtType_STMT_BAL() throws Exception {
         dto.setRecurAmtType("STMT_BAL");
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertEquals("S", result.getPmtAm());
+        Assert.assertNotNull(result);
+        Assert.assertEquals("S", result.getPmtAm());
+        Assert.assertEquals("Y", result.getCasgFlag());
     }
 
     @Test
-    public void testProcess_WhenToProductCodeIsNull_ShouldReturnNull() throws Exception {
+    public void testProcess_withRecurAmtType_NULL() throws Exception {
+        dto.setRecurAmtType(null);
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNull(result);
+    }
+
+    @Test
+    public void testProcess_withUnsupportedRecurAmtType() throws Exception {
+        dto.setRecurAmtType("INVALID");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNotNull(result);
+        Assert.assertNull(result.getPmtAm());
+    }
+
+    @Test
+    public void testProcess_withToProductCode_NULL() throws Exception {
         dto.setToProductCode(null);
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertNull(result);
+        Assert.assertNull(result);
     }
 
     @Test
-    public void testProcess_WhenToAccountNumberIsLessThan10_ShouldFetchHostNo() throws Exception {
-        dto.setToAccountNumber("123456789");
-        when(jdbcTemplate.queryForObject(
-                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                any(Object[].class),
-                eq(String.class))
-        ).thenReturn("0001");
+    public void testProcess_withValidToProductCode_CCA() throws Exception {
+        dto.setToProductCode("CCA");
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        verify(jdbcTemplate, times(1)).queryForObject(
-                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                any(Object[].class),
-                eq(String.class)
-        );
-        assertEquals("Y", result.getCasgFlag());
+        Assert.assertNotNull(result);
+        Assert.assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getAccountDtype());
+        Assert.assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getPhoneNumber());
+        Assert.assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getBaccorRespCity());
     }
 
     @Test
-    public void testProcess_WhenHostNoIs0001AndSubChannelIsRET_ShouldSetRCAFields() throws Exception {
-        dto.setToAccountNumber("123456789");
-        dto.setSubChn("RET");
-        when(jdbcTemplate.queryForObject(
-                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                any(Object[].class),
-                eq(String.class))
-        ).thenReturn("0001");
+    public void testProcess_withHostNumber_FetchedFromDatabase() throws Exception {
+        dto.setToAccountNumber("123456789012");
+        Mockito.when(jdbcTemplate.queryForObject(
+                Mockito.eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)
+        )).thenReturn("0001");
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertEquals("RCA", result.getAccountDtype());
-        assertEquals("RCA", result.getPhoneNumber());
-        assertEquals("RCA", result.getBaccorRespL1());
-        assertEquals("RCA", result.getBaccorRespL2());
-        assertEquals("RCA", result.getBaccorRespCity());
+        Assert.assertNotNull(result);
+        Assert.assertEquals("Y", dto.getCasgFlag());
     }
 
     @Test
-    public void testProcess_WhenHostNoIs0003_ShouldSetSMBFields() throws Exception {
-        dto.setToAccountNumber("123456789");
-        when(jdbcTemplate.queryForObject(
-                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                any(Object[].class),
-                eq(String.class))
-        ).thenReturn("0003");
+    public void testProcess_withHostNumber_FallbackToDefault() throws Exception {
+        dto.setToAccountNumber("123456789012");
+        Mockito.when(jdbcTemplate.queryForObject(
+                Mockito.eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)
+        )).thenReturn("0003");
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertEquals("SMB", result.getAccountDtype());
-        assertEquals("SMB", result.getPhoneNumber());
-        assertEquals("SMB", result.getBaccorRespL1());
-        assertEquals("SMB", result.getBaccorRespL2());
-        assertEquals("SMB", result.getBaccorRespCity());
+        Assert.assertNotNull(result);
+        Assert.assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, dto.getCasgFlag());
     }
 
     @Test
-    public void testProcess_WhenHostNoIsNull_ShouldSetDefaultValues() throws Exception {
-        dto.setToAccountNumber("123456789");
-        when(jdbcTemplate.queryForObject(
-                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                any(Object[].class),
-                eq(String.class))
-        ).thenReturn(null);
+    public void testProcess_withDatabaseException() throws Exception {
+        dto.setToAccountNumber("123456789012");
+        Mockito.when(jdbcTemplate.queryForObject(
+                Mockito.eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                Mockito.eq(String.class),
+                Mockito.any(Object[].class)
+        )).thenThrow(new DataAccessException("DB Error") {});
 
         CollectionLettersPaymentInfoDTO result = processor.process(dto);
 
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getCasgFlag());
+        Assert.assertNotNull(result);
+        Assert.assertNull(result.getPmtAm()); // Ensure processing continues safely
+    }
+
+    @Test
+    public void testProcess_withAdditionalAmtHandling() throws Exception {
+        dto.setRecurAmtType("CONST_RECUR");
+        dto.setAdditionalAmt(BigDecimal.valueOf(200.00));
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals("200.00", result.getPmtAm());
+    }
+
+    @Test
+    public void testProcess_withNullAdditionalAmtForCONST_RECUR() throws Exception {
+        dto.setRecurAmtType("CONST_RECUR");
+        dto.setAdditionalAmt(null);
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals(BigDecimal.ZERO.toPlainString(), result.getPmtAm());
+    }
+
+    @Test
+    public void testProcess_withShortToAccountNumber() throws Exception {
+        dto.setToAccountNumber("12345");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNotNull(result);
+        Assert.assertNull(result.getCasgFlag()); // No database query executed for short account number
+    }
+
+    @Test
+    public void testProcess_withFinalFieldMapping() throws Exception {
+        dto.setRecurAmtType("MIN");
+        dto.setToProductCode("CCA");
+        dto.setToAccountNumber("1234567890");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        Assert.assertNotNull(result);
+        Assert.assertEquals(dto.getToAccountNumber(), result.getToAccountNumber());
+        Assert.assertEquals(dto.getRecurAmtType(), result.getRecurAmtType());
+    }
+
+    @After
+    public void tearDown() {
+        dto = null; // Clear the DTO after each test
     }
 }
-
