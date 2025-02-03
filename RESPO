@@ -1,11 +1,1 @@
-payment.setRecurAmtType(rs.getString("RECUR_AMT_TYPE"));
 
-// Determine casgFlag based on recurAmtType
-if ("MIN".equalsIgnoreCase(payment.getRecurAmtType()) ||
-    "CONST_RECUR".equalsIgnoreCase(payment.getRecurAmtType()) ||
-    "ISB".equalsIgnoreCase(payment.getRecurAmtType()) ||
-    "STMT_BAL".equalsIgnoreCase(payment.getRecurAmtType())) {
-    payment.setCasgFlag("Y");
-} else {
-    payment.setCasgFlag("N"); // Default to "N" for non-matching cases
-}
