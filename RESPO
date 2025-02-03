@@ -1,1 +1,55 @@
+@Override
+public void process(CollectionLettersPaymentInfoDTO dto) {
+    try {
+        // Step 1: Fetch host_no using the provided toAccountNumber
+        Log.debug("Executing query to fetch Host No for ToAccountNumber: {}", dto.getToAccountNumber());
+        String hostNo = jdbcTemplate.queryForObject(
+            CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN,
+            new Object[]{dto.getToAccountNumber()},
+            String.class
+        );
+
+        Log.debug("Fetched Host No: {}", hostNo);
+
+        // Step 2: Set casgFlag based on host_no
+        if ("0001".equals(hostNo)) {
+            dto.setCasgFlag("Y");
+        } else {
+            dto.setCasgFlag("N");
+        }
+
+        // Step 3: Process fields based on host_no and subChannel
+        if ("0001".equals(hostNo) || "0003".equals(hostNo)) {
+            String subChannel = dto.getSubChn();
+            if ("RET".equalsIgnoreCase(subChannel)) {
+                // Set fields to "RCA" if subChannel is "RET"
+                dto.setAccountType("RCA");
+                dto.setPhoneNumber("RCA");
+                dto.setBaccorRespL1("RCA");
+                dto.setBaccorRespL2("RCA");
+                dto.setBaccorRespCity("RCA");
+            } else {
+                // Set fields to "CCA" for other subChannel values
+                dto.setAccountType("CCA");
+                dto.setPhoneNumber("CCA");
+                dto.setBaccorRespL1("CCA");
+                dto.setBaccorRespL2("CCA");
+                dto.setBaccorRespCity("CCA");
+            }
+        } else if ("0003".equals(hostNo)) {
+            // Set all fields to "SMB" if host_no is 0003
+            dto.setAccountType("SMB");
+            dto.setPhoneNumber("SMB");
+            dto.setBaccorRespL1("SMB");
+            dto.setBaccorRespL2("SMB");
+            dto.setBaccorRespCity("SMB");
+        }
+    } catch (DataAccessException e) {
+        // Handle database access error
+        Log.error("Database access error while fetching Host No for ToAccountNumber: {}. Error: {}", dto.getToAccountNumber(), e.getMessage(), e);
+    } catch (Exception e) {
+        // Handle unexpected errors
+        Log.error("Unexpected error while processing ToAccountNumber: {}. Error: {}", dto.getToAccountNumber(), e.getMessage(), e);
+    }
+}
 
