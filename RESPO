@@ -1,1 +1,136 @@
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+
+import com.bofa.sst.batch.core.CollectionLettersPaymentInfoProcessor;
+import com.bofa.sst.batch.core.dto.CollectionLettersPaymentInfoDTO;
+import com.bofa.sst.batch.constants.CollectionLettersBatchConstants;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+public class CollectionLettersPaymentInfoProcessorTest {
+
+    @InjectMocks
+    private CollectionLettersPaymentInfoProcessor processor;
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
+    private CollectionLettersPaymentInfoDTO dto;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        dto = new CollectionLettersPaymentInfoDTO();
+    }
+
+    @Test
+    public void testProcess_WhenRecurAmtTypeIsNull_ShouldReturnNull() throws Exception {
+        dto.setRecurAmtType(null);
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_WhenRecurAmtTypeIsMIN_ShouldSetPmtAmToM() throws Exception {
+        dto.setRecurAmtType("MIN");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertEquals("M", result.getPmtAm());
+    }
+
+    @Test
+    public void testProcess_WhenRecurAmtTypeIsSTMT_BAL_ShouldSetPmtAmToS() throws Exception {
+        dto.setRecurAmtType("STMT_BAL");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertEquals("S", result.getPmtAm());
+    }
+
+    @Test
+    public void testProcess_WhenToProductCodeIsNull_ShouldReturnNull() throws Exception {
+        dto.setToProductCode(null);
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_WhenToAccountNumberIsLessThan10_ShouldFetchHostNo() throws Exception {
+        dto.setToAccountNumber("123456789");
+        when(jdbcTemplate.queryForObject(
+                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                any(Object[].class),
+                eq(String.class))
+        ).thenReturn("0001");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        verify(jdbcTemplate, times(1)).queryForObject(
+                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                any(Object[].class),
+                eq(String.class)
+        );
+        assertEquals("Y", result.getCasgFlag());
+    }
+
+    @Test
+    public void testProcess_WhenHostNoIs0001AndSubChannelIsRET_ShouldSetRCAFields() throws Exception {
+        dto.setToAccountNumber("123456789");
+        dto.setSubChn("RET");
+        when(jdbcTemplate.queryForObject(
+                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                any(Object[].class),
+                eq(String.class))
+        ).thenReturn("0001");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertEquals("RCA", result.getAccountDtype());
+        assertEquals("RCA", result.getPhoneNumber());
+        assertEquals("RCA", result.getBaccorRespL1());
+        assertEquals("RCA", result.getBaccorRespL2());
+        assertEquals("RCA", result.getBaccorRespCity());
+    }
+
+    @Test
+    public void testProcess_WhenHostNoIs0003_ShouldSetSMBFields() throws Exception {
+        dto.setToAccountNumber("123456789");
+        when(jdbcTemplate.queryForObject(
+                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                any(Object[].class),
+                eq(String.class))
+        ).thenReturn("0003");
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertEquals("SMB", result.getAccountDtype());
+        assertEquals("SMB", result.getPhoneNumber());
+        assertEquals("SMB", result.getBaccorRespL1());
+        assertEquals("SMB", result.getBaccorRespL2());
+        assertEquals("SMB", result.getBaccorRespCity());
+    }
+
+    @Test
+    public void testProcess_WhenHostNoIsNull_ShouldSetDefaultValues() throws Exception {
+        dto.setToAccountNumber("123456789");
+        when(jdbcTemplate.queryForObject(
+                eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
+                any(Object[].class),
+                eq(String.class))
+        ).thenReturn(null);
+
+        CollectionLettersPaymentInfoDTO result = processor.process(dto);
+
+        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getCasgFlag());
+    }
+}
 
