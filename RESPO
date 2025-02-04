@@ -1,139 +1,198 @@
-import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
+package com.bofa.sst.batch.scheduler.config;
 
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+import java.lang.reflect.Field;
+import java.util.Properties;
+import javax.naming.NamingException;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.*;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.item.ExecutionContext;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.quartz.CronTrigger;
+import org.quartz.JobDataMap;
+import org.quartz.JobDetail;
+import org.quartz.JobKey;
+import org.quartz.Trigger;
+import org.springframework.scheduling.quartz.SchedulerFactoryBean;
 
-import java.io.IOException;
-import java.nio.file.*;
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
+class CollectionLettersBatchQuartzJob implements org.quartz.Job {
+    @Override
+    public void execute(org.quartz.JobExecutionContext context) {
+    }
+}
 
-public class CollectionLettersAggregatorTaskletTest {
+class CollectionLettersBatchCommonConstants {
+    public static final String JBOSS_SERVER_NAME = "jboss.server.name";
+}
+
+interface JobLauncher {
+}
+
+interface JobLocator {
+}
+
+interface QuartzProperties {
+    Properties getProperties();
+}
+
+interface M2MDynamicConfigPropertiesRepository {
+    String findPropertyValueByPropertyName(String propertyName);
+}
+
+interface JobRegistry {
+}
+
+class JobRegistryBeanPostProcessor {
+    private JobRegistry jobRegistry;
+    public void setJobRegistry(JobRegistry jobRegistry) {
+        this.jobRegistry = jobRegistry;
+    }
+    public JobRegistry getJobRegistry() {
+        return jobRegistry;
+    }
+}
+
+@RunWith(MockitoJUnitRunner.class)
+public class CollectionLettersQuartzConfigurationTest {
 
     @InjectMocks
-    private CollectionLettersAggregatorTasklet tasklet;
+    private CollectionLettersQuartzConfiguration config;
 
     @Mock
-    private StepContribution stepContribution;
+    private JobLauncher jobLauncher;
 
     @Mock
-    private ChunkContext chunkContext;
+    private JobLocator jobLocator;
 
     @Mock
-    private ExecutionContext executionContext;
+    private QuartzProperties quartzProperties;
+
+    @Mock
+    private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Mock
+    private JobRegistry jobRegistry;
+
+    private Properties quartzProps;
 
     @Before
-    public void setup() {
-        MockitoAnnotations.initMocks(this);
-        when(chunkContext.getStepContext().getStepExecution().getExecutionContext()).thenReturn(executionContext);
+    public void setUp() {
+        quartzProps = new Properties();
+        quartzProps.setProperty("someProperty", "someValue");
+        when(quartzProperties.getProperties()).thenReturn(quartzProps);
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
+            .thenReturn("0 0 12 ? * MON-FRI");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
+            .thenReturn("0 0 12 ? * SAT,SUN");
+        config.init();
     }
 
     @Test
-    public void testExecute_Success() throws Exception {
-        // Arrange
-        String sourceDir = "src/test/resources/letters";
-        when(executionContext.getString(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH_KEY))
-                .thenReturn(sourceDir);
-
-        // Act
-        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-
-        // Assert
-        assertEquals(RepeatStatus.FINISHED, status);
-        Path outputPath = Paths.get(sourceDir, "Final_Aggregated_Letter.txt");
-        assertTrue(Files.exists(outputPath));
-
-        // Clean up
-        Files.deleteIfExists(outputPath);
+    public void testValidCronSchedules() {
+        assertEquals("0 0 12 ? * MON-FRI", config.getWeekdayCronSchedule());
+        assertEquals("0 0 12 ? * SAT,SUN", config.getWeekendCronSchedule());
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testValidateDirectoryPath_NullPath() {
-        // Act
-        tasklet.validateDirectoryPath(null);
+    public void testInvalidWeekdayCronSchedule() {
+        CollectionLettersQuartzConfiguration config2 = new CollectionLettersQuartzConfiguration();
+        config2.jobLauncher = jobLauncher;
+        config2.jobLocator = jobLocator;
+        config2.quartzProperties = quartzProperties;
+        config2.dynamicConfigPropRepository = dynamicConfigPropRepository;
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
+            .thenReturn("   ");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
+            .thenReturn("0 0 12 ? * SAT,SUN");
+        config2.init();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testValidateDirectoryPath_EmptyPath() {
-        // Act
-        tasklet.validateDirectoryPath("  ");
+    public void testInvalidWeekendCronSchedule() {
+        CollectionLettersQuartzConfiguration config2 = new CollectionLettersQuartzConfiguration();
+        config2.jobLauncher = jobLauncher;
+        config2.jobLocator = jobLocator;
+        config2.quartzProperties = quartzProperties;
+        config2.dynamicConfigPropRepository = dynamicConfigPropRepository;
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
+            .thenReturn("0 0 12 ? * MON-FRI");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
+            .thenReturn("");
+        config2.init();
     }
 
     @Test
-    public void testAggregateFilesForLetterType_Success() throws IOException {
-        // Arrange
-        String sourceDir = "src/test/resources/letters";
-        Path sourcePath = Paths.get(sourceDir);
-        Files.createDirectories(sourcePath);
-
-        List<String> filesContent = Arrays.asList("Header", "Line1", "Line2", "Trailer");
-        for (String type : Arrays.asList("NN3", "NN5")) {
-            Path filePath = sourcePath.resolve(type + "_file.txt");
-            Files.write(filePath, filesContent);
-        }
-
-        StringBuilder finalAggregatedContent = new StringBuilder();
-
-        // Act
-        tasklet.aggregateFilesForLetterType(sourceDir, "NN3", finalAggregatedContent);
-
-        // Assert
-        Path outputFilePath = sourcePath.resolve("NN3_Letter.txt");
-        assertTrue(Files.exists(outputFilePath));
-        assertTrue(finalAggregatedContent.toString().contains("Line1"));
-
-        // Clean up
-        Files.deleteIfExists(outputFilePath);
-        Files.deleteIfExists(sourcePath.resolve("NN3_file.txt"));
-        Files.deleteIfExists(sourcePath.resolve("NN5_file.txt"));
-        Files.deleteIfExists(sourcePath);
+    public void testJobRegistryBeanPostProcessor() throws Exception {
+        JobRegistryBeanPostProcessor processor = config.jobRegistryBeanPostProcessor(jobRegistry);
+        Field field = JobRegistryBeanPostProcessor.class.getDeclaredField("jobRegistry");
+        field.setAccessible(true);
+        Object actualJobRegistry = field.get(processor);
+        assertEquals(jobRegistry, actualJobRegistry);
     }
 
     @Test
-    public void testAggregateFilesForLetterType_NoMatchingFiles() throws IOException {
-        // Arrange
-        String sourceDir = "src/test/resources/empty";
-        Path sourcePath = Paths.get(sourceDir);
-        Files.createDirectories(sourcePath);
-
-        StringBuilder finalAggregatedContent = new StringBuilder();
-
-        // Act
-        tasklet.aggregateFilesForLetterType(sourceDir, "NN3", finalAggregatedContent);
-
-        // Assert
-        Path outputFilePath = sourcePath.resolve("NN3_Letter.txt");
-        assertFalse(Files.exists(outputFilePath));
-
-        // Clean up
-        Files.deleteIfExists(sourcePath);
+    public void testCollectionLettersJobDetail() {
+        JobDetail jobDetail = config.collectionLettersJobDetail();
+        assertNotNull(jobDetail);
+        assertEquals("collectionLettersJob-detail", jobDetail.getKey().getName());
+        JobDataMap dataMap = jobDetail.getJobDataMap();
+        assertEquals(jobLauncher, dataMap.get("jobLauncher"));
+        assertEquals(jobLocator, dataMap.get("jobLocator"));
+        assertEquals("collectionlettersJob", dataMap.get("jobName"));
     }
 
     @Test
-    public void testExecute_NoFilesToAggregate() throws Exception {
-        // Arrange
-        String sourceDir = "src/test/resources/empty";
-        when(executionContext.getString(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH_KEY))
-                .thenReturn(sourceDir);
+    public void testCollectionLettersJobDetailWeekend() {
+        JobDetail jobDetail = config.collectionLettersJobDetailWeekend();
+        assertNotNull(jobDetail);
+        assertEquals("collectionLettersJob-detailWeekend", jobDetail.getKey().getName());
+        JobDataMap dataMap = jobDetail.getJobDataMap();
+        assertEquals(jobLauncher, dataMap.get("jobLauncher"));
+        assertEquals(jobLocator, dataMap.get("jobLocator"));
+        assertEquals("weekendJob", dataMap.get("jobName"));
+    }
 
-        Path sourcePath = Paths.get(sourceDir);
-        Files.createDirectories(sourcePath);
+    @Test
+    public void testWeekdayJobTrigger() {
+        Trigger trigger = config.weekdayJobTrigger();
+        assertNotNull(trigger);
+        assertEquals("weekdayJob-trigger", trigger.getKey().getName());
+        JobKey jobKey = trigger.getJobKey();
+        assertNotNull(jobKey);
+        assertEquals("collectionLettersJob-detail", jobKey.getName());
+        assertTrue(trigger instanceof CronTrigger);
+        CronTrigger cronTrigger = (CronTrigger) trigger;
+        assertEquals("0 0 12 ? * MON-FRI", cronTrigger.getCronExpression());
+    }
 
-        // Act
-        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+    @Test
+    public void testWeekendJobTrigger() {
+        Trigger trigger = config.weekendJobTrigger();
+        assertNotNull(trigger);
+        assertEquals("weekendJob-trigger", trigger.getKey().getName());
+        JobKey jobKey = trigger.getJobKey();
+        assertNotNull(jobKey);
+        assertEquals("collectionLettersJob-detailWeekend", jobKey.getName());
+        assertTrue(trigger instanceof CronTrigger);
+        CronTrigger cronTrigger = (CronTrigger) trigger;
+        assertEquals("0 0 12 ? * SAT,SUN", cronTrigger.getCronExpression());
+    }
 
-        // Assert
-        assertEquals(RepeatStatus.FINISHED, status);
-        Path outputPath = sourcePath.resolve("Final_Aggregated_Letter.txt");
-        assertFalse(Files.exists(outputPath));
-
-        // Clean up
-        Files.deleteIfExists(sourcePath);
+    @Test
+    public void testSchedulerFactoryBean() throws NamingException {
+        System.setProperty(CollectionLettersBatchCommonConstants.JBOSS_SERVER_NAME, "TestServer");
+        SchedulerFactoryBean scheduler = config.schedulerFactoryBean();
+        assertNotNull(scheduler);
+        assertTrue(scheduler.isOverwriteExistingJobs());
     }
 }
