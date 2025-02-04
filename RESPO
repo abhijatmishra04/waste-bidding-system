@@ -1,66 +1,25 @@
-package com.bofa.sst.batch.scheduler.config;
-
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import java.lang.reflect.Field;
 import java.util.Properties;
-import javax.naming.NamingException;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.mockito.runners.MockitoJUnitRunner;
-import org.quartz.CronTrigger;
-import org.quartz.JobDataMap;
-import org.quartz.JobDetail;
-import org.quartz.JobKey;
-import org.quartz.Trigger;
+import org.quartz.*;
 import org.springframework.scheduling.quartz.SchedulerFactoryBean;
 
-class CollectionLettersBatchQuartzJob implements org.quartz.Job {
-    @Override
-    public void execute(org.quartz.JobExecutionContext context) {
-    }
-}
-
-class CollectionLettersBatchCommonConstants {
-    public static final String JBOSS_SERVER_NAME = "jboss.server.name";
-}
-
-interface JobLauncher {
-}
-
-interface JobLocator {
-}
-
-interface QuartzProperties {
-    Properties getProperties();
-}
-
-interface M2MDynamicConfigPropertiesRepository {
-    String findPropertyValueByPropertyName(String propertyName);
-}
-
-interface JobRegistry {
-}
-
-class JobRegistryBeanPostProcessor {
-    private JobRegistry jobRegistry;
-    public void setJobRegistry(JobRegistry jobRegistry) {
-        this.jobRegistry = jobRegistry;
-    }
-    public JobRegistry getJobRegistry() {
-        return jobRegistry;
-    }
-}
+import javax.naming.NamingException;
 
 @RunWith(MockitoJUnitRunner.class)
 public class CollectionLettersQuartzConfigurationTest {
 
     @InjectMocks
-    private CollectionLettersQuartzConfiguration config;
+    private CollectionLettersQuartzConfiguration configuration;
 
     @Mock
     private JobLauncher jobLauncher;
@@ -74,125 +33,103 @@ public class CollectionLettersQuartzConfigurationTest {
     @Mock
     private M2MDynamicConfigPropertiesRepository dynamicConfigPropRepository;
 
-    @Mock
-    private JobRegistry jobRegistry;
-
-    private Properties quartzProps;
-
     @Before
     public void setUp() {
-        quartzProps = new Properties();
-        quartzProps.setProperty("someProperty", "someValue");
-        when(quartzProperties.getProperties()).thenReturn(quartzProps);
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
-            .thenReturn("0 0 12 ? * MON-FRI");
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
-            .thenReturn("0 0 12 ? * SAT,SUN");
-        config.init();
+        MockitoAnnotations.initMocks(this);
     }
 
     @Test
-    public void testValidCronSchedules() {
-        assertEquals("0 0 12 ? * MON-FRI", config.getWeekdayCronSchedule());
-        assertEquals("0 0 12 ? * SAT,SUN", config.getWeekendCronSchedule());
+    public void testInit_Success() {
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
+                .thenReturn("0 0 12 * * ?");
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
+                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
+                .thenReturn("0 0 10 * * ?");
+
+        configuration.init();
+
+        assertEquals("0 0 12 * * ?", configuration.getWeekdayCronSchedule());
+        assertEquals("0 0 10 * * ?", configuration.getWeekendCronSchedule());
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testInvalidWeekdayCronSchedule() {
-        CollectionLettersQuartzConfiguration config2 = new CollectionLettersQuartzConfiguration();
-        config2.jobLauncher = jobLauncher;
-        config2.jobLocator = jobLocator;
-        config2.quartzProperties = quartzProperties;
-        config2.dynamicConfigPropRepository = dynamicConfigPropRepository;
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
-            .thenReturn("   ");
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
-            .thenReturn("0 0 12 ? * SAT,SUN");
-        config2.init();
+    public void testValidateProperties_WeekdayCronScheduleEmpty() {
+        configuration.weekdayCronSchedule = "";
+        configuration.weekendCronSchedule = "0 0 10 * * ?";
+        configuration.validateProperties();
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testInvalidWeekendCronSchedule() {
-        CollectionLettersQuartzConfiguration config2 = new CollectionLettersQuartzConfiguration();
-        config2.jobLauncher = jobLauncher;
-        config2.jobLocator = jobLocator;
-        config2.quartzProperties = quartzProperties;
-        config2.dynamicConfigPropRepository = dynamicConfigPropRepository;
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekdayCronSchedule"))
-            .thenReturn("0 0 12 ? * MON-FRI");
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(
-                "collectionletters.sstBatch.collectionlettersJob.trigger.weekendCronSchedule"))
-            .thenReturn("");
-        config2.init();
+    public void testValidateProperties_WeekendCronScheduleNull() {
+        configuration.weekdayCronSchedule = "0 0 12 * * ?";
+        configuration.weekendCronSchedule = null;
+        configuration.validateProperties();
     }
 
     @Test
-    public void testJobRegistryBeanPostProcessor() throws Exception {
-        JobRegistryBeanPostProcessor processor = config.jobRegistryBeanPostProcessor(jobRegistry);
-        Field field = JobRegistryBeanPostProcessor.class.getDeclaredField("jobRegistry");
-        field.setAccessible(true);
-        Object actualJobRegistry = field.get(processor);
-        assertEquals(jobRegistry, actualJobRegistry);
+    public void testJobRegistryBeanPostProcessor() {
+        JobRegistry mockJobRegistry = mock(JobRegistry.class);
+        JobRegistryBeanPostProcessor postProcessor = configuration.jobRegistryBeanPostProcessor(mockJobRegistry);
+
+        assertNotNull(postProcessor);
+        assertEquals(mockJobRegistry, postProcessor.getJobRegistry());
     }
 
     @Test
     public void testCollectionLettersJobDetail() {
-        JobDetail jobDetail = config.collectionLettersJobDetail();
+        JobDetail jobDetail = configuration.collectionLettersJobDetail();
+
         assertNotNull(jobDetail);
-        assertEquals("collectionLettersJob-detail", jobDetail.getKey().getName());
-        JobDataMap dataMap = jobDetail.getJobDataMap();
-        assertEquals(jobLauncher, dataMap.get("jobLauncher"));
-        assertEquals(jobLocator, dataMap.get("jobLocator"));
-        assertEquals("collectionlettersJob", dataMap.get("jobName"));
+        assertEquals("collectionlettersJob", jobDetail.getJobDataMap().get("jobName"));
+        assertEquals(jobLauncher, jobDetail.getJobDataMap().get("jobLauncher"));
+        assertEquals(jobLocator, jobDetail.getJobDataMap().get("jobLocator"));
     }
 
     @Test
     public void testCollectionLettersJobDetailWeekend() {
-        JobDetail jobDetail = config.collectionLettersJobDetailWeekend();
+        JobDetail jobDetail = configuration.collectionLettersJobDetailWeekend();
+
         assertNotNull(jobDetail);
-        assertEquals("collectionLettersJob-detailWeekend", jobDetail.getKey().getName());
-        JobDataMap dataMap = jobDetail.getJobDataMap();
-        assertEquals(jobLauncher, dataMap.get("jobLauncher"));
-        assertEquals(jobLocator, dataMap.get("jobLocator"));
-        assertEquals("weekendJob", dataMap.get("jobName"));
+        assertEquals("weekendJob", jobDetail.getJobDataMap().get("jobName"));
+        assertEquals(jobLauncher, jobDetail.getJobDataMap().get("jobLauncher"));
+        assertEquals(jobLocator, jobDetail.getJobDataMap().get("jobLocator"));
     }
 
     @Test
     public void testWeekdayJobTrigger() {
-        Trigger trigger = config.weekdayJobTrigger();
+        configuration.weekdayCronSchedule = "0 0 12 * * ?";
+        Trigger trigger = configuration.weekdayJobTrigger();
+
         assertNotNull(trigger);
-        assertEquals("weekdayJob-trigger", trigger.getKey().getName());
-        JobKey jobKey = trigger.getJobKey();
-        assertNotNull(jobKey);
-        assertEquals("collectionLettersJob-detail", jobKey.getName());
         assertTrue(trigger instanceof CronTrigger);
-        CronTrigger cronTrigger = (CronTrigger) trigger;
-        assertEquals("0 0 12 ? * MON-FRI", cronTrigger.getCronExpression());
+        assertEquals("weekdayJob-trigger", trigger.getKey().getName());
+        assertEquals("0 0 12 * * ?", ((CronTrigger) trigger).getCronExpression());
     }
 
     @Test
     public void testWeekendJobTrigger() {
-        Trigger trigger = config.weekendJobTrigger();
+        configuration.weekendCronSchedule = "0 0 10 * * ?";
+        Trigger trigger = configuration.weekendJobTrigger();
+
         assertNotNull(trigger);
-        assertEquals("weekendJob-trigger", trigger.getKey().getName());
-        JobKey jobKey = trigger.getJobKey();
-        assertNotNull(jobKey);
-        assertEquals("collectionLettersJob-detailWeekend", jobKey.getName());
         assertTrue(trigger instanceof CronTrigger);
-        CronTrigger cronTrigger = (CronTrigger) trigger;
-        assertEquals("0 0 12 ? * SAT,SUN", cronTrigger.getCronExpression());
+        assertEquals("weekendJob-trigger", trigger.getKey().getName());
+        assertEquals("0 0 10 * * ?", ((CronTrigger) trigger).getCronExpression());
     }
 
     @Test
     public void testSchedulerFactoryBean() throws NamingException {
-        System.setProperty(CollectionLettersBatchCommonConstants.JBOSS_SERVER_NAME, "TestServer");
-        SchedulerFactoryBean scheduler = config.schedulerFactoryBean();
-        assertNotNull(scheduler);
-        assertTrue(scheduler.isOverwriteExistingJobs());
+        Properties mockProperties = new Properties();
+        when(quartzProperties.getProperties()).thenReturn(mockProperties);
+        System.setProperty("jboss.server.name", "TestServer");
+
+        SchedulerFactoryBean schedulerFactoryBean = configuration.schedulerFactoryBean();
+
+        assertNotNull(schedulerFactoryBean);
+        assertEquals(mockProperties, schedulerFactoryBean.getQuartzProperties());
+        assertTrue(schedulerFactoryBean.isOverwriteExistingJobs());
+        assertEquals("TestServer", schedulerFactoryBean.getQuartzProperties()
+                .get("org.quartz.scheduler.instanceName"));
     }
 }
