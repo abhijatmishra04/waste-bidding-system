@@ -1,150 +1,27 @@
-@RunWith(MockitoJUnitRunner.class)
-public class CollectionLettersPaymentInfoProcessorTest {
+private void aggregateFilesForLetterType(String sourceDir, String letterType, StringBuilder finalAggregatedContent) throws IOException {
+    Path sourcePath = Paths.get(sourceDir).toAbsolutePath();
+    Log.debug("Resolved sourcePath: {}", sourcePath.toString());
 
-    @InjectMocks
-    private CollectionLettersPaymentInfoProcessor processor;
+    // Updated pattern to include underscore
+    Pattern pattern = Pattern.compile(".*" + letterType + "_Letter\\.txt", Pattern.CASE_INSENSITIVE);
+    Log.debug("Generated pattern for letter type {}: {}", letterType, pattern);
 
-    @Mock
-    private JdbcTemplate jdbcTemplate;
+    try (Stream<Path> filesStream = Files.list(sourcePath)) {
+        List<Path> matchingFiles = filesStream
+            .filter(path -> pattern.matcher(path.getFileName().toString()).matches())
+            .collect(Collectors.toList());
 
-    private CollectionLettersPaymentInfoDTO dto;
+        if (matchingFiles.isEmpty()) {
+            Log.warn("No files found for letter type: {}", letterType);
+            return;
+        }
 
-    @Before
-    public void setUp() {
-        // Initialize a DTO object with default values for testing
-        dto = new CollectionLettersPaymentInfoDTO();
-        dto.setRecurAmtType("MIN");
-        dto.setToProductCode("CCA");
-        dto.setToAccountNumber("1234567890");
-        dto.setAdditionalAmt(BigDecimal.valueOf(100.00));
-        dto.setSubChn("RET");
-    }
+        Log.debug("Matching files for letter type {}: {}", letterType, matchingFiles);
 
-    @Test
-    public void testProcess_withToProductCode_CCA() throws Exception {
-        // Test when product code is "CCA" with a valid sub-channel
-        dto.setToProductCode("CCA");
-        dto.setSubChn("RET");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getAccountDtype());
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getPhoneNumber());
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getBaccorRespL1());
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getBaccorRespCity());
-    }
-
-    @Test
-    public void testProcess_withHostNumberAndSubChannel_RET() throws Exception {
-        // Test host number and sub-channel logic for "RET"
-        dto.setToAccountNumber("123456789012");
-        dto.setSubChn("RET");
-        Mockito.when(jdbcTemplate.queryForObject(
-                Mockito.eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)
-        )).thenReturn("0001");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("RCA", result.getAccountDtype());
-        assertEquals("RCA", result.getPhoneNumber());
-        assertEquals("RCA", result.getBaccorRespL1());
-        assertEquals("RCA", result.getBaccorRespCity());
-    }
-
-    @Test
-    public void testProcess_withHostNumber_0003() throws Exception {
-        // Test when host number is "0003"
-        dto.setToAccountNumber("123456789012");
-        Mockito.when(jdbcTemplate.queryForObject(
-                Mockito.eq(CollectionLettersSQLFactory.FETCH_HOST_NO_FROM_BIN),
-                Mockito.eq(String.class),
-                Mockito.any(Object[].class)
-        )).thenReturn("0003");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("SMB", result.getAccountDtype());
-        assertEquals("SMB", result.getPhoneNumber());
-        assertEquals("SMB", result.getBaccorRespL1());
-        assertEquals("SMB", result.getBaccorRespCity());
-    }
-
-    @Test
-    public void testProcess_withProductCode_ALI() throws Exception {
-        // Test the "ALI" product code logic
-        dto.setToProductCode("ALI");
-        dto.setSubChn("RET");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("RAI", result.getAccountDtype());
-        assertEquals("RAI", result.getPhoneNumber());
-        assertEquals("RAI", result.getBaccorRespL1());
-        assertEquals("RAI", result.getBaccorRespCity());
-    }
-
-    @Test
-    public void testProcess_withProductCode_ALS() throws Exception {
-        // Test the "ALS" product code logic
-        dto.setToProductCode("ALS");
-        dto.setSubChn("RET");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("ALS", result.getAccountDtype());
-        assertEquals("ALS", result.getPhoneNumber());
-        assertEquals("ALS", result.getBaccorRespL1());
-        assertEquals("ALS", result.getBaccorRespCity());
-    }
-
-    @Test
-    public void testProcess_withAccessId() throws Exception {
-        // Test setting the "setBy" field based on AccessId
-        dto.setAccessId("USER123");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("USER123", result.getSentBy());
-    }
-
-    @Test
-    public void testProcess_withAccessId_NULL() throws Exception {
-        // Test when AccessId is null
-        dto.setAccessId(null);
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("NA", result.getSentBy());
-    }
-
-    @Test
-    public void testProcess_withCasgFlagDetermination() throws Exception {
-        // Test the CasgFlag determination logic based on recurAmtType
-        dto.setRecurAmtType("ISB");
-
-        CollectionLettersPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals("Y", result.getCasgFlag());
-
-        dto.setRecurAmtType("INVALID");
-        result = processor.process(dto);
-
-        assertNotNull(result); // Ensure result is not null
-        assertEquals(CollectionLettersBatchConstants.DEFAULT_SPACE, result.getCasgFlag());
-    }
-
-    @After
-    public void tearDown() {
-        dto = null; // Clear the DTO after each test
+        // Process the matching files
+        for (Path filePath : matchingFiles) {
+            List<String> lines = Files.readAllLines(filePath);
+            lines.forEach(line -> finalAggregatedContent.append(line).append(System.lineSeparator()));
+        }
     }
 }
