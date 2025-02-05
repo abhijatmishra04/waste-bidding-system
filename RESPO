@@ -1,29 +1,11 @@
-@Log4j2
-public class CollectionLettersDateUtils {
+ZonedDateTime now = ZonedDateTime.now(ZoneId.systemDefault());
+Timestamp calculatedSchdCreatTs = Timestamp.valueOf(now.toLocalDateTime());
+String schdCreatTsString = calculatedSchdCreatTs.toString(); // Convert to String
 
-    private static final String INPUT_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS"; // Format of date coming from DB
-    private static final String OUTPUT_DATE_FORMAT = "yyyyMMdd"; // Desired format
-
-    public static String parseAndFormatDate(String dateStr) {
-        if (dateStr == null || dateStr.isEmpty()) {
-            Log.trace("Invalid date string provided: {}", dateStr);
-            return null;
-        }
-
-        // Define input and output date formats
-        SimpleDateFormat inputFormat = new SimpleDateFormat(INPUT_DATE_FORMAT);
-        SimpleDateFormat outputFormat = new SimpleDateFormat(OUTPUT_DATE_FORMAT);
-
-        try {
-            // Parse the input date
-            Date parsedDate = inputFormat.parse(dateStr);
-
-            // Format it to the desired output format
-            return outputFormat.format(parsedDate);
-        } catch (ParseException e) {
-            Log.error("Error parsing date: {}. {}", dateStr, e.getMessage());
-            return null;
-        }
-    }
+// Ensure the length does not exceed 26 characters
+if (schdCreatTsString.length() > 26) {
+    schdCreatTsString = schdCreatTsString.substring(0, 26); // Truncate to 26 characters
 }
 
+// Set the value back to the staging table
+stagingTable.setSchdCreatTs(Timestamp.valueOf(schdCreatTsString));
