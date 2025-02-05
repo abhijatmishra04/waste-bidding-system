@@ -1,1 +1,26 @@
+UPDATE sst_owner.transfer_instruction_m2m
+SET updt_ts = TRUNC(SYSTIMESTAMP - 1),
+    cls_dt = TRUNC(SYSTIMESTAMP - 1),
+    updt_by = 'ACH RETN',
+    rtrn_cd = 'R01' -- Example value from query
+WHERE schd_id = '966a52da-b6fb-4555-8e62-b6aba21101f6'; -- Match `schd_id`
+
+UPDATE sst_owner.account_boa
+SET PROD_CD = 'PER' -- Example value from query
+WHERE ACC_BOA_ID = '4edb217a-c23d-4c8e-be2d-5efb4872abd2'; -- Provided `dr_acc_id`
+
+
+UPDATE sst_owner.account_m2m
+SET PROD_CD = 'CCA', -- Example value from query
+    LST_NM = 'Smith', -- Example last name
+    RTE_NO = 123 -- Example route number
+WHERE ACC_M2M_ID = '5e2825e3-4fe2-48f1-8ea8-1f8f20d834a6'; -- Provided `cr_acc_id`
+
+UPDATE sst_owner.SCHEDULE_M2M
+SET schd_stat = 'S02',
+    CHN_CD = 'CCC', -- Example value
+    SUB_CHN = 'COL', -- Example value
+    XFER_REF_ID = NULL, -- Matches the `WHERE` condition
+    TRAN_ID = 3000000002 -- Matches the `WHERE` condition
+WHERE schd_id = '966a52da-b6fb-4555-8e62-b6aba21101f6'; -- Provided `schd_id`
 
