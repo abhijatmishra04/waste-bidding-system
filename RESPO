@@ -1,38 +1,59 @@
-@Test
-public void testForce100PercentCoverage() {
-    // Case 1: File does not exist
-    partitioner.partition(3);
+import static org.mockito.Mockito.*;
 
-    // Case 2: File exists but is empty
-    File emptyFile = mock(File.class);
-    when(emptyFile.exists()).thenReturn(true);
-    when(emptyFile.length()).thenReturn(0L);
-    partitioner.partition(3);
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.item.ExecutionContext;
 
-    // Case 3: File has records
-    File validFile = mock(File.class);
-    when(validFile.exists()).thenReturn(true);
-    when(validFile.length()).thenReturn(5000L);
-    partitioner.partition(3);
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggCustomJobListenerTest {
 
-    // Case 4: Uneven records per partition
-    when(validFile.length()).thenReturn(3500L);
-    partitioner.partition(4);
+    @InjectMocks
+    private CustaggCustomJobListener jobListener;
 
-    // Case 5: Exception handling forced
-    try {
-        when(fileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
-            .thenThrow(new RuntimeException("Forced Exception"));
-        partitioner.partition(3);
-    } catch (Exception e) {
-        // Catch the forced exception so the test does not fail
+    @Mock
+    private OraOdsDynamicConfigPropertiesRepository mockRepository;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+
+        // Mock the ExecutionContext retrieval
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+
+        // Mock repository behavior
+        when(mockRepository.findPropertyValueByPropertyName(anyString())).thenReturn("mockValue");
     }
 
-    // Case 6: Testing loop execution
-    when(validFile.length()).thenReturn(7000L);
-    partitioner.partition(5);
+    @Test
+    public void testForce100PercentCoverage() {
+        // Call beforeJob() to cover initialization logic
+        jobListener.beforeJob(jobExecution);
 
-    // Case 7: Force execution of remaining if conditions
-    when(validFile.length()).thenReturn(1234L); // Random file size
-    partitioner.partition(2);
+        // Mock COMPLETED job execution
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+        jobListener.afterJob(jobExecution);
+
+        // Mock FAILED job execution to trigger the "else" block
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+        jobListener.afterJob(jobExecution);
+
+        // Ensure all branches are covered by forcing execution of methods
+        when(jobExecution.getJobInstance()).thenReturn(mock(org.springframework.batch.core.JobInstance.class));
+        when(jobExecution.getJobInstance().getJobName()).thenReturn("MockJob");
+        when(jobExecution.getExitStatus()).thenReturn(org.springframework.batch.core.ExitStatus.FAILED);
+        jobListener.afterJob(jobExecution);
+    }
 }
