@@ -11,8 +11,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.test.context.junit4.SpringRunner;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.beans.factory.annotation.Value;
 
 @RunWith(SpringRunner.class)
 public class CustaggFilePartitionerTest {
@@ -22,6 +22,9 @@ public class CustaggFilePartitionerTest {
 
     @Mock
     private OraOdsDynamicConfigPropertiesRepository mockConfigRepo;
+
+    @Mock
+    private File mockFile;
 
     @Value("${custag.input.file.path}")
     private String filePath;
@@ -42,34 +45,54 @@ public class CustaggFilePartitionerTest {
 
     @Test
     public void testPartition_FileDoesNotExist() {
-        File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(false);
 
         Map<String, ExecutionContext> partitions = partitioner.partition(4);
 
         assertNotNull(partitions);
-        assertTrue(partitions.isEmpty());
+        assertTrue("Partitions should be empty when file does not exist", partitions.isEmpty());
     }
 
     @Test
     public void testPartition_FileIsEmpty() {
-        File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
         when(mockFile.length()).thenReturn(0L);
 
         Map<String, ExecutionContext> partitions = partitioner.partition(4);
 
         assertNotNull(partitions);
-        assertTrue(partitions.isEmpty());
+        assertTrue("Partitions should be empty for an empty file", partitions.isEmpty());
     }
 
     @Test
-    public void testPartition_ValidFile() {
-        File mockFile = mock(File.class);
+    public void testPartition_NoRecordsFound() {
         when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(1000L);
+        when(mockFile.length()).thenReturn(10L); // Small file that has no valid records
+
+        Map<String, ExecutionContext> partitions = partitioner.partition(4);
+
+        assertNotNull(partitions);
+        assertTrue("Partitions should be empty if no valid records are found", partitions.isEmpty());
+    }
+
+    @Test
+    public void testPartition_SmallFile_LessThanPartitions() {
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenReturn(50L); // Simulating a small file
 
         int gridSize = 5;
+        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
+
+        assertNotNull(partitions);
+        assertEquals("Partition count should not exceed available records", Math.min(gridSize, 1), partitions.size());
+    }
+
+    @Test
+    public void testPartition_ValidPartitioning() {
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenReturn(1000L); // A valid file size
+
+        int gridSize = 4;
         Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
 
         assertNotNull(partitions);
@@ -81,18 +104,40 @@ public class CustaggFilePartitionerTest {
             assertTrue(context.containsKey("fromLine"));
             assertTrue(context.containsKey("toLine"));
             assertTrue(context.containsKey("numberOfRecords"));
+
+            int fromLine = context.getInt("fromLine");
+            int toLine = context.getInt("toLine");
+            int numberOfRecords = context.getInt("numberOfRecords");
+
+            assertTrue(fromLine > 0);
+            assertTrue(toLine >= fromLine);
+            assertTrue(numberOfRecords > 0);
         }
     }
 
     @Test
-    public void testPartition_NoRecordsFound() {
-        File mockFile = mock(File.class);
+    public void testPartition_GridSizeGreaterThanRecords() {
         when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(10L);
+        when(mockFile.length()).thenReturn(80L); // Small number of records
+        int gridSize = 10; // More partitions than records
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(4);
+        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
 
         assertNotNull(partitions);
-        assertTrue(partitions.isEmpty());
+        assertTrue("Partitions should not be more than available records", partitions.size() <= gridSize);
+    }
+
+    @Test
+    public void testPartition_ExceptionHandling() {
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenThrow(new RuntimeException("Test Exception"));
+
+        try {
+            Map<String, ExecutionContext> partitions = partitioner.partition(4);
+            assertNotNull(partitions);
+            assertTrue("Partitions should be empty in case of exception", partitions.isEmpty());
+        } catch (Exception e) {
+            fail("Exception should have been handled gracefully");
+        }
     }
 }
