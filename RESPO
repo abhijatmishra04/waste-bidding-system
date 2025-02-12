@@ -1,11 +1,121 @@
-ZonedDateTime now = ZonedDateTime.now(ZoneId.systemDefault());
-Timestamp calculatedSchdCreatTs = Timestamp.valueOf(now.toLocalDateTime());
-String schdCreatTsString = calculatedSchdCreatTs.toString(); // Convert to String
+package com.bofa.sst.batch.core.impl;
 
-// Ensure the length does not exceed 26 characters
-if (schdCreatTsString.length() > 26) {
-    schdCreatTsString = schdCreatTsString.substring(0, 26); // Truncate to 26 characters
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.HashMap;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.JobContext;
+import org.springframework.batch.core.scope.context.JobExecutionContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.scope.context.ExecutionContext;
+
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggFileValidationTaskletTest {
+
+    @InjectMocks
+    private CustaggFileValidationTasklet tasklet;
+
+    @Mock
+    private StepContribution stepContribution;
+
+    @Mock
+    private ChunkContext chunkContext;
+
+    @Mock
+    private StepExecution stepExecution;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
+
+    @Mock
+    private StepContext stepContext;
+
+    @Mock
+    private JobContext jobContext;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        when(chunkContext.getStepContext()).thenReturn(stepContext);
+        when(stepContext.getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn("/mock/directory");
+        when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn("mockReferData");
+        when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)).thenReturn("mockReferEntry");
+    }
+
+    @Test
+    public void testExecute_SuccessfulValidation() throws Exception {
+        when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                .thenReturn("/mock/directory/mockFile.dat");
+
+        doNothing().when(FileUtils.class);
+        FileUtils.lockFile(anyString(), anyString(), anyString());
+
+        BufferedReader bufferedReader = mock(BufferedReader.class);
+        when(bufferedReader.readLine())
+                .thenReturn("1234ABCD")
+                .thenReturn(null);
+        whenNew(BufferedReader.class).withAnyArguments().thenReturn(bufferedReader);
+
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+
+        assertEquals(RepeatStatus.FINISHED, status);
+        verify(stepContribution).setExitStatus(ExitStatus.COMPLETED);
+        verify(executionContext).put(eq("entityMap"), any(HashMap.class));
+    }
+
+    @Test(expected = FileNotFoundException.class)
+    public void testExecute_FileNotFound() throws Exception {
+        when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                .thenReturn(null);
+        tasklet.execute(stepContribution, chunkContext);
+    }
+
+    @Test(expected = IOException.class)
+    public void testExecute_FileReadFailure() throws Exception {
+        when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                .thenReturn("/mock/directory/mockFile.dat");
+
+        whenNew(BufferedReader.class).withAnyArguments().thenThrow(new IOException("File read error"));
+
+        tasklet.execute(stepContribution, chunkContext);
+    }
+
+    @Test
+    public void testExecute_EmptyFile() throws Exception {
+        when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                .thenReturn("/mock/directory/mockFile.dat");
+
+        BufferedReader bufferedReader = mock(BufferedReader.class);
+        when(bufferedReader.readLine()).thenReturn(null);
+        whenNew(BufferedReader.class).withAnyArguments().thenReturn(bufferedReader);
+
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+
+        assertEquals(RepeatStatus.FINISHED, status);
+        verify(executionContext).put(eq("entityMap"), any(HashMap.class));
+    }
 }
-
-// Set the value back to the staging table
-stagingTable.setSchdCreatTs(Timestamp.valueOf(schdCreatTsString));
