@@ -24,7 +24,12 @@ import org.springframework.batch.core.scope.context.JobContext;
 import org.springframework.batch.core.scope.context.ExecutionContext;
 import org.springframework.batch.repeat.RepeatStatus;
 
-@RunWith(MockitoJUnitRunner.class)
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({ FileUtils.class })  // Required for mocking static methods
 public class CustaggFileValidationTaskletTest {
 
     @InjectMocks
@@ -53,19 +58,22 @@ public class CustaggFileValidationTaskletTest {
         MockitoAnnotations.initMocks(this);
 
         when(chunkContext.getStepContext()).thenReturn(stepContext);
-        when(stepContext.getJobContext()).thenReturn(jobContext);
-        when(jobContext.getExecutionContext()).thenReturn(executionContext);
+        when(stepContext.getJobExecutionContext()).thenReturn(executionContext);
 
         when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn("/mock/directory");
         when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn("FilePrefixReferData");
         when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)).thenReturn("FilePrefixReferEnty");
 
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt")).thenReturn("/mock/directory/FilePrefixReferData.txt");
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", "txt")).thenReturn("/mock/directory/FilePrefixReferEnty.txt");
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+        PowerMockito.mockStatic(FileUtils.class);
+        
+        PowerMockito.when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt"))
+                .thenReturn("/mock/directory/FilePrefixReferData.txt");
+        PowerMockito.when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", "txt"))
+                .thenReturn("/mock/directory/FilePrefixReferEnty.txt");
+        PowerMockito.when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", CustaggBatchConstants.LOCK_FILE_EXTENSION))
                 .thenReturn("/mock/directory/FilePrefixReferEnty.lock");
 
-        doNothing().when(FileUtils.class);
+        PowerMockito.doNothing().when(FileUtils.class);
         FileUtils.lockFile(anyString(), anyString(), anyString());
 
         when(bufferedReader.readLine()).thenReturn("ABCD1234", "WXYZ5678", null);
@@ -81,13 +89,13 @@ public class CustaggFileValidationTaskletTest {
 
     @Test(expected = FileNotFoundException.class)
     public void testExecute_FileNotFound() throws Exception {
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt")).thenReturn(null);
+        PowerMockito.when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt")).thenReturn(null);
         tasklet.execute(stepContribution, chunkContext);
     }
 
     @Test
     public void testExecute_LockFileException() throws Exception {
-        doThrow(new IOException("Lock file failed")).when(FileUtils.class);
+        PowerMockito.doThrow(new IOException("Lock file failed")).when(FileUtils.class);
         FileUtils.lockFile(anyString(), anyString(), anyString());
 
         RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
@@ -105,7 +113,8 @@ public class CustaggFileValidationTaskletTest {
 
     @Test(expected = Exception.class)
     public void testExecute_EntityFileProcessing_ThrowsException() throws Exception {
-        when(new BufferedReader(new FileReader("/mock/directory/FilePrefixReferEnty.txt")))
+        PowerMockito.whenNew(FileReader.class)
+                .withArguments("/mock/directory/FilePrefixReferEnty.txt")
                 .thenThrow(new IOException("File read error"));
 
         tasklet.execute(stepContribution, chunkContext);
