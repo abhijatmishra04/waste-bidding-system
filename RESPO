@@ -11,9 +11,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.runners.MockitoJUnitRunner;
-import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.test.util.ReflectionTestUtils;
 
 @RunWith(MockitoJUnitRunner.class)
 public class CustaggFilePartitionerTest {
@@ -28,15 +26,14 @@ public class CustaggFilePartitionerTest {
     public void setUp() {
         MockitoAnnotations.initMocks(this);
         
-        // Inject values into private fields
-        ReflectionTestUtils.setField(partitioner, "filePath", "/mock/path/input.txt");
-        ReflectionTestUtils.setField(partitioner, "filePrefixReferData", "mockFilePrefix");
-        ReflectionTestUtils.setField(partitioner, "directoryPath", "/mock/path/");
+        // Directly setting values instead of ReflectionTestUtils
+        partitioner.filePrefixReferData = "mockFilePrefix";
+        partitioner.filePath = "/mock/path/input.txt";
+        partitioner.directoryPath = "/mock/path/";
     }
 
     @Test
     public void testPartition_FileDoesNotExist() {
-        // Mock file existence check
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(false);
 
@@ -47,7 +44,6 @@ public class CustaggFilePartitionerTest {
 
     @Test
     public void testPartition_FileIsEmpty() {
-        // Mock file with size 0
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
         when(mockFile.length()).thenReturn(0L);
@@ -59,14 +55,10 @@ public class CustaggFilePartitionerTest {
 
     @Test
     public void testPartition_FileWithRecords() {
-        // Mock file with a valid size
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
         when(mockFile.length()).thenReturn(3000L); // Mock file size
 
-        // Assume each record size is 100 bytes
-        ReflectionTestUtils.setField(partitioner, "RECORD_SIZE", 100);
-        
         Map<String, ExecutionContext> result = partitioner.partition(3);
 
         assertEquals("Should create 3 partitions", 3, result.size());
@@ -80,14 +72,10 @@ public class CustaggFilePartitionerTest {
 
     @Test
     public void testPartition_GridSizeGreaterThanRecords() {
-        // Mock file with only a few records
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(200L); // Mock file size
+        when(mockFile.length()).thenReturn(200L); 
 
-        // Assume each record size is 100 bytes
-        ReflectionTestUtils.setField(partitioner, "RECORD_SIZE", 100);
-        
         Map<String, ExecutionContext> result = partitioner.partition(5);
 
         assertEquals("Should create only as many partitions as records exist", 2, result.size());
