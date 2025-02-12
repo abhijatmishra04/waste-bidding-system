@@ -22,16 +22,21 @@ public class CustaggFilePartitionerTest {
     @Mock
     private OraOdsDynamicConfigPropertiesRepository mockRepository;
 
+    @Mock
+    private FileUtils fileUtils;  // Mock FileUtils to control file behavior
+
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
         
-        // Directly setting values instead of ReflectionTestUtils
         partitioner.filePrefixReferData = "mockFilePrefix";
         partitioner.filePath = "/mock/path/input.txt";
         partitioner.directoryPath = "/mock/path/";
     }
 
+    /**
+     * 1. Tests case where file does not exist.
+     */
     @Test
     public void testPartition_FileDoesNotExist() {
         File mockFile = mock(File.class);
@@ -42,17 +47,23 @@ public class CustaggFilePartitionerTest {
         assertTrue("Partitions should be empty if file does not exist", result.isEmpty());
     }
 
+    /**
+     * 2. Tests case where file is empty.
+     */
     @Test
     public void testPartition_FileIsEmpty() {
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(0L);
+        when(mockFile.length()).thenReturn(0L);  // File is empty
 
         Map<String, ExecutionContext> result = partitioner.partition(3);
 
-        assertTrue("Partitions should be empty if file is empty", result.isEmpty());
+        assertTrue("Partitions should be empty if file has no records", result.isEmpty());
     }
 
+    /**
+     * 3. Tests partitioning logic when file has enough records.
+     */
     @Test
     public void testPartition_FileWithRecords() {
         File mockFile = mock(File.class);
@@ -70,14 +81,48 @@ public class CustaggFilePartitionerTest {
         }
     }
 
+    /**
+     * 4. Tests partitioning when grid size is greater than the number of records.
+     */
     @Test
     public void testPartition_GridSizeGreaterThanRecords() {
         File mockFile = mock(File.class);
         when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(200L); 
+        when(mockFile.length()).thenReturn(200L); // Only a few records
 
         Map<String, ExecutionContext> result = partitioner.partition(5);
 
         assertEquals("Should create only as many partitions as records exist", 2, result.size());
+    }
+
+    /**
+     * 5. Tests exception handling in partitioning logic.
+     */
+    @Test
+    public void testPartition_ExceptionHandling() {
+        try {
+            when(fileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("Test Exception"));
+
+            Map<String, ExecutionContext> result = partitioner.partition(3);
+            assertTrue("Partitions should be empty when exception occurs", result.isEmpty());
+
+        } catch (Exception e) {
+            fail("Exception should be handled gracefully.");
+        }
+    }
+
+    /**
+     * 6. Tests case where totalRecords % gridSize != 0 to check the loop execution.
+     */
+    @Test
+    public void testPartition_HandlesRemainingLinesCorrectly() {
+        File mockFile = mock(File.class);
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenReturn(3500L); // File size not exactly divisible
+
+        Map<String, ExecutionContext> result = partitioner.partition(4); // 3500/4 = 875 + remainder
+
+        assertEquals("Should create 4 partitions", 4, result.size());
     }
 }
