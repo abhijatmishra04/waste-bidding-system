@@ -82,12 +82,12 @@ public class CustaggFileValidationTaskletTest {
             BufferedReader mockReader = mock(BufferedReader.class);
             when(mockReader.readLine()).thenReturn("ABCD1234", null); // Mock valid line, then EOF
 
-            // FIX: Use `PowerMockito.whenNew()` for constructor mocking
+            // ✅ FIX: Use `mockStatic(FileReader.class)` instead of `whenNew()`
             try (MockedStatic<FileReader> fileReaderMock = mockStatic(FileReader.class);
                  MockedStatic<BufferedReader> bufferedReaderMock = mockStatic(BufferedReader.class)) {
 
-                whenNew(FileReader.class).withArguments(trailerFilePath).thenReturn(mock(FileReader.class));
-                whenNew(BufferedReader.class).withArguments(any(FileReader.class)).thenReturn(mockReader);
+                fileReaderMock.when(() -> new FileReader(trailerFilePath)).thenReturn(mock(FileReader.class));
+                bufferedReaderMock.when(() -> new BufferedReader(any(FileReader.class))).thenReturn(mockReader);
 
                 // Execute tasklet
                 RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
@@ -124,10 +124,12 @@ public class CustaggFileValidationTaskletTest {
             fileUtilsMock.when(() -> FileUtils.findTodaysFiles("C:\\SST\\", "REFERENTRY", CustaggBatchConstants.LOCK_FILE_EXTENSION))
                     .thenReturn("C:\\SST\\TRAILER.FILE20231125.txt");
 
-            // FIX: Use `PowerMockito.whenNew()` for constructor mocking
-            whenNew(FileReader.class).withArguments("C:\\SST\\TRAILER.FILE20231125.txt").thenThrow(new IOException());
+            // ✅ FIX: Use `mockStatic(FileReader.class)` instead of `whenNew()`
+            try (MockedStatic<FileReader> fileReaderMock = mockStatic(FileReader.class)) {
+                fileReaderMock.when(() -> new FileReader("C:\\SST\\TRAILER.FILE20231125.txt")).thenThrow(new IOException());
 
-            tasklet.execute(stepContribution, chunkContext);
+                tasklet.execute(stepContribution, chunkContext);
+            }
         }
     }
 
