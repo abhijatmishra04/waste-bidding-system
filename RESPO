@@ -26,6 +26,9 @@ public class CustaggCustomJobListenerTest {
     @Mock
     private ExecutionContext executionContext;
 
+    @Mock
+    private FileUtils fileUtils;
+
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
@@ -35,6 +38,9 @@ public class CustaggCustomJobListenerTest {
 
         // Mock repository behavior
         when(mockRepository.findPropertyValueByPropertyName(anyString())).thenReturn("mockValue");
+
+        // Mock file presence checks
+        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
     }
 
     @Test
@@ -42,15 +48,19 @@ public class CustaggCustomJobListenerTest {
         // Call beforeJob() to cover initialization logic
         jobListener.beforeJob(jobExecution);
 
-        // Mock COMPLETED job execution
+        // Case 1: Mock COMPLETED job execution (Success Path)
         when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
         jobListener.afterJob(jobExecution);
 
-        // Mock FAILED job execution to trigger the "else" block
+        // Case 2: Mock FAILED job execution (Failure Path)
         when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
         jobListener.afterJob(jobExecution);
 
-        // Ensure all branches are covered by forcing execution of methods
+        // Ensure the "else" block executes by explicitly triggering the error scenario
+        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
+        jobListener.afterJob(jobExecution);
+
+        // Ensure all log statements and conditional branches are covered
         when(jobExecution.getJobInstance()).thenReturn(mock(org.springframework.batch.core.JobInstance.class));
         when(jobExecution.getJobInstance().getJobName()).thenReturn("MockJob");
         when(jobExecution.getExitStatus()).thenReturn(org.springframework.batch.core.ExitStatus.FAILED);
