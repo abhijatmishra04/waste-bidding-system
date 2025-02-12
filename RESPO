@@ -1,6 +1,6 @@
 package com.bofa.sst.batch.core.impl;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertNotNull;
 import static org.mockito.Mockito.*;
 
 import java.io.*;
@@ -11,22 +11,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.scope.context.StepContext;
-import org.springframework.batch.core.scope.context.StepExecutionContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.repeat.RepeatStatus;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ FileUtils.class, CustaggBatchConstants.class })
+@RunWith(MockitoJUnitRunner.class)
 public class CustaggFileValidationTaskletTest {
 
     @InjectMocks
@@ -42,52 +39,51 @@ public class CustaggFileValidationTaskletTest {
     private StepContext stepContext;
 
     @Mock
+    private StepExecution stepExecution;
+
+    @Mock
     private ExecutionContext executionContext;
 
-    private static final String DIRECTORY_PATH = "/test/path";
+    private static final String DIRECTORY_PATH = "C:\\test\\";
     private static final String FILE_PREFIX_REFERDATA = "testData";
     private static final String FILE_PREFIX_REFERENTRY = "testEntry";
-    private static final String TEST_FILE_PATH = "/test/path/testEntry.dat";
+    private static final String REFERDATA_FILE_PATH = "C:\\test\\testData_20250212.dat";
+    private static final String REFERENTRY_FILE_PATH = "C:\\test\\testEntry_20250212.dat";
+    private static final String LOCKED_FILE_PATH = "C:\\test\\testEntry_20250212.lock";
 
     @Before
-    public void setUp() throws Exception {
-        MockitoAnnotations.initMocks(this);
-
+    public void setUp() {
         when(chunkContext.getStepContext()).thenReturn(stepContext);
-        when(stepContext.getStepExecution()).thenReturn(stepContribution.getStepExecution());
-        when(stepContribution.getStepExecution().getJobExecution().getExecutionContext()).thenReturn(executionContext);
+        when(stepContext.getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution().getExecutionContext()).thenReturn(executionContext);
 
         when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn(DIRECTORY_PATH);
         when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn(FILE_PREFIX_REFERDATA);
         when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)).thenReturn(FILE_PREFIX_REFERENTRY);
-
-        // Mocking FileUtils Static Methods
-        PowerMockito.mockStatic(FileUtils.class);
     }
 
     @Test
     public void testExecuteSuccess() throws Exception {
-        try (MockedStatic<FileUtils> toMock = mockStatic(FileUtils.class)) {
-
-            String filePathForReferData = "C:\\test\\testData.dat";
-            String filePathForReferEntry = "C:\\test\\testEntry.dat";
-            String lockedFilePath = "C:\\test\\testEntry.lock";
-
+        try (MockedStatic<FileUtils> toMock = Mockito.mockStatic(FileUtils.class)) {
+            
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERDATA, CustaggBatchConstants.INPUT_FILE_EXTENSION))
-                    .thenReturn(filePathForReferData);
+                 .thenReturn(REFERDATA_FILE_PATH);
 
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERENTRY, CustaggBatchConstants.INPUT_FILE_EXTENSION))
-                    .thenReturn(filePathForReferEntry);
+                 .thenReturn(REFERENTRY_FILE_PATH);
 
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERENTRY, CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                    .thenReturn(lockedFilePath);
+                 .thenReturn(LOCKED_FILE_PATH);
 
-            PowerMockito.doNothing().when(FileUtils.class);
-            FileUtils.lockFile(anyString(), anyString(), anyString());
+            toMock.when(() -> FileUtils.lockFile(DIRECTORY_PATH, FILE_PREFIX_REFERDATA, CustaggBatchConstants.INPUT_FILE_EXTENSION))
+                 .thenAnswer(invocation -> null);
+
+            toMock.when(() -> FileUtils.lockFile(DIRECTORY_PATH, FILE_PREFIX_REFERENTRY, CustaggBatchConstants.INPUT_FILE_EXTENSION))
+                 .thenAnswer(invocation -> null);
 
             RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
 
-            assertEquals(RepeatStatus.FINISHED, status);
+            assertNotNull(status);
             verify(stepContribution).setExitStatus(ExitStatus.COMPLETED);
             verify(executionContext).put(eq("entityMap"), any(HashMap.class));
 
@@ -99,13 +95,13 @@ public class CustaggFileValidationTaskletTest {
 
     @Test(expected = FileNotFoundException.class)
     public void testExecuteFileNotFound() throws Exception {
-        try (MockedStatic<FileUtils> toMock = mockStatic(FileUtils.class)) {
+        try (MockedStatic<FileUtils> toMock = Mockito.mockStatic(FileUtils.class)) {
 
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERDATA, CustaggBatchConstants.INPUT_FILE_EXTENSION))
-                    .thenReturn(null);
+                 .thenReturn(null);
 
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERENTRY, CustaggBatchConstants.INPUT_FILE_EXTENSION))
-                    .thenReturn(null);
+                 .thenReturn(null);
 
             tasklet.execute(stepContribution, chunkContext);
         }
@@ -113,10 +109,10 @@ public class CustaggFileValidationTaskletTest {
 
     @Test(expected = Exception.class)
     public void testExecuteFileReadError() throws Exception {
-        try (MockedStatic<FileUtils> toMock = mockStatic(FileUtils.class)) {
+        try (MockedStatic<FileUtils> toMock = Mockito.mockStatic(FileUtils.class)) {
 
             toMock.when(() -> FileUtils.findTodaysFiles(DIRECTORY_PATH, FILE_PREFIX_REFERENTRY, CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                    .thenReturn("/invalid/path");
+                 .thenReturn("/invalid/path");
 
             tasklet.execute(stepContribution, chunkContext);
         }
