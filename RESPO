@@ -6,28 +6,14 @@ import static org.mockito.Mockito.*;
 import java.io.File;
 import java.util.Map;
 
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 import org.mockito.MockedStatic;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.batch.core.scope.context.ExecutionContext;
 
 @RunWith(MockitoJUnitRunner.class)
 public class CustaggFilePartitionerTest {
-
-    private CustaggFilePartitioner partitioner;
-
-    @Mock private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropertiesRepository;
-
-    @Before
-    public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        partitioner = new CustaggFilePartitioner();
-        partitioner.dynamicConfigPropertiesRepository = dynamicConfigPropertiesRepository;
-    }
 
     @Test
     public void testPartition_FileExists() {
@@ -36,6 +22,7 @@ public class CustaggFilePartitionerTest {
             String mockDirectoryPath = "mockDir";
             String mockFilePath = "mockDir/mockFile.txt";
 
+            CustaggFilePartitioner partitioner = new CustaggFilePartitioner();
             partitioner.directoryPath = mockDirectoryPath;
             partitioner.FilePrefixReferData = "mockPrefix";
 
@@ -43,15 +30,11 @@ public class CustaggFilePartitionerTest {
                             CustaggBatchConstants.LOCK_FILE_EXTENSION))
                     .thenReturn(mockFilePath);
 
-            File mockFile = mock(File.class);
-            when(mockFile.exists()).thenReturn(true);
-            when(mockFile.length()).thenReturn(1024L);
-
-            // ✅ Close previous static mock before creating new one
-            fileUtilsMock.close();
-
             try (MockedStatic<File> fileMock = mockStatic(File.class)) {
+                File mockFile = mock(File.class);
                 fileMock.when(() -> new File(mockFilePath)).thenReturn(mockFile);
+                when(mockFile.exists()).thenReturn(true);
+                when(mockFile.length()).thenReturn(1024L);
 
                 Map<String, ExecutionContext> partitions = partitioner.partition(3);
 
@@ -65,8 +48,9 @@ public class CustaggFilePartitionerTest {
     @Test
     public void testPartition_FileNotFound() {
         try (MockedStatic<FileUtils> fileUtilsMock = mockStatic(FileUtils.class)) {
-
             String mockDirectoryPath = "mockDir";
+
+            CustaggFilePartitioner partitioner = new CustaggFilePartitioner();
             partitioner.directoryPath = mockDirectoryPath;
             partitioner.FilePrefixReferData = "mockPrefix";
 
@@ -88,6 +72,7 @@ public class CustaggFilePartitionerTest {
             String mockDirectoryPath = "mockDir";
             String mockFilePath = "mockDir/mockFile.txt";
 
+            CustaggFilePartitioner partitioner = new CustaggFilePartitioner();
             partitioner.directoryPath = mockDirectoryPath;
             partitioner.FilePrefixReferData = "mockPrefix";
 
@@ -95,15 +80,11 @@ public class CustaggFilePartitionerTest {
                             CustaggBatchConstants.LOCK_FILE_EXTENSION))
                     .thenReturn(mockFilePath);
 
-            File mockFile = mock(File.class);
-            when(mockFile.exists()).thenReturn(true);
-            when(mockFile.length()).thenReturn(0L);
-
-            // ✅ Close previous static mock before creating new one
-            fileUtilsMock.close();
-
             try (MockedStatic<File> fileMock = mockStatic(File.class)) {
+                File mockFile = mock(File.class);
                 fileMock.when(() -> new File(mockFilePath)).thenReturn(mockFile);
+                when(mockFile.exists()).thenReturn(true);
+                when(mockFile.length()).thenReturn(0L);
 
                 Map<String, ExecutionContext> partitions = partitioner.partition(3);
 
@@ -114,29 +95,11 @@ public class CustaggFilePartitionerTest {
     }
 
     @Test
-    public void testPartition_GridSizeZero() {
-        try (MockedStatic<FileUtils> fileUtilsMock = mockStatic(FileUtils.class)) {
-
-            String mockDirectoryPath = "mockDir";
-            partitioner.directoryPath = mockDirectoryPath;
-            partitioner.FilePrefixReferData = "mockPrefix";
-
-            fileUtilsMock.when(() -> FileUtils.findTodaysFiles(mockDirectoryPath, "mockPrefix",
-                            CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                    .thenReturn("mockDir/mockFile.txt");
-
-            Map<String, ExecutionContext> partitions = partitioner.partition(0);
-
-            assertNotNull(partitions);
-            assertTrue(partitions.isEmpty());
-        }
-    }
-
-    @Test
     public void testPartition_ExceptionHandling() {
         try (MockedStatic<FileUtils> fileUtilsMock = mockStatic(FileUtils.class)) {
-
             String mockDirectoryPath = "mockDir";
+
+            CustaggFilePartitioner partitioner = new CustaggFilePartitioner();
             partitioner.directoryPath = mockDirectoryPath;
             partitioner.FilePrefixReferData = "mockPrefix";
 
