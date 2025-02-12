@@ -3,6 +3,7 @@ package com.bofa.sst.batch.core.impl;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
+import java.lang.reflect.Field;
 import java.util.HashMap;
 
 import org.junit.Before;
@@ -46,7 +47,7 @@ public class CustaggFileValidationTaskletTest {
     private ExecutionContext executionContext;
 
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         MockitoAnnotations.initMocks(this);
 
         when(chunkContext.getStepContext()).thenReturn(stepContext);
@@ -59,8 +60,12 @@ public class CustaggFileValidationTaskletTest {
         when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)).thenReturn("FilePrefixReferEnty");
 
         when(executionContext.get(anyString())).thenReturn(new HashMap<>());
-
         doNothing().when(stepContribution).setExitStatus(any());
+
+        // Using Reflection to set private field
+        Field executionContextField = CustaggFileValidationTasklet.class.getDeclaredField("executionContext");
+        executionContextField.setAccessible(true);
+        executionContextField.set(tasklet, executionContext);
     }
 
     @Test
