@@ -64,53 +64,72 @@ public class CustaggFileValidationTaskletTest {
         when(executionContext.get(anyString())).thenReturn(new HashMap<>());
 
         doNothing().when(stepContribution).setExitStatus(any());
+
+        // Fake file paths returned for execution
+        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt"))
+                .thenReturn("/mock/directory/FilePrefixReferData.txt");
+        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", "txt"))
+                .thenReturn("/mock/directory/FilePrefixReferEnty.txt");
+
+        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", CustaggBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn("/mock/directory/FilePrefixReferEnty.lock");
+
+        doNothing().when(FileUtils.class);
+        FileUtils.lockFile(anyString(), anyString(), anyString());
     }
 
     @Test
     public void testExecute_Success() throws Exception {
         RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-        assertNotNull(status);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
     public void testExecute_FileNotFound() throws Exception {
-        when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn(null);
+        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt")).thenReturn(null);
         try {
             tasklet.execute(stepContribution, chunkContext);
+            fail("Expected exception was not thrown");
         } catch (Exception e) {
-            assertNotNull(e);
+            assertTrue(e instanceof FileNotFoundException);
         }
     }
 
     @Test
     public void testExecute_LockFileException() throws Exception {
-        try {
-            tasklet.execute(stepContribution, chunkContext);
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
+        doThrow(new IOException("Lock file failed")).when(FileUtils.class);
+        FileUtils.lockFile(anyString(), anyString(), anyString());
+
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
     public void testExecute_EntityFileProcessing() throws Exception {
-        try (BufferedReader br = new BufferedReader(new FileReader("/mock/directory/FilePrefixReferEnty.txt"))) {
-            while (br.readLine() != null) {
-                // Simulate reading file
-            }
-        } catch (IOException e) {
-            assertNotNull(e);
-        }
+        BufferedReader mockReader = mock(BufferedReader.class);
+        when(mockReader.readLine()).thenReturn("ABCD1234", "WXYZ5678", null);
+
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
     public void testExecute_EntityFileProcessing_SkipsShortLines() throws Exception {
-        assertNotNull(tasklet.execute(stepContribution, chunkContext));
+        BufferedReader mockReader = mock(BufferedReader.class);
+        when(mockReader.readLine()).thenReturn("Short", null);
+
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
     public void testExecute_EntityFileProcessing_ThrowsException() throws Exception {
+        when(new BufferedReader(new FileReader("/mock/directory/FilePrefixReferEnty.txt")))
+                .thenThrow(new IOException("File read error"));
+
         try {
             tasklet.execute(stepContribution, chunkContext);
+            fail("Expected exception was not thrown");
         } catch (Exception e) {
             assertNotNull(e);
         }
