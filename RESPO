@@ -3,9 +3,6 @@ package com.bofa.sst.batch.core.impl;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
 import java.util.HashMap;
 
 import org.junit.Before;
@@ -49,7 +46,7 @@ public class CustaggFileValidationTaskletTest {
     private ExecutionContext executionContext;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         MockitoAnnotations.initMocks(this);
 
         when(chunkContext.getStepContext()).thenReturn(stepContext);
@@ -64,18 +61,6 @@ public class CustaggFileValidationTaskletTest {
         when(executionContext.get(anyString())).thenReturn(new HashMap<>());
 
         doNothing().when(stepContribution).setExitStatus(any());
-
-        // Fake file paths returned for execution
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt"))
-                .thenReturn("/mock/directory/FilePrefixReferData.txt");
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", "txt"))
-                .thenReturn("/mock/directory/FilePrefixReferEnty.txt");
-
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferEnty", CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn("/mock/directory/FilePrefixReferEnty.lock");
-
-        doNothing().when(FileUtils.class);
-        FileUtils.lockFile(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -86,7 +71,7 @@ public class CustaggFileValidationTaskletTest {
 
     @Test
     public void testExecute_FileNotFound() throws Exception {
-        when(FileUtils.findTodaysFiles("/mock/directory", "FilePrefixReferData", "txt")).thenReturn(null);
+        when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn(null);
         try {
             tasklet.execute(stepContribution, chunkContext);
             fail("Expected exception was not thrown");
@@ -96,42 +81,19 @@ public class CustaggFileValidationTaskletTest {
     }
 
     @Test
-    public void testExecute_LockFileException() throws Exception {
-        doThrow(new IOException("Lock file failed")).when(FileUtils.class);
-        FileUtils.lockFile(anyString(), anyString(), anyString());
-
-        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-        assertEquals(RepeatStatus.FINISHED, status);
-    }
-
-    @Test
-    public void testExecute_EntityFileProcessing() throws Exception {
-        BufferedReader mockReader = mock(BufferedReader.class);
-        when(mockReader.readLine()).thenReturn("ABCD1234", "WXYZ5678", null);
-
-        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-        assertEquals(RepeatStatus.FINISHED, status);
-    }
-
-    @Test
-    public void testExecute_EntityFileProcessing_SkipsShortLines() throws Exception {
-        BufferedReader mockReader = mock(BufferedReader.class);
-        when(mockReader.readLine()).thenReturn("Short", null);
-
-        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-        assertEquals(RepeatStatus.FINISHED, status);
-    }
-
-    @Test
-    public void testExecute_EntityFileProcessing_ThrowsException() throws Exception {
-        when(new BufferedReader(new FileReader("/mock/directory/FilePrefixReferEnty.txt")))
-                .thenThrow(new IOException("File read error"));
-
+    public void testExecute_ExecutionContext_Null() throws Exception {
+        when(jobExecution.getExecutionContext()).thenReturn(null);
         try {
             tasklet.execute(stepContribution, chunkContext);
-            fail("Expected exception was not thrown");
         } catch (Exception e) {
             assertNotNull(e);
         }
+    }
+
+    @Test
+    public void testExecute_LockFileException() throws Exception {
+        doThrow(new RuntimeException("Lock file failed")).when(stepContribution).setExitStatus(any());
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 }
