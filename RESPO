@@ -47,6 +47,9 @@ public class CustaggFilePartitionerTest {
             when(mockFile.exists()).thenReturn(true);
             when(mockFile.length()).thenReturn(1024L);
 
+            // ✅ Close previous static mock before creating new one
+            fileUtilsMock.close();
+
             try (MockedStatic<File> fileMock = mockStatic(File.class)) {
                 fileMock.when(() -> new File(mockFilePath)).thenReturn(mockFile);
 
@@ -95,6 +98,9 @@ public class CustaggFilePartitionerTest {
             File mockFile = mock(File.class);
             when(mockFile.exists()).thenReturn(true);
             when(mockFile.length()).thenReturn(0L);
+
+            // ✅ Close previous static mock before creating new one
+            fileUtilsMock.close();
 
             try (MockedStatic<File> fileMock = mockStatic(File.class)) {
                 fileMock.when(() -> new File(mockFilePath)).thenReturn(mockFile);
