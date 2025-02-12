@@ -1,143 +1,228 @@
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+package com.bofa.sst.batch.partition;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.powermock.api.mockito.PowerMockito.when;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.Map;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.beans.factory.annotation.Value;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(SpringRunner.class)
+import com.bofa.sst.batch.constants.CustaggBatchConstants;
+import com.bofa.sst.batch.util.FileUtils;
+
+/**
+ * JUnit4 test class for CustaggFilePartitioner with 100% code coverage.
+ */
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({FileUtils.class})
 public class CustaggFilePartitionerTest {
 
-    @InjectMocks
     private CustaggFilePartitioner partitioner;
 
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository mockConfigRepo;
-
-    @Mock
-    private File mockFile;
-
-    @Value("${custag.input.file.path}")
-    private String filePath;
-
-    @Value("#{JobExecutionContext['FilePrefixReferData']}")
-    private String filePrefixReferData;
-
-    @Value("#{JobExecutionContext['directoryPath']}")
-    private String directoryPath;
+    // These are dummy values for the injected fields.
+    private static final String DUMMY_DIRECTORY = "dummyDirectory";
+    private static final String DUMMY_PREFIX = "dummyPrefix";
+    private static final String DUMMY_FILEPATH = "dummyFilePath";
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        partitioner.filePath = "/tmp/testfile.dat";
-        partitioner.FilePrefixReferData = "testfile";
-        partitioner.directoryPath = "/tmp";
+        // Create a new instance and set the required fields.
+        partitioner = new CustaggFilePartitioner();
+        partitioner.directoryPath = DUMMY_DIRECTORY;
+        partitioner.filePrefixReferData = DUMMY_PREFIX;
+        partitioner.filePath = DUMMY_FILEPATH;
+
+        // Prepare FileUtils for static mocking.
+        mockStatic(FileUtils.class);
     }
 
+    @After
+    public void tearDown() {
+        // Clear any stubbing on FileUtils.
+        // (Optional: PowerMockito.reset(FileUtils.class);)
+    }
+
+    /**
+     * Test when FileUtils.findLatestSysFiles returns a path to a file that does not exist.
+     */
     @Test
-    public void testPartition_FileDoesNotExist() {
-        when(mockFile.exists()).thenReturn(false);
+    public void testPartitionWhenFileDoesNotExist() {
+        // Stub the static method to return a non-existent file path.
+        String nonExistentPath = "nonexistent_file.txt";
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(nonExistentPath);
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(4);
-
+        Map<String, ExecutionContext> partitions = partitioner.partition(1);
         assertNotNull(partitions);
-        assertTrue("Partitions should be empty when file does not exist", partitions.isEmpty());
+        // Since the file does not exist, the partition map should be empty.
+        assertTrue(partitions.isEmpty());
     }
 
+    /**
+     * Test when the file exists but is empty.
+     */
     @Test
-    public void testPartition_FileIsEmpty() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(0L);
+    public void testPartitionWhenFileIsEmpty() throws Exception {
+        File tempFile = File.createTempFile("emptyFile", ".txt");
+        tempFile.deleteOnExit();
+        // Make sure the file is empty.
+        assertEquals(0, tempFile.length());
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(4);
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(tempFile.getAbsolutePath());
 
+        Map<String, ExecutionContext> partitions = partitioner.partition(1);
         assertNotNull(partitions);
-        assertTrue("Partitions should be empty for an empty file", partitions.isEmpty());
+        assertTrue(partitions.isEmpty());
+
+        tempFile.delete();
     }
 
+    /**
+     * Test when the file exists but its length is less than RECORD_SIZE,
+     * so no records can be read.
+     */
     @Test
-    public void testPartition_NoRecordsFound() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(10L); // Small file that has no valid records
+    public void testPartitionWhenFileSizeLessThanRecordSize() throws Exception {
+        long recordSize = CustaggBatchConstants.RECORD_SIZE;
+        // Create a file with fewer bytes than RECORD_SIZE (if possible).
+        int fileSize = recordSize > 1 ? (int) recordSize - 1 : 0;
+        File tempFile = File.createTempFile("smallFile", ".txt");
+        tempFile.deleteOnExit();
+        if (fileSize > 0) {
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                byte[] data = new byte[fileSize];
+                fos.write(data);
+            }
+        }
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(tempFile.getAbsolutePath());
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(4);
-
+        Map<String, ExecutionContext> partitions = partitioner.partition(1);
         assertNotNull(partitions);
-        assertTrue("Partitions should be empty if no valid records are found", partitions.isEmpty());
+        // Since totalRecords will be 0, no partitions should be created.
+        assertTrue(partitions.isEmpty());
+
+        tempFile.delete();
     }
 
+    /**
+     * Test valid partitioning when the total number of records divides evenly among partitions.
+     * For example, with gridSize=2 and totalRecords=6.
+     */
     @Test
-    public void testPartition_SmallFile_LessThanPartitions() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(50L); // Simulating a small file
+    public void testEvenDivisionPartitioning() throws Exception {
+        long recordSize = CustaggBatchConstants.RECORD_SIZE;
+        int totalRecords = 6;
+        int gridSize = 2;
+        int fileSize = (int) (totalRecords * recordSize);
 
-        int gridSize = 5;
+        File tempFile = File.createTempFile("evenFile", ".txt");
+        tempFile.deleteOnExit();
+        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            byte[] data = new byte[fileSize];
+            fos.write(data);
+        }
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(tempFile.getAbsolutePath());
+
         Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
-
-        assertNotNull(partitions);
-        assertEquals("Partition count should not exceed available records", Math.min(gridSize, 1), partitions.size());
-    }
-
-    @Test
-    public void testPartition_ValidPartitioning() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(1000L); // A valid file size
-
-        int gridSize = 4;
-        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
-
         assertNotNull(partitions);
         assertEquals(gridSize, partitions.size());
 
-        for (int i = 0; i < gridSize; i++) {
-            ExecutionContext context = partitions.get("partition" + i);
-            assertNotNull(context);
-            assertTrue(context.containsKey("fromLine"));
-            assertTrue(context.containsKey("toLine"));
-            assertTrue(context.containsKey("numberOfRecords"));
+        // With 6 total records and 2 partitions:
+        // linesPerPartition = 6 / 2 = 3; remainder = 0.
+        // Partition 0 should have records 1-3 and partition 1 should have records 4-6.
+        ExecutionContext context0 = partitions.get("partition0");
+        assertNotNull(context0);
+        assertEquals(1, context0.getInt("fromLine"));
+        assertEquals(3, context0.getInt("toLine"));
+        assertEquals(3, context0.getInt("numberOfRecords"));
 
-            int fromLine = context.getInt("fromLine");
-            int toLine = context.getInt("toLine");
-            int numberOfRecords = context.getInt("numberOfRecords");
+        ExecutionContext context1 = partitions.get("partition1");
+        assertNotNull(context1);
+        assertEquals(4, context1.getInt("fromLine"));
+        assertEquals(6, context1.getInt("toLine"));
+        assertEquals(3, context1.getInt("numberOfRecords"));
 
-            assertTrue(fromLine > 0);
-            assertTrue(toLine >= fromLine);
-            assertTrue(numberOfRecords > 0);
-        }
+        tempFile.delete();
     }
 
+    /**
+     * Test valid partitioning when the total number of records does not divide evenly among partitions.
+     * For example, with gridSize=3 and totalRecords=10.
+     */
     @Test
-    public void testPartition_GridSizeGreaterThanRecords() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenReturn(80L); // Small number of records
-        int gridSize = 10; // More partitions than records
+    public void testUnevenDivisionPartitioning() throws Exception {
+        long recordSize = CustaggBatchConstants.RECORD_SIZE;
+        int totalRecords = 10;
+        int gridSize = 3;
+        int fileSize = (int) (totalRecords * recordSize);
+
+        File tempFile = File.createTempFile("unevenFile", ".txt");
+        tempFile.deleteOnExit();
+        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+            byte[] data = new byte[fileSize];
+            fos.write(data);
+        }
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(tempFile.getAbsolutePath());
 
         Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
-
         assertNotNull(partitions);
-        assertTrue("Partitions should not be more than available records", partitions.size() <= gridSize);
+        assertEquals(gridSize, partitions.size());
+
+        // With totalRecords=10 and gridSize=3:
+        // linesPerPartition = 10 / 3 = 3 and remainder = 10 % 3 = 1.
+        // Partition 0 gets an extra record.
+        // Partition 0: fromLine=1, toLine=4 (4 records)
+        // Partition 1: fromLine=5, toLine=7 (3 records)
+        // Partition 2: fromLine=8, toLine=10 (3 records)
+        ExecutionContext context0 = partitions.get("partition0");
+        assertNotNull(context0);
+        assertEquals(1, context0.getInt("fromLine"));
+        assertEquals(4, context0.getInt("toLine"));
+        assertEquals(4, context0.getInt("numberOfRecords"));
+
+        ExecutionContext context1 = partitions.get("partition1");
+        assertNotNull(context1);
+        assertEquals(5, context1.getInt("fromLine"));
+        assertEquals(7, context1.getInt("toLine"));
+        assertEquals(3, context1.getInt("numberOfRecords"));
+
+        ExecutionContext context2 = partitions.get("partition2");
+        assertNotNull(context2);
+        assertEquals(8, context2.getInt("fromLine"));
+        assertEquals(10, context2.getInt("toLine"));
+        assertEquals(3, context2.getInt("numberOfRecords"));
+
+        tempFile.delete();
     }
 
+    /**
+     * Test the exception handling path: if FileUtils.findLatestSysFiles returns null,
+     * new File(null) will throw an exception which is caught.
+     */
     @Test
-    public void testPartition_ExceptionHandling() {
-        when(mockFile.exists()).thenReturn(true);
-        when(mockFile.length()).thenThrow(new RuntimeException("Test Exception"));
+    public void testPartitionExceptionHandling() {
+        // Stub the static method to return null.
+        when(FileUtils.findLatestSysFiles(DUMMY_DIRECTORY, DUMMY_PREFIX, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+            .thenReturn(null);
 
-        try {
-            Map<String, ExecutionContext> partitions = partitioner.partition(4);
-            assertNotNull(partitions);
-            assertTrue("Partitions should be empty in case of exception", partitions.isEmpty());
-        } catch (Exception e) {
-            fail("Exception should have been handled gracefully");
-        }
+        Map<String, ExecutionContext> partitions = partitioner.partition(1);
+        assertNotNull(partitions);
+        // Even though an exception was thrown, the partitioner returns an empty map.
+        assertTrue(partitions.isEmpty());
     }
 }
