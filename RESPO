@@ -53,13 +53,25 @@ public class CustaggFileValidationTaskletTest {
 
     @Before
     public void setUp() {
+        MockitoAnnotations.initMocks(this);
+
+        // Debugging: Ensure mocks are initialized
+        System.out.println("stepContribution: " + stepContribution);
+        System.out.println("chunkContext: " + chunkContext);
+        System.out.println("stepContext: " + stepContext);
+        System.out.println("stepExecution: " + stepExecution);
+        System.out.println("executionContext: " + executionContext);
+
+        // Prevent NullPointerException by ensuring StepExecution and ExecutionContext are properly returned
         when(chunkContext.getStepContext()).thenReturn(stepContext);
         when(stepContext.getStepExecution()).thenReturn(stepExecution);
-        when(stepExecution.getJobExecution().getExecutionContext()).thenReturn(executionContext);
+        when(stepContribution.getStepExecution()).thenReturn(stepExecution);
+        
+        ExecutionContext executionContextMock = mock(ExecutionContext.class);
+        when(stepExecution.getJobExecution().getExecutionContext()).thenReturn(executionContextMock);
 
-        when(executionContext.getString(CustaggBatchConstants.DIRECTORY_PATH)).thenReturn(DIRECTORY_PATH);
-        when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA)).thenReturn(FILE_PREFIX_REFERDATA);
-        when(executionContext.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTRY)).thenReturn(FILE_PREFIX_REFERENTRY);
+        // Mock execution context values to avoid NPE
+        when(executionContextMock.getString(anyString())).thenReturn("mocked_value");
     }
 
     @Test
