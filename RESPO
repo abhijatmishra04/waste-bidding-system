@@ -1,16 +1,12 @@
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
-
-import java.time.Clock;
-import java.util.TimeZone;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -19,59 +15,63 @@ public class BatchApplicationTest {
     @InjectMocks
     private BatchApplication batchApplication;
 
-    @Mock
-    private ToolkitListener mockToolkitListener;
-
-    @Mock
-    private ToolkitFilter mockToolkitFilter;
-
-    @Mock
-    private SplunkLoggingFilter mockSplunkLoggingFilter;
-
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
     }
 
-    // 🔹 Test: Ensure `started()` sets default timezone
+    // 🔹 Test: Ensure `commandOF()` returns a valid ObjectFactory bean
     @Test
-    public void testStarted_SetsDefaultTimeZone() {
-        batchApplication.started();
-        assertEquals("America/New_York", TimeZone.getDefault().getID());
+    public void testCommandOF_ReturnsBean() {
+        com.bac.baclws.ngen.command.ObjectFactory result = batchApplication.commandOF();
+        assertNotNull("commandOF() should return a valid bean", result);
     }
 
-    // 🔹 Test: Ensure `getClock()` returns system clock
+    // 🔹 Test: Ensure `commonOF()` returns a valid ObjectFactory bean
     @Test
-    public void testGetClock_ReturnsSystemClock() {
-        Clock clock = batchApplication.getClock();
-        assertNotNull(clock);
-        assertEquals(Clock.systemDefaultZone(), clock);
+    public void testCommonOF_ReturnsBean() {
+        com.bac.baclws.ngen.common.ObjectFactory result = batchApplication.commonOF();
+        assertNotNull("commonOF() should return a valid bean", result);
     }
 
-    // 🔹 Test: Ensure `toolkitListener()` returns a valid `ToolkitListener` bean
+    // 🔹 Test: Ensure `ngenCommandObject()` returns a valid ObjectFactory bean
     @Test
-    public void testToolkitListener_ReturnsBean() {
-        ToolkitListener listener = batchApplication.toolkitListener();
-        assertNotNull(listener);
+    public void testNgenCommandObject_ReturnsBean() {
+        com.bac.baclws.ngen2.command.ObjectFactory result = batchApplication.ngenCommandObject();
+        assertNotNull("ngenCommandObject() should return a valid bean", result);
     }
 
-    // 🔹 Test: Ensure `toolkitFilterRegistration()` registers `ToolkitFilter`
+    // 🔹 Test: Ensure `ngenCommunicationObject()` returns a valid ObjectFactory bean
     @Test
-    public void testToolkitFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<ToolkitFilter> registration = batchApplication.toolkitFilterRegistration();
-
-        assertNotNull(registration);
-        assertNotNull(registration.getFilter());
-        assertEquals("/*", registration.getUrlPatterns().iterator().next());
+    public void testNgenCommunicationObject_ReturnsBean() {
+        com.bac.baclws.ngen2.communication.ObjectFactory result = batchApplication.ngenCommunicationObject();
+        assertNotNull("ngenCommunicationObject() should return a valid bean", result);
     }
 
-    // 🔹 Test: Ensure `splunkLoggingFilterRegistration()` registers `SplunkLoggingFilter`
+    // 🔹 Test: Ensure `transactionOF()` returns a valid ObjectFactory bean
     @Test
-    public void testSplunkLoggingFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<SplunkLoggingFilter> registration = batchApplication.splunkLoggingFilterRegistration();
+    public void testTransactionOF_ReturnsBean() {
+        com.bac.baclws.ngen.transaction.ObjectFactory result = batchApplication.transactionOF();
+        assertNotNull("transactionOF() should return a valid bean", result);
+    }
 
-        assertNotNull(registration);
-        assertNotNull(registration.getFilter());
-        assertEquals("/*", registration.getUrlPatterns().iterator().next());
+    // 🔹 Test: Ensure `getManifestDetails()` registers a servlet correctly
+    @Test
+    public void testGetManifestDetails_ReturnsServletRegistration() {
+        ServletRegistrationBean<?> result = batchApplication.getManifestDetails();
+
+        assertNotNull("getManifestDetails() should return a valid ServletRegistrationBean", result);
+        assertEquals("HealthCheckServlet should be registered", "health/appHealth.do", 
+                     result.getUrlMappings().iterator().next());
+    }
+
+    // 🔹 Test: Ensure `securityFilterRegistration()` registers `BasicAuthFilter` correctly
+    @Test
+    public void testSecurityFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.securityFilterRegistration();
+
+        assertNotNull("securityFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertEquals("Security filter should be mapped to /admin/*", "/admin/*", 
+                     result.getUrlPatterns().iterator().next());
     }
 }
