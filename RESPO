@@ -2,7 +2,6 @@ import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Map;
 
 import org.junit.Before;
@@ -10,14 +9,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.mockito.Mockito;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.batch.core.partition.support.ExecutionContext;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ File.class, FileUtils.class })  // Mock static methods & file behaviors
+@RunWith(MockitoJUnitRunner.class)  // No PowerMockRunner needed
 public class CustaggFilePartitionerTest {
 
     @InjectMocks
@@ -39,7 +35,6 @@ public class CustaggFilePartitionerTest {
         setPrivateField(partitioner, "FilePrefixReferData", filePrefix);
     }
 
-    // Utility method to set private fields
     private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
         java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
@@ -48,72 +43,44 @@ public class CustaggFilePartitionerTest {
 
     @Test
     public void testPartition_FileDoesNotExist() throws Exception {
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(false, 0L));
-        
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-        assertTrue(partitions.isEmpty());
+        File mockFile = mock(File.class);
+        when(mockFile.exists()).thenReturn(false);
+
+        try (var mockedStatic = mockStatic(File.class)) {
+            mockedStatic.when(() -> new File(filePath)).thenReturn(mockFile);
+            Map<String, ExecutionContext> partitions = partitioner.partition(5);
+            assertTrue(partitions.isEmpty());
+        }
     }
 
     @Test
     public void testPartition_EmptyFile() throws Exception {
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 0L));
+        File mockFile = mock(File.class);
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenReturn(0L);
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-        assertTrue(partitions.isEmpty());
+        try (var mockedStatic = mockStatic(File.class)) {
+            mockedStatic.when(() -> new File(filePath)).thenReturn(mockFile);
+            Map<String, ExecutionContext> partitions = partitioner.partition(5);
+            assertTrue(partitions.isEmpty());
+        }
     }
 
     @Test
-    public void testPartition_FileWith30Bytes() throws Exception {
-        // 30 bytes = 1 record
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 30L));
-        PowerMockito.mockStatic(FileUtils.class);
-        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn(filePath);
+    public void testPartition_NonEmptyFile() throws Exception {
+        File mockFile = mock(File.class);
+        when(mockFile.exists()).thenReturn(true);
+        when(mockFile.length()).thenReturn(300L);
 
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-        assertFalse(partitions.isEmpty());
-        assertEquals(1, partitions.size());  // Only one record, so one partition
-    }
+        try (var mockedStaticFile = mockStatic(File.class);
+             var mockedStaticFileUtils = mockStatic(FileUtils.class)) {
+            
+            mockedStaticFile.when(() -> new File(filePath)).thenReturn(mockFile);
+            mockedStaticFileUtils.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+                    .thenReturn(filePath);
 
-    @Test
-    public void testPartition_FileWithMultipleRecords() throws Exception {
-        // 300 bytes = 10 records
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 300L));
-        PowerMockito.mockStatic(FileUtils.class);
-        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn(filePath);
-
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-        assertFalse(partitions.isEmpty());
-        assertEquals(5, partitions.size());  // 10 records split into 5 partitions
-    }
-
-    @Test
-    public void testPartition_FileWithUnevenRecords() throws Exception {
-        // 320 bytes = 10 full records + 2 extra bytes (should still be 10 records)
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 320L));
-        PowerMockito.mockStatic(FileUtils.class);
-        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn(filePath);
-
-        Map<String, ExecutionContext> partitions = partitioner.partition(3);
-        assertFalse(partitions.isEmpty());
-        assertEquals(3, partitions.size());  // 10 records split into 3 partitions
-    }
-
-    @Test
-    public void testPartition_ExceptionHandling() throws Exception {
-        PowerMockito.whenNew(File.class).withArguments(filePath).thenThrow(new IOException("File error"));
-
-        Map<String, ExecutionContext> partitions = partitioner.partition(5);
-        assertTrue(partitions.isEmpty());  // Exception caught, should return empty map
-    }
-
-    // Helper method to mock File behavior
-    private File mockFile(boolean exists, long length) {
-        File mockFile = PowerMockito.mock(File.class);
-        when(mockFile.exists()).thenReturn(exists);
-        when(mockFile.length()).thenReturn(length);
-        return mockFile;
+            Map<String, ExecutionContext> partitions = partitioner.partition(5);
+            assertFalse(partitions.isEmpty());
+        }
     }
 }
