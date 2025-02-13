@@ -1,12 +1,16 @@
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.SpringApplication;
 
 @RunWith(MockitoJUnitRunner.class)
 public class BatchApplicationTest {
@@ -14,52 +18,46 @@ public class BatchApplicationTest {
     @InjectMocks
     private BatchApplication batchApplication;
 
+    @Mock
+    private SpringApplicationBuilder mockApplicationBuilder;
+
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
     }
 
-    // 🔹 Test: Ensure `errorHandlingFilterRegistration()` registers ErrorHandlingFilter
+    // 🔹 Test: Ensure `xssFilterRegistration()` registers XSSFilter
     @Test
-    public void testErrorHandlingFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<?> result = batchApplication.errorHandlingFilterRegistration();
+    public void testXssFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.xssFilterRegistration();
 
-        assertNotNull("errorHandlingFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertNotNull("xssFilterRegistration() should return a valid FilterRegistrationBean", result);
         assertNotNull("Filter should not be null", result.getFilter());
-        assertEquals("ErrorHandlingFilter should be mapped to /*", "/*", 
+        assertEquals("XSSFilter should be mapped to /*", "/*", 
                      result.getUrlPatterns().iterator().next());
     }
 
-    // 🔹 Test: Ensure `transactionTracingFilterRegistration()` registers TransactionTracingFilter
+    // 🔹 Test: Ensure `configure()` correctly sets the application sources
     @Test
-    public void testTransactionTracingFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<?> result = batchApplication.transactionTracingFilterRegistration();
+    public void testConfigure_SetsApplicationSources() {
+        when(mockApplicationBuilder.sources(any())).thenReturn(mockApplicationBuilder);
 
-        assertNotNull("transactionTracingFilterRegistration() should return a valid FilterRegistrationBean", result);
-        assertNotNull("Filter should not be null", result.getFilter());
-        assertEquals("TransactionTracingFilter should be mapped to /*", "/*", 
-                     result.getUrlPatterns().iterator().next());
+        SpringApplicationBuilder result = batchApplication.configure(mockApplicationBuilder);
+
+        assertNotNull("configure() should return a valid SpringApplicationBuilder", result);
+        verify(mockApplicationBuilder).sources(BatchApplication.class);
     }
 
-    // 🔹 Test: Ensure `reqRespLoggerFilterRegistration()` registers ReqRespLoggerFilter
+    // 🔹 Test: Ensure `main()` runs the Spring Boot application
     @Test
-    public void testReqRespLoggerFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<?> result = batchApplication.reqRespLoggerFilterRegistration();
+    public void testMain_RunsSpringApplication() {
+        try (var mockedStatic = mockStatic(SpringApplication.class)) {
+            mockedStatic.when(() -> SpringApplication.run(BatchApplication.class, new String[]{}))
+                        .thenReturn(null);
 
-        assertNotNull("reqRespLoggerFilterRegistration() should return a valid FilterRegistrationBean", result);
-        assertNotNull("Filter should not be null", result.getFilter());
-        assertEquals("ReqRespLoggerFilter should be mapped to /*", "/*", 
-                     result.getUrlPatterns().iterator().next());
-    }
+            BatchApplication.main(new String[]{});
 
-    // 🔹 Test: Ensure `headerFilterRegistration()` registers HttpHeadersFilter
-    @Test
-    public void testHeaderFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<?> result = batchApplication.headerFilterRegistration();
-
-        assertNotNull("headerFilterRegistration() should return a valid FilterRegistrationBean", result);
-        assertNotNull("Filter should not be null", result.getFilter());
-        assertEquals("HttpHeadersFilter should be mapped to /*", "/*", 
-                     result.getUrlPatterns().iterator().next());
+            mockedStatic.verify(() -> SpringApplication.run(BatchApplication.class, new String[]{}), times(1));
+        }
     }
 }
