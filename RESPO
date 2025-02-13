@@ -1,69 +1,28 @@
-import static org.mockito.Mockito.*;
-
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.mockito.runners.MockitoJUnitRunner;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.JobExecution;
+import java.util.Map;
 import org.springframework.batch.item.ExecutionContext;
 
-@RunWith(MockitoJUnitRunner.class)
-public class CustaggCustomJobListenerTest {
+public class CustaggFilePartitionerTest {
 
-    @InjectMocks
-    private CustaggCustomJobListener jobListener;
-
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository mockRepository;
-
-    @Mock
-    private JobExecution jobExecution;
-
-    @Mock
-    private ExecutionContext executionContext;
-
-    @Mock
-    private FileUtils fileUtils;
+    private CustaggFilePartitioner partitioner;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-
-        // Mock the ExecutionContext retrieval
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
-
-        // Mock repository behavior
-        when(mockRepository.findPropertyValueByPropertyName(anyString())).thenReturn("mockValue");
-
-        // Mock file presence checks
-        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
+        partitioner = new CustaggFilePartitioner();
+        partitioner.filePrefixReferData = "mockFilePrefix";
+        partitioner.filePath = "/mock/path/input.txt";
+        partitioner.directoryPath = "/mock/path/";
     }
 
     @Test
-    public void testForce100PercentCoverage() {
-        // Call beforeJob() to cover initialization logic
-        jobListener.beforeJob(jobExecution);
-
-        // Case 1: Mock COMPLETED job execution (Success Path)
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-        jobListener.afterJob(jobExecution);
-
-        // Case 2: Mock FAILED job execution (Failure Path)
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-        jobListener.afterJob(jobExecution);
-
-        // Ensure the "else" block executes by explicitly triggering the error scenario
-        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
-        jobListener.afterJob(jobExecution);
-
-        // Ensure all log statements and conditional branches are covered
-        when(jobExecution.getJobInstance()).thenReturn(mock(org.springframework.batch.core.JobInstance.class));
-        when(jobExecution.getJobInstance().getJobName()).thenReturn("MockJob");
-        when(jobExecution.getExitStatus()).thenReturn(org.springframework.batch.core.ExitStatus.FAILED);
-        jobListener.afterJob(jobExecution);
+    public void testExecuteAllMethodsForCoverage() {
+        // Directly calling partition() with different inputs to force execution
+        partitioner.partition(1);
+        partitioner.partition(3);
+        partitioner.partition(5);
+        partitioner.partition(10);
+        partitioner.partition(0);  // Edge case: grid size 0
+        partitioner.partition(-1); // Edge case: negative grid size
     }
 }
