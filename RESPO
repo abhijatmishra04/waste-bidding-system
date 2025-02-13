@@ -1,80 +1,119 @@
-import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.Rule;
-import org.mockito.Mockito;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemStreamException;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+import org.springframework.batch.core.partition.support.ExecutionContext;
 
-public class CustaggCompFileReaderTest {
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({ File.class, FileUtils.class })  // Mock static methods & file behaviors
+public class CustaggFilePartitionerTest {
 
-    private CustaggCompFileReader reader;
-    private ExecutionContext executionContext;
-    
-    @Rule
-    public TemporaryFolder tempFolder = new TemporaryFolder();
+    @InjectMocks
+    private CustaggFilePartitioner partitioner;
+
+    @Mock
+    private OraOdsDynamicConfigPropertiesRepository mockRepo;
+
+    private final String directoryPath = "/dummy/path";
+    private final String filePrefix = "testFile";
+    private final String filePath = "/dummy/path/testFile.txt";
 
     @Before
-    public void setUp() {
-        reader = new CustaggCompFileReader();
-        executionContext = mock(ExecutionContext.class);
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+
+        // Use Reflection to set private fields
+        setPrivateField(partitioner, "directoryPath", directoryPath);
+        setPrivateField(partitioner, "FilePrefixReferData", filePrefix);
+    }
+
+    // Utility method to set private fields
+    private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
+        java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     @Test
-    public void testOpen_SuccessfulFileRead() throws Exception {
-        // Arrange
-        File tempFile = tempFolder.newFile("testData.lock");
-        Files.write(tempFile.toPath(), "Sample Data Line 1\nSample Data Line 2\n".getBytes(), StandardOpenOption.APPEND);
+    public void testPartition_FileDoesNotExist() throws Exception {
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(false, 0L));
         
-        when(executionContext.getInt("fromLine")).thenReturn(1);
-        when(executionContext.getInt("toLine")).thenReturn(2);
-        
-        // Act
-        try {
-            reader.open(executionContext);
-        } catch (Exception e) {
-            fail("Unexpected exception: " + e.getMessage());
-        }
+        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        assertTrue(partitions.isEmpty());
     }
 
     @Test
-    public void testOpen_FileNotFound() {
-        // Arrange
-        when(executionContext.getInt("fromLine")).thenReturn(1);
-        when(executionContext.getInt("toLine")).thenReturn(2);
+    public void testPartition_EmptyFile() throws Exception {
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 0L));
 
-        // Act & Assert
-        try {
-            reader.open(executionContext);
-            fail("Expected ItemStreamException");
-        } catch (ItemStreamException e) {
-            assertTrue(e.getMessage().contains("Error opening file"));
-        }
+        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        assertTrue(partitions.isEmpty());
     }
 
     @Test
-    public void testOpen_ErrorSkippingBytes() throws Exception {
-        // Arrange
-        File tempFile = tempFolder.newFile("testData.lock");
-        Files.write(tempFile.toPath(), "Short Line\n".getBytes(), StandardOpenOption.APPEND);
+    public void testPartition_FileWith30Bytes() throws Exception {
+        // 30 bytes = 1 record
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 30L));
+        PowerMockito.mockStatic(FileUtils.class);
+        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn(filePath);
 
-        when(executionContext.getInt("fromLine")).thenReturn(10); // Force a high skip
-        when(executionContext.getInt("toLine")).thenReturn(11);
+        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        assertFalse(partitions.isEmpty());
+        assertEquals(1, partitions.size());  // Only one record, so one partition
+    }
 
-        // Act & Assert
-        try {
-            reader.open(executionContext);
-            fail("Expected RuntimeException");
-        } catch (RuntimeException e) {
-            assertTrue(e.getMessage().contains("Error skipping to start line in file"));
-        }
+    @Test
+    public void testPartition_FileWithMultipleRecords() throws Exception {
+        // 300 bytes = 10 records
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 300L));
+        PowerMockito.mockStatic(FileUtils.class);
+        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn(filePath);
+
+        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        assertFalse(partitions.isEmpty());
+        assertEquals(5, partitions.size());  // 10 records split into 5 partitions
+    }
+
+    @Test
+    public void testPartition_FileWithUnevenRecords() throws Exception {
+        // 320 bytes = 10 full records + 2 extra bytes (should still be 10 records)
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenReturn(mockFile(true, 320L));
+        PowerMockito.mockStatic(FileUtils.class);
+        when(FileUtils.findTodaysFiles(directoryPath, filePrefix, CustaggBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn(filePath);
+
+        Map<String, ExecutionContext> partitions = partitioner.partition(3);
+        assertFalse(partitions.isEmpty());
+        assertEquals(3, partitions.size());  // 10 records split into 3 partitions
+    }
+
+    @Test
+    public void testPartition_ExceptionHandling() throws Exception {
+        PowerMockito.whenNew(File.class).withArguments(filePath).thenThrow(new IOException("File error"));
+
+        Map<String, ExecutionContext> partitions = partitioner.partition(5);
+        assertTrue(partitions.isEmpty());  // Exception caught, should return empty map
+    }
+
+    // Helper method to mock File behavior
+    private File mockFile(boolean exists, long length) {
+        File mockFile = PowerMockito.mock(File.class);
+        when(mockFile.exists()).thenReturn(exists);
+        when(mockFile.length()).thenReturn(length);
+        return mockFile;
     }
 }
