@@ -6,7 +6,6 @@ import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -20,58 +19,47 @@ public class BatchApplicationTest {
         MockitoAnnotations.initMocks(this);
     }
 
-    // 🔹 Test: Ensure `commandOF()` returns a valid ObjectFactory bean
+    // 🔹 Test: Ensure `errorHandlingFilterRegistration()` registers ErrorHandlingFilter
     @Test
-    public void testCommandOF_ReturnsBean() {
-        com.bac.baclws.ngen.command.ObjectFactory result = batchApplication.commandOF();
-        assertNotNull("commandOF() should return a valid bean", result);
+    public void testErrorHandlingFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.errorHandlingFilterRegistration();
+
+        assertNotNull("errorHandlingFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertNotNull("Filter should not be null", result.getFilter());
+        assertEquals("ErrorHandlingFilter should be mapped to /*", "/*", 
+                     result.getUrlPatterns().iterator().next());
     }
 
-    // 🔹 Test: Ensure `commonOF()` returns a valid ObjectFactory bean
+    // 🔹 Test: Ensure `transactionTracingFilterRegistration()` registers TransactionTracingFilter
     @Test
-    public void testCommonOF_ReturnsBean() {
-        com.bac.baclws.ngen.common.ObjectFactory result = batchApplication.commonOF();
-        assertNotNull("commonOF() should return a valid bean", result);
+    public void testTransactionTracingFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.transactionTracingFilterRegistration();
+
+        assertNotNull("transactionTracingFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertNotNull("Filter should not be null", result.getFilter());
+        assertEquals("TransactionTracingFilter should be mapped to /*", "/*", 
+                     result.getUrlPatterns().iterator().next());
     }
 
-    // 🔹 Test: Ensure `ngenCommandObject()` returns a valid ObjectFactory bean
+    // 🔹 Test: Ensure `reqRespLoggerFilterRegistration()` registers ReqRespLoggerFilter
     @Test
-    public void testNgenCommandObject_ReturnsBean() {
-        com.bac.baclws.ngen2.command.ObjectFactory result = batchApplication.ngenCommandObject();
-        assertNotNull("ngenCommandObject() should return a valid bean", result);
+    public void testReqRespLoggerFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.reqRespLoggerFilterRegistration();
+
+        assertNotNull("reqRespLoggerFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertNotNull("Filter should not be null", result.getFilter());
+        assertEquals("ReqRespLoggerFilter should be mapped to /*", "/*", 
+                     result.getUrlPatterns().iterator().next());
     }
 
-    // 🔹 Test: Ensure `ngenCommunicationObject()` returns a valid ObjectFactory bean
+    // 🔹 Test: Ensure `headerFilterRegistration()` registers HttpHeadersFilter
     @Test
-    public void testNgenCommunicationObject_ReturnsBean() {
-        com.bac.baclws.ngen2.communication.ObjectFactory result = batchApplication.ngenCommunicationObject();
-        assertNotNull("ngenCommunicationObject() should return a valid bean", result);
-    }
+    public void testHeaderFilterRegistration_ReturnsFilterBean() {
+        FilterRegistrationBean<?> result = batchApplication.headerFilterRegistration();
 
-    // 🔹 Test: Ensure `transactionOF()` returns a valid ObjectFactory bean
-    @Test
-    public void testTransactionOF_ReturnsBean() {
-        com.bac.baclws.ngen.transaction.ObjectFactory result = batchApplication.transactionOF();
-        assertNotNull("transactionOF() should return a valid bean", result);
-    }
-
-    // 🔹 Test: Ensure `getManifestDetails()` registers a servlet correctly
-    @Test
-    public void testGetManifestDetails_ReturnsServletRegistration() {
-        ServletRegistrationBean<?> result = batchApplication.getManifestDetails();
-
-        assertNotNull("getManifestDetails() should return a valid ServletRegistrationBean", result);
-        assertEquals("HealthCheckServlet should be registered", "health/appHealth.do", 
-                     result.getUrlMappings().iterator().next());
-    }
-
-    // 🔹 Test: Ensure `securityFilterRegistration()` registers `BasicAuthFilter` correctly
-    @Test
-    public void testSecurityFilterRegistration_ReturnsFilterBean() {
-        FilterRegistrationBean<?> result = batchApplication.securityFilterRegistration();
-
-        assertNotNull("securityFilterRegistration() should return a valid FilterRegistrationBean", result);
-        assertEquals("Security filter should be mapped to /admin/*", "/admin/*", 
+        assertNotNull("headerFilterRegistration() should return a valid FilterRegistrationBean", result);
+        assertNotNull("Filter should not be null", result.getFilter());
+        assertEquals("HttpHeadersFilter should be mapped to /*", "/*", 
                      result.getUrlPatterns().iterator().next());
     }
 }
