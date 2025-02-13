@@ -1,69 +1,80 @@
 import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.mockito.runners.MockitoJUnitRunner;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.JobExecution;
+import org.junit.rules.TemporaryFolder;
+import org.junit.Rule;
+import org.mockito.Mockito;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemStreamException;
 
-@RunWith(MockitoJUnitRunner.class)
-public class CustaggCustomJobListenerTest {
+public class CustaggCompFileReaderTest {
 
-    @InjectMocks
-    private CustaggCustomJobListener jobListener;
-
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository mockRepository;
-
-    @Mock
-    private JobExecution jobExecution;
-
-    @Mock
+    private CustaggCompFileReader reader;
     private ExecutionContext executionContext;
-
-    @Mock
-    private FileUtils fileUtils;
+    
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-
-        // Mock execution context to avoid NullPointerException
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
-
-        // Mock repository behavior
-        when(mockRepository.findPropertyValueByPropertyName(anyString())).thenReturn("mockValue");
-
-        // Mock file presence checks
-        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
+        reader = new CustaggCompFileReader();
+        executionContext = mock(ExecutionContext.class);
     }
 
     @Test
-    public void testForce100PercentCoverage() {
-        // Call beforeJob() to cover its execution
-        jobListener.beforeJob(jobExecution);
+    public void testOpen_SuccessfulFileRead() throws Exception {
+        // Arrange
+        File tempFile = tempFolder.newFile("testData.lock");
+        Files.write(tempFile.toPath(), "Sample Data Line 1\nSample Data Line 2\n".getBytes(), StandardOpenOption.APPEND);
+        
+        when(executionContext.getInt("fromLine")).thenReturn(1);
+        when(executionContext.getInt("toLine")).thenReturn(2);
+        
+        // Act
+        try {
+            reader.open(executionContext);
+        } catch (Exception e) {
+            fail("Unexpected exception: " + e.getMessage());
+        }
+    }
 
-        // Case 1: COMPLETED job execution (Success Path)
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-        jobListener.afterJob(jobExecution);
+    @Test
+    public void testOpen_FileNotFound() {
+        // Arrange
+        when(executionContext.getInt("fromLine")).thenReturn(1);
+        when(executionContext.getInt("toLine")).thenReturn(2);
 
-        // Case 2: FAILED job execution (Failure Path)
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-        jobListener.afterJob(jobExecution);
+        // Act & Assert
+        try {
+            reader.open(executionContext);
+            fail("Expected ItemStreamException");
+        } catch (ItemStreamException e) {
+            assertTrue(e.getMessage().contains("Error opening file"));
+        }
+    }
 
-        // Ensure the "else" block executes by explicitly triggering the error scenario
-        when(FileUtils.isTodayFilePresent(anyString(), anyString())).thenReturn(true);
-        jobListener.afterJob(jobExecution);
+    @Test
+    public void testOpen_ErrorSkippingBytes() throws Exception {
+        // Arrange
+        File tempFile = tempFolder.newFile("testData.lock");
+        Files.write(tempFile.toPath(), "Short Line\n".getBytes(), StandardOpenOption.APPEND);
 
-        // Ensure all log statements and conditional branches are covered
-        when(jobExecution.getJobInstance()).thenReturn(mock(org.springframework.batch.core.JobInstance.class));
-        when(jobExecution.getJobInstance().getJobName()).thenReturn("MockJob");
-        when(jobExecution.getExitStatus()).thenReturn(org.springframework.batch.core.ExitStatus.FAILED);
-        jobListener.afterJob(jobExecution);
+        when(executionContext.getInt("fromLine")).thenReturn(10); // Force a high skip
+        when(executionContext.getInt("toLine")).thenReturn(11);
+
+        // Act & Assert
+        try {
+            reader.open(executionContext);
+            fail("Expected RuntimeException");
+        } catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Error skipping to start line in file"));
+        }
     }
 }
