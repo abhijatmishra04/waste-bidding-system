@@ -5,7 +5,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Objects;
 
 import org.junit.After;
 import org.junit.Before;
@@ -45,62 +44,80 @@ public class FileUtilsTest {
 
     @Test
     public void testFindTodaysFiles() {
+        assertTrue("File should exist before searching", tempFile.exists());
+
         String result = FileUtils.findTodaysFiles(tempDir.toString(), "testFile", ".txt");
-        assertNotNull(result);
-        assertTrue(result.endsWith(".txt"));
+
+        assertNotNull("findTodaysFiles() should return a file path", result);
+        assertTrue("Returned path should be a .txt file", result.endsWith(".txt"));
     }
 
     @Test
     public void testLockFile() {
+        assertTrue("File should exist before locking", tempFile.exists());
+
         boolean result = FileUtils.lockFile(tempDir.toString(), "testFile", ".txt");
-        assertTrue(result);
 
         File lockedFile = new File(tempFile.getAbsolutePath() + ".lock");
-        assertTrue(lockedFile.exists());
-        lockedFile.delete();  // Cleanup
+        assertTrue("Lock file should be created", lockedFile.exists());
+        assertTrue("Lock operation should return true", result);
+
+        lockedFile.delete(); // Cleanup
     }
 
     @Test
     public void testUnlockFile() {
-        // First, lock the file
         File lockedFile = new File(tempFile.getAbsolutePath() + ".lock");
-        tempFile.renameTo(lockedFile);
+        assertTrue("Locking file for unlock test", tempFile.renameTo(lockedFile));
 
         boolean result = FileUtils.unlockFile(tempDir.toString(), "testFile", ".txt");
-        assertTrue(result);
-        assertFalse(lockedFile.exists());  // It should be renamed back
+
+        assertFalse("Lock file should be removed", lockedFile.exists());
+        assertTrue("Unlock operation should return true", result);
     }
 
     @Test
     public void testArchiveFile() {
+        assertTrue("File should exist before archiving", tempFile.exists());
+
         boolean result = FileUtils.archiveFile(tempDir.toString(), "testFile", ".txt");
-        assertTrue(result);
 
         File archiveFile = new File(tempDir.toFile(), "archive/testFile_20240214.txt");
-        assertTrue(archiveFile.exists());
-        archiveFile.delete();  // Cleanup
+        assertTrue("Archive file should be created", archiveFile.exists());
+        assertTrue("Archive operation should return true", result);
+
+        archiveFile.delete(); // Cleanup
     }
 
     @Test
     public void testErrorFile() {
+        assertTrue("File should exist before marking as error", tempFile.exists());
+
         boolean result = FileUtils.errorFile(tempDir.toString(), "testFile", ".txt");
-        assertTrue(result);
 
         File errorFile = new File(tempDir.toFile(), "error/testFile_20240214.txt");
-        assertTrue(errorFile.exists());
-        errorFile.delete();  // Cleanup
+        assertTrue("Error file should be created", errorFile.exists());
+        assertTrue("Error operation should return true", result);
+
+        errorFile.delete(); // Cleanup
     }
 
     @Test
     public void testIsTodayFilePresent_True() {
+        assertTrue("File should exist before checking presence", tempFile.exists());
+
         boolean result = FileUtils.isTodayFilePresent(tempDir.toString(), "testFile", ".txt");
-        assertTrue(result);
+
+        assertTrue("File should be detected as present", result);
     }
 
     @Test
     public void testIsTodayFilePresent_False() {
-        tempFile.delete();  // Remove file to simulate missing file
+        assertTrue("File should exist before deletion", tempFile.exists());
+        tempFile.delete(); // Remove file to simulate missing file
+
         boolean result = FileUtils.isTodayFilePresent(tempDir.toString(), "testFile", ".txt");
-        assertFalse(result);
+
+        assertFalse("File should not be detected as present", result);
     }
 }
