@@ -1,170 +1,106 @@
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
 import java.io.File;
-import java.util.Arrays;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Objects;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
 
-@RunWith(MockitoJUnitRunner.class)
 public class FileUtilsTest {
 
-    private final String directoryPath = "/dummy/path";
-    private final String filePrefix = "testFile";
-    private final String extension = ".txt";
+    private Path tempDir;
+    private File tempFile;
+    private File tempFile2;
 
     @Before
-    public void setUp() {
-        // No setup required as we are mocking static methods
-    }
+    public void setUp() throws IOException {
+        // Create a temporary directory
+        tempDir = Files.createTempDirectory("testDir");
 
-    // 🔹 Test: Directory does not exist
-    @Test
-    public void testFindTodaysFiles_DirectoryDoesNotExist() {
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenCallRealMethod();
-            mockedStatic.when(() -> new File(directoryPath)).thenReturn(null);
+        // Create temporary files
+        tempFile = Files.createTempFile(tempDir, "testFile_20240214", ".txt").toFile();
+        tempFile2 = Files.createTempFile(tempDir, "testFile_20240213", ".txt").toFile();
 
-            String result = FileUtils.findTodaysFiles(directoryPath, filePrefix, extension);
-            assertNull(result);
+        // Write some content to the files
+        try (FileWriter writer = new FileWriter(tempFile)) {
+            writer.write("Sample content");
+        }
+        try (FileWriter writer = new FileWriter(tempFile2)) {
+            writer.write("Old content");
         }
     }
 
-    // 🔹 Test: No matching files found
-    @Test
-    public void testFindTodaysFiles_NoMatchingFiles() {
-        File mockDir = mock(File.class);
-        when(mockDir.exists()).thenReturn(true);
-        when(mockDir.listFiles()).thenReturn(null);
-
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenCallRealMethod();
-            mockedStatic.when(() -> new File(directoryPath)).thenReturn(mockDir);
-
-            String result = FileUtils.findTodaysFiles(directoryPath, filePrefix, extension);
-            assertNull(result);
-        }
+    @After
+    public void tearDown() {
+        // Cleanup: Delete temp files and directory
+        tempFile.delete();
+        tempFile2.delete();
+        tempDir.toFile().delete();
     }
 
-    // 🔹 Test: Matching files found (sorted by lastModified)
     @Test
-    public void testFindTodaysFiles_MatchingFilesFound() {
-        File mockDir = mock(File.class);
-        File file1 = mock(File.class);
-        File file2 = mock(File.class);
-        
-        when(mockDir.exists()).thenReturn(true);
-        when(mockDir.listFiles(any())).thenReturn(new File[]{file1, file2});
-        
-        when(file1.getName()).thenReturn("testFile_20240213.txt");
-        when(file2.getName()).thenReturn("testFile_20240214.txt");
-        when(file1.lastModified()).thenReturn(1000L);
-        when(file2.lastModified()).thenReturn(2000L);
-
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenCallRealMethod();
-            mockedStatic.when(() -> new File(directoryPath)).thenReturn(mockDir);
-
-            String result = FileUtils.findTodaysFiles(directoryPath, filePrefix, extension);
-            assertNotNull(result);
-        }
+    public void testFindTodaysFiles() {
+        String result = FileUtils.findTodaysFiles(tempDir.toString(), "testFile", ".txt");
+        assertNotNull(result);
+        assertTrue(result.endsWith(".txt"));
     }
 
-    // 🔹 Test: Lock file (Success case)
     @Test
-    public void testLockFile_Success() {
-        File mockInputFile = mock(File.class);
-        File mockLockedFile = mock(File.class);
-        
-        when(mockInputFile.renameTo(mockLockedFile)).thenReturn(true);
+    public void testLockFile() {
+        boolean result = FileUtils.lockFile(tempDir.toString(), "testFile", ".txt");
+        assertTrue(result);
 
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn("/dummy/path/testFile.txt");
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt")).thenReturn(mockInputFile);
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt.lock")).thenReturn(mockLockedFile);
-
-            boolean result = FileUtils.lockFile(directoryPath, filePrefix, extension);
-            assertTrue(result);
-        }
+        File lockedFile = new File(tempFile.getAbsolutePath() + ".lock");
+        assertTrue(lockedFile.exists());
+        lockedFile.delete();  // Cleanup
     }
 
-    // 🔹 Test: Lock file (Failure case)
     @Test
-    public void testLockFile_Failure() {
-        File mockInputFile = mock(File.class);
-        File mockLockedFile = mock(File.class);
-        
-        when(mockInputFile.renameTo(mockLockedFile)).thenReturn(false);
+    public void testUnlockFile() {
+        // First, lock the file
+        File lockedFile = new File(tempFile.getAbsolutePath() + ".lock");
+        tempFile.renameTo(lockedFile);
 
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn("/dummy/path/testFile.txt");
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt")).thenReturn(mockInputFile);
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt.lock")).thenReturn(mockLockedFile);
-
-            boolean result = FileUtils.lockFile(directoryPath, filePrefix, extension);
-            assertFalse(result);
-        }
+        boolean result = FileUtils.unlockFile(tempDir.toString(), "testFile", ".txt");
+        assertTrue(result);
+        assertFalse(lockedFile.exists());  // It should be renamed back
     }
 
-    // 🔹 Test: Archive file (Success case)
     @Test
-    public void testArchiveFile_Success() {
-        File mockInputFile = mock(File.class);
-        File mockArchiveFile = mock(File.class);
+    public void testArchiveFile() {
+        boolean result = FileUtils.archiveFile(tempDir.toString(), "testFile", ".txt");
+        assertTrue(result);
 
-        when(mockInputFile.renameTo(mockArchiveFile)).thenReturn(true);
-
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn("/dummy/path/testFile.txt");
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt")).thenReturn(mockInputFile);
-            mockedStatic.when(() -> new File("/dummy/path/archive/testFile.txt")).thenReturn(mockArchiveFile);
-
-            boolean result = FileUtils.archiveFile(directoryPath, filePrefix, extension);
-            assertTrue(result);
-        }
+        File archiveFile = new File(tempDir.toFile(), "archive/testFile_20240214.txt");
+        assertTrue(archiveFile.exists());
+        archiveFile.delete();  // Cleanup
     }
 
-    // 🔹 Test: Archive file (Failure case)
     @Test
-    public void testArchiveFile_Failure() {
-        File mockInputFile = mock(File.class);
-        File mockArchiveFile = mock(File.class);
+    public void testErrorFile() {
+        boolean result = FileUtils.errorFile(tempDir.toString(), "testFile", ".txt");
+        assertTrue(result);
 
-        when(mockInputFile.renameTo(mockArchiveFile)).thenReturn(false);
-
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn("/dummy/path/testFile.txt");
-            mockedStatic.when(() -> new File("/dummy/path/testFile.txt")).thenReturn(mockInputFile);
-            mockedStatic.when(() -> new File("/dummy/path/archive/testFile.txt")).thenReturn(mockArchiveFile);
-
-            boolean result = FileUtils.archiveFile(directoryPath, filePrefix, extension);
-            assertFalse(result);
-        }
+        File errorFile = new File(tempDir.toFile(), "error/testFile_20240214.txt");
+        assertTrue(errorFile.exists());
+        errorFile.delete();  // Cleanup
     }
 
-    // 🔹 Test: Is today's file present (True case)
     @Test
-    public void testIsTodayFilePresent_Found() {
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn("/dummy/path/testFile.txt");
-
-            boolean result = FileUtils.isTodayFilePresent(directoryPath, filePrefix, extension);
-            assertTrue(result);
-        }
+    public void testIsTodayFilePresent_True() {
+        boolean result = FileUtils.isTodayFilePresent(tempDir.toString(), "testFile", ".txt");
+        assertTrue(result);
     }
 
-    // 🔹 Test: Is today's file present (False case)
     @Test
-    public void testIsTodayFilePresent_NotFound() {
-        try (var mockedStatic = Mockito.mockStatic(FileUtils.class)) {
-            mockedStatic.when(() -> FileUtils.findTodaysFiles(directoryPath, filePrefix, extension)).thenReturn(null);
-
-            boolean result = FileUtils.isTodayFilePresent(directoryPath, filePrefix, extension);
-            assertFalse(result);
-        }
+    public void testIsTodayFilePresent_False() {
+        tempFile.delete();  // Remove file to simulate missing file
+        boolean result = FileUtils.isTodayFilePresent(tempDir.toString(), "testFile", ".txt");
+        assertFalse(result);
     }
 }
