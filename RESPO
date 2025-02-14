@@ -3,161 +3,105 @@ import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 import java.io.IOException;
-import java.nio.file.*;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Stream;
+import java.io.Writer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+import javax.sql.DataSource;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.*;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.scope.context.StepContext;
-import org.springframework.batch.core.scope.context.StepExecution;
-import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.repeat.RepeatStatus;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.scope.context.StepExecutionContext;
 
 @RunWith(MockitoJUnitRunner.class)
-public class CollectionLettersAggregatorTaskletTest {
+public class CollectionLettersNN14StagingBatchItemWriterImplTest {
+
+    @Mock
+    private DataSource dataSource;
 
     @InjectMocks
-    private CollectionLettersAggregatorTasklet tasklet;
+    private CollectionLettersNN14StagingBatchItemWriterImpl itemWriterImpl;
 
     @Mock
-    private StepContribution stepContribution;
+    private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
 
     @Mock
-    private ChunkContext chunkContext;
+    private Writer mockWriter;
 
     @Mock
-    private StepContext stepContext;
+    private SimpleDateFormat mockDateFormat;
 
     @Mock
-    private StepExecution stepExecution;
+    private Date mockDate;
 
-    @Mock
-    private JobExecution jobExecution;
-
-    @Mock
-    private StepExecutionContext executionContext;
-
-    private final String testSourceDir = "/test/source";
+    private static final String MOCK_DATE_STRING = "2025-02-14";
+    private static final String RECORD_COUNT_STRING = String.format("%015d", 100);
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        itemWriterImpl = new CollectionLettersNN14StagingBatchItemWriterImpl(dataSource);
+        itemWriterImpl.dynamicConfigPropRepository = dynamicConfigPropRepository;
 
-        lenient().when(chunkContext.getStepContext()).thenReturn(stepContext);
-        lenient().when(stepContext.getStepExecution()).thenReturn(stepExecution);
-        lenient().when(stepExecution.getJobExecution()).thenReturn(jobExecution);
-        lenient().when(jobExecution.getExecutionContext()).thenReturn(executionContext);
-        lenient().when(executionContext.getString(anyString())).thenReturn(testSourceDir);
+        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.output.flat.file.path"))
+                .thenReturn("/var/tmp/landing_zone/sst53071_1z/dev01/file/outbound/");
+        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.aggregator.format"))
+                .thenReturn("%-12s%-20s%-35s%-10s%-10s%-6s%-24s");
+        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.flatfile.writer.name"))
+                .thenReturn("MyFlatfileWriter");
+
+        lenient().when(mockDateFormat.format(any(Date.class))).thenReturn(MOCK_DATE_STRING);
     }
 
     @Test
-    public void testExecute_Success() throws Exception {
-        try (MockedStatic<Paths> mockedPaths = mockStatic(Paths.class)) {
-            Path mockPath = mock(Path.class);
-            mockedPaths.when(() -> Paths.get(testSourceDir)).thenReturn(mockPath);
+    public void testWriteHeader_Success() throws IOException {
+        itemWriterImpl.setHeaderCallback(header -> {
+            String expectedHeader = CollectionLettersBatchConstants.SST_REC_ID_HDR +
+                                    MOCK_DATE_STRING +
+                                    CollectionLettersBatchConstants.SST_00 +
+                                    CollectionLettersBatchConstants.SPACES_177;
+            header.write(expectedHeader);
+        });
 
-            RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
-            assertEquals(RepeatStatus.FINISHED, status);
-        }
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testValidateDirectoryPath_EmptyPath() {
-        tasklet.validateDirectoryPath("");
-    }
-
-    @Test(expected = IllegalStateException.class)
-    public void testValidateDirectoryPath_NullPath() {
-        tasklet.validateDirectoryPath(null);
+        itemWriterImpl.getHeaderCallback().write(mockWriter);
+        verify(mockWriter).write(contains(MOCK_DATE_STRING));
     }
 
     @Test
-    public void testAggregateFilesForLetterType_WithFiles() throws Exception {
-        try (MockedStatic<Files> mockedFiles = mockStatic(Files.class)) {
-            Path mockSourcePath = mock(Path.class);
-            Path mockFilePath1 = mock(Path.class);
-            Path mockFilePath2 = mock(Path.class);
+    public void testWriteFooter_Success() throws IOException {
+        itemWriterImpl.setFooterCallback(footer -> {
+            String expectedFooter = CollectionLettersBatchConstants.SST_REC_ID_TLR +
+                                    RECORD_COUNT_STRING +
+                                    CollectionLettersBatchConstants.SPACES_172;
+            footer.write(expectedFooter);
+        });
 
-            List<Path> mockFileList = Arrays.asList(mockFilePath1, mockFilePath2);
-
-            lenient().when(mockSourcePath.toAbsolutePath()).thenReturn(mockSourcePath);
-            mockedFiles.when(() -> Files.list(mockSourcePath)).thenReturn(mockFileList.stream());
-            lenient().when(mockFilePath1.getFileName()).thenReturn(Paths.get("NN3_sample.txt"));
-            lenient().when(mockFilePath2.getFileName()).thenReturn(Paths.get("NN3_sample2.txt"));
-
-            mockedFiles.when(() -> Files.readAllLines(mockFilePath1))
-                    .thenReturn(Arrays.asList("Header", "Data1", "Data2"));
-            mockedFiles.when(() -> Files.readAllLines(mockFilePath2))
-                    .thenReturn(Arrays.asList("Header", "Data3", "Data4"));
-
-            StringBuilder finalAggregatedContent = new StringBuilder();
-            tasklet.aggregateFilesForLetterType(testSourceDir, "NN3", finalAggregatedContent);
-
-            assertTrue(finalAggregatedContent.toString().contains("Data1"));
-            assertTrue(finalAggregatedContent.toString().contains("Data4"));
-        }
+        itemWriterImpl.getFooterCallback().write(mockWriter);
+        verify(mockWriter).write(contains(RECORD_COUNT_STRING));
     }
 
     @Test
-    public void testAggregateFilesForLetterType_NoMatchingFiles() throws Exception {
-        try (MockedStatic<Files> mockedFiles = mockStatic(Files.class)) {
-            Path mockSourcePath = mock(Path.class);
-            lenient().when(mockSourcePath.toAbsolutePath()).thenReturn(mockSourcePath);
-            mockedFiles.when(() -> Files.list(mockSourcePath)).thenReturn(Stream.empty());
+    public void testOutputFieldsWrittenToFile() throws Exception {
+        File outputFile = File.createTempFile("testOutput", ".txt");
+        outputFile.deleteOnExit();
 
-            StringBuilder finalAggregatedContent = new StringBuilder();
-            tasklet.aggregateFilesForLetterType(testSourceDir, "NN3", finalAggregatedContent);
+        FlatFileItemWriter<CollectionLettersPaymentInfoDTO> writer = itemWriterImpl.flatFileItemWriter(null);
+        writer.setResource(new FileSystemResource(outputFile));
 
-            assertEquals(0, finalAggregatedContent.length());
-        }
-    }
+        FormatterLineAggregator<CollectionLettersPaymentInfoDTO> formatterAggregator = new FormatterLineAggregator<>();
+        BeanWrapperFieldExtractor<CollectionLettersPaymentInfoDTO> extractor = new BeanWrapperFieldExtractor<>();
+        extractor.setNames(CollectionLettersPaymentInfoDTO.outputFields());
 
-    @Test
-    public void testAggregateFilesForLetterType_FileReadFailure() throws Exception {
-        try (MockedStatic<Files> mockedFiles = mockStatic(Files.class)) {
-            Path mockSourcePath = mock(Path.class);
-            Path mockFilePath = mock(Path.class);
+        formatterAggregator.setFieldExtractor(extractor);
+        formatterAggregator.setFormat(aggregatorFormat);
 
-            lenient().when(mockSourcePath.toAbsolutePath()).thenReturn(mockSourcePath);
-            mockedFiles.when(() -> Files.list(mockSourcePath)).thenReturn(Stream.of(mockFilePath));
-            lenient().when(mockFilePath.getFileName()).thenReturn(Paths.get("NN3_sample.txt"));
+        writer.setLineAggregator(formatterAggregator);
 
-            mockedFiles.when(() -> Files.readAllLines(mockFilePath)).thenThrow(new IOException("Test I/O exception"));
+        CollectionLettersSST2LettersStagingDTO dto = new CollectionLettersSST2LettersStagingDTO();
+        FlatFileItemWriter<CollectionLettersPaymentInfoDTO> itemWriter = new FlatFileItemWriter<>();
 
-            StringBuilder finalAggregatedContent = new StringBuilder();
-            tasklet.aggregateFilesForLetterType(testSourceDir, "NN3", finalAggregatedContent);
-
-            assertEquals(0, finalAggregatedContent.length());
-        }
-    }
-
-    @Test
-    public void testAggregateFilesForLetterType_FileDeletionFailure() throws Exception {
-        try (MockedStatic<Files> mockedFiles = mockStatic(Files.class)) {
-            Path mockSourcePath = mock(Path.class);
-            Path mockFilePath = mock(Path.class);
-
-            lenient().when(mockSourcePath.toAbsolutePath()).thenReturn(mockSourcePath);
-            mockedFiles.when(() -> Files.list(mockSourcePath)).thenReturn(Stream.of(mockFilePath));
-            lenient().when(mockFilePath.getFileName()).thenReturn(Paths.get("NN3_sample.txt"));
-
-            mockedFiles.when(() -> Files.readAllLines(mockFilePath)).thenReturn(Arrays.asList("Header", "Data1"));
-
-            mockedFiles.when(() -> Files.delete(mockFilePath)).thenThrow(new IOException("Delete error"));
-
-            StringBuilder finalAggregatedContent = new StringBuilder();
-            tasklet.aggregateFilesForLetterType(testSourceDir, "NN3", finalAggregatedContent);
-
-            assertTrue(finalAggregatedContent.toString().contains("Data1"));
-        }
+        assertNotNull(itemWriter);
     }
 }
