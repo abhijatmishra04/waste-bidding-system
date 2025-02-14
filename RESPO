@@ -1,28 +1,117 @@
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Mock;
+import org.mockito.*;
 import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.batch.item.file.FlatFileHeaderCallback;
-import java.io.IOException;
-import java.io.Writer;
-
-import static org.mockito.Mockito.*;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.configuration.JobRegistry;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobRestartException;
 
 @RunWith(MockitoJUnitRunner.class)
-public class BogusFlatFileItemWriterTest {
+public class CollectionLettersBatchJobExecutionServiceTest {
+
+    @InjectMocks
+    private CollectionLettersBatchJobExecutionService jobExecutionService;
 
     @Mock
-    private Writer mockWriter;
+    private JobLauncher jobLauncher;
+
+    @Mock
+    private JobRegistry jobRegistry;
+
+    @Mock
+    private BatchUtil batchUtil;
+
+    @Mock
+    private Job mockJob;
+
+    @Mock
+    private JobExecution mockJobExecution;
+
+    @Mock
+    private BatchLauncherResponse mockResponse;
+
+    @Before
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+    }
 
     @Test
-    public void testWriteHeader_Bogus() throws IOException {
-        FlatFileHeaderCallback headerCallback = mock(FlatFileHeaderCallback.class);
+    public void testStartJob_JobNotEnabled() {
+        when(batchUtil.isJobEnabled(anyString())).thenReturn(false);
+        BatchLauncherRequest request = new BatchLauncherRequest("testJob");
+        BatchLauncherResponse response = jobExecutionService.startJob(request);
+
+        assertEquals(CollectionLettersBatchCommonConstants.FAILURE_STATUS, response.getJobLaunchStatus());
+    }
+
+    @Test
+    public void testStartJob_JobAlreadyRunning() {
+        when(batchUtil.isJobEnabled(anyString())).thenReturn(true);
+        when(batchUtil.isJobRunning(anyString())).thenReturn(true);
+
+        BatchLauncherRequest request = new BatchLauncherRequest("testJob");
+        BatchLauncherResponse response = jobExecutionService.startJob(request);
+
+        assertEquals(CollectionLettersBatchCommonConstants.FAILURE_STATUS, response.getJobLaunchStatus());
+    }
+
+    @Test
+    public void testStartJob_SuccessfulExecution() throws Exception {
+        when(batchUtil.isJobEnabled(anyString())).thenReturn(true);
+        when(batchUtil.isJobRunning(anyString())).thenReturn(false);
+        when(jobRegistry.getJob(anyString())).thenReturn(mockJob);
+        when(jobLauncher.run(any(Job.class), any(JobParameters.class))).thenReturn(mockJobExecution);
+        when(mockJobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+
+        BatchLauncherRequest request = new BatchLauncherRequest("testJob");
+        BatchLauncherResponse response = jobExecutionService.startJob(request);
+
+        assertEquals("COMPLETED", response.getJobLaunchStatus());
+    }
+
+    @Test
+    public void testStartJob_JobExecutionAlreadyRunningException() throws Exception {
+        when(batchUtil.isJobEnabled(anyString())).thenReturn(true);
+        when(batchUtil.isJobRunning(anyString())).thenReturn(false);
+        when(jobRegistry.getJob(anyString())).thenReturn(mockJob);
+        when(jobLauncher.run(any(Job.class), any(JobParameters.class)))
+                .thenThrow(new JobExecutionAlreadyRunningException("Job is already running"));
+
+        BatchLauncherRequest request = new BatchLauncherRequest("testJob");
+        BatchLauncherResponse response = jobExecutionService.startJob(request);
+
+        assertEquals(CollectionLettersBatchCommonConstants.FAILURE_STATUS, response.getJobLaunchStatus());
+    }
+
+    @Test
+    public void testStartJob_JobRestartException() throws Exception {
+        when(batchUtil.isJobEnabled(anyString())).thenReturn(true);
+        when(batchUtil.isJobRunning(anyString())).thenReturn(false);
+        when(jobRegistry.getJob(anyString())).thenReturn(mockJob);
+        when(jobLauncher.run(any(Job.class), any(JobParameters.class)))
+                .thenThrow(new JobRestartException("Job restart error"));
+
+        BatchLauncherRequest request = new BatchLauncherRequest("testJob");
+        BatchLauncherResponse response = jobExecutionService.startJob(request);
+
+        assertEquals(CollectionLettersBatchCommonConstants.FAILURE_STATUS, response.getJobLaunchStatus());
+    }
+
+    @Test
+    public void testSetJobErrorResponse() {
+        Exception exception = new Exception("Test Exception");
+        jobExecutionService.setJobErrorResponse(mockResponse, exception, "ERROR", "FAILURE");
         
-        doNothing().when(headerCallback).write(mockWriter);
-
-        // Just call the method to hit coverage
-        headerCallback.write(mockWriter);
-
-        verify(headerCallback, times(1)).write(mockWriter);
+        verify(mockResponse).setJobStausMessage(contains("Test Exception"));
+        verify(mockResponse).setJobStatus("ERROR");
+        verify(mockResponse).setJobLaunchStatus("FAILURE");
+        verify(mockResponse, atLeastOnce()).setJobExecutionId(null);
     }
 }
