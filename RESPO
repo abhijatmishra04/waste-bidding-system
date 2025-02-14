@@ -1,64 +1,150 @@
+import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
+
+import javax.annotation.PostConstruct;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
+import org.mockito.*;
 import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobExecutionListener;
-import org.springframework.batch.core.scope.context.ExecutionContext;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.core.partition.support.Partitioner;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+import com.bofa.sst.batch.repository.OraOdsDynamicConfigPropertiesRepository;
+import com.bofa.sst.batch.listener.CollectionLettersCustomJobListener;
+import com.bofa.sst.batch.tasklet.CollectionLettersAggregatorTasklet;
 
 @RunWith(MockitoJUnitRunner.class)
-public class CollectionLettersCustomJobListenerTest {
+public class CollectionLettersBatchJobConfigurationTest {
 
     @InjectMocks
-    private CollectionLettersCustomJobListener jobListener;
+    private CollectionLettersBatchJobConfiguration config;
 
     @Mock
     private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
 
     @Mock
-    private JobExecution jobExecution;
+    private JobBuilderFactory jobBuilderFactory;
 
     @Mock
-    private ExecutionContext executionContext;
+    private StepBuilderFactory stepBuilderFactory;
+
+    @Mock
+    private StepBuilder stepBuilder;
+
+    @Mock
+    private CollectionLettersCustomJobListener jobListener;
+
+    @Mock
+    private CollectionLettersAggregatorTasklet aggregatorTasklet;
+
+    @Mock
+    private Partitioner mockPartitioner;
+
+    @Mock
+    private JobRepository jobRepository;
+
+    @Mock
+    private ItemReader<Object> mockReader;
+
+    @Mock
+    private ItemProcessor<Object, Object> mockProcessor;
+
+    @Mock
+    private ItemWriter<Object> mockWriter;
+
+    @Mock
+    private TaskExecutor taskExecutor;
 
     @Before
     public void setUp() {
-        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        MockitoAnnotations.initMocks(this);
+
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
+                .thenReturn("testValue");
+
+        when(stepBuilderFactory.get(anyString())).thenReturn(stepBuilder);
+        when(stepBuilder.chunk(10)).thenReturn(stepBuilder);
+        when(stepBuilder.reader(any())).thenReturn(stepBuilder);
+        when(stepBuilder.processor(any())).thenReturn(stepBuilder);
+        when(stepBuilder.writer(any())).thenReturn(stepBuilder);
+        when(stepBuilder.build()).thenReturn(mock(Step.class));
     }
 
     @Test
-    public void testBeforeJob() {
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.output.flat.file.path"))
-                .thenReturn("/test/source/path");
+    public void testInit_Success() {
+        config.init();
+        assertNotNull(config.inputFilePath);
+        assertNotNull(config.chunkSize);
+        assertNotNull(config.gridSize);
+    }
 
-        jobListener.beforeJob(jobExecution);
+    @Test(expected = ApplicationContextException.class)
+    public void testInit_Failure() {
+        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
+                .thenThrow(new RuntimeException("Error fetching config"));
 
-        verify(executionContext).putString(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT_FILE_PATH_KEY, "/test/source/path");
-        verify(executionContext).putString(eq("destDir"), anyString());
+        config.init();
     }
 
     @Test
-    public void testAfterJob_Completed() {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-
-        jobListener.afterJob(jobExecution);
-
-        verify(jobExecution).setExitStatus(new ExitStatus(BatchStatus.COMPLETED.toString(), "Job Launched Successfully.."));
+    public void testTaskExecutor() {
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.taskExecutor();
+        assertNotNull(executor);
     }
 
     @Test
-    public void testAfterJob_Failed() {
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-        when(jobExecution.getFailureExceptions()).thenReturn(new RuntimeException("Job Failed"));
+    public void testCollectionLettersJob() {
+        Job mockJob = mock(Job.class);
+        when(jobBuilderFactory.get(anyString())).thenReturn(mock(Job.class));
+        
+        Job job = config.collectionlettersJob();
+        assertNotNull(job);
+    }
 
-        jobListener.afterJob(jobExecution);
+    @Test
+    public void testWeekendJob() {
+        Job job = config.weekendJob();
+        assertNotNull(job);
+    }
 
-        verify(jobExecution).setExitStatus(new ExitStatus(BatchStatus.FAILED.toString(), "Job Failed"));
+    @Test
+    public void testProcessDatabaseToDatabasePartition() {
+        Step step = config.processDatabaseToDatabasePartition();
+        assertNotNull(step);
+    }
+
+    @Test
+    public void testStepBeans() {
+        assertNotNull(config.collectionLettersFinalAggregatorStep());
+        assertNotNull(config.letterAggregatorStep());
+        assertNotNull(config.NN3Step());
+        assertNotNull(config.NN5Step());
+        assertNotNull(config.NN8Step());
+        assertNotNull(config.NN14Step());
+        assertNotNull(config.NN28Step());
+        assertNotNull(config.NN30Step());
+    }
+
+    @Test
+    public void testPartitionerBeans() {
+        assertNotNull(config.collectionlettersNN3Partitioner());
+        assertNotNull(config.collectionlettersNN5Partitioner());
+        assertNotNull(config.collectionlettersNN8Partitioner());
+        assertNotNull(config.collectionlettersNN14Partitioner());
+        assertNotNull(config.collectionlettersNN28Partitioner());
+        assertNotNull(config.collectionlettersNN30Partitioner());
     }
 }
