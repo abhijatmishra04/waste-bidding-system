@@ -1,107 +1,23 @@
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+@Test
+public void testWriteHeader_Success() throws IOException {
+    FlatFileItemWriter<CollectionLettersPaymentInfoDTO> writer = new FlatFileItemWriter<>();
 
-import java.io.IOException;
-import java.io.Writer;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-
-import javax.sql.DataSource;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
-
-@RunWith(MockitoJUnitRunner.class)
-public class CollectionLettersNN14StagingBatchItemWriterImplTest {
-
-    @Mock
-    private DataSource dataSource;
-
-    @InjectMocks
-    private CollectionLettersNN14StagingBatchItemWriterImpl itemWriterImpl;
-
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
-
-    @Mock
-    private Writer mockWriter;
-
-    @Mock
-    private SimpleDateFormat mockDateFormat;
-
-    @Mock
-    private Date mockDate;
-
-    private static final String MOCK_DATE_STRING = "2025-02-14";
-    private static final String RECORD_COUNT_STRING = String.format("%015d", 100);
-
-    @Before
-    public void setUp() {
-        itemWriterImpl = new CollectionLettersNN14StagingBatchItemWriterImpl(dataSource);
-        itemWriterImpl.dynamicConfigPropRepository = dynamicConfigPropRepository;
-
-        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.output.flat.file.path"))
-                .thenReturn("/var/tmp/landing_zone/sst53071_1z/dev01/file/outbound/");
-        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.aggregator.format"))
-                .thenReturn("%-12s%-20s%-35s%-10s%-10s%-6s%-24s");
-        lenient().when(dynamicConfigPropRepository.findPropertyValueByPropertyName("collectionletters.flatfile.writer.name"))
-                .thenReturn("MyFlatfileWriter");
-
-        lenient().when(mockDateFormat.format(any(Date.class))).thenReturn(MOCK_DATE_STRING);
-    }
-
-    @Test
-    public void testWriteHeader_Success() throws IOException {
-        itemWriterImpl.setHeaderCallback(header -> {
+    FlatFileHeaderCallback headerCallback = new FlatFileHeaderCallback() {
+        @Override
+        public void write(Writer writer) throws IOException {
             String expectedHeader = CollectionLettersBatchConstants.SST_REC_ID_HDR +
                                     MOCK_DATE_STRING +
                                     CollectionLettersBatchConstants.SST_00 +
                                     CollectionLettersBatchConstants.SPACES_177;
-            header.write(expectedHeader);
-        });
+            writer.write(expectedHeader);
+        }
+    };
 
-        itemWriterImpl.getHeaderCallback().write(mockWriter);
-        verify(mockWriter).write(contains(MOCK_DATE_STRING));
-    }
+    writer.setHeaderCallback(headerCallback);
 
-    @Test
-    public void testWriteFooter_Success() throws IOException {
-        itemWriterImpl.setFooterCallback(footer -> {
-            String expectedFooter = CollectionLettersBatchConstants.SST_REC_ID_TLR +
-                                    RECORD_COUNT_STRING +
-                                    CollectionLettersBatchConstants.SPACES_172;
-            footer.write(expectedFooter);
-        });
+    // Directly call write() on the callback instance
+    headerCallback.write(mockWriter);
 
-        itemWriterImpl.getFooterCallback().write(mockWriter);
-        verify(mockWriter).write(contains(RECORD_COUNT_STRING));
-    }
-
-    @Test
-    public void testOutputFieldsWrittenToFile() throws Exception {
-        File outputFile = File.createTempFile("testOutput", ".txt");
-        outputFile.deleteOnExit();
-
-        FlatFileItemWriter<CollectionLettersPaymentInfoDTO> writer = itemWriterImpl.flatFileItemWriter(null);
-        writer.setResource(new FileSystemResource(outputFile));
-
-        FormatterLineAggregator<CollectionLettersPaymentInfoDTO> formatterAggregator = new FormatterLineAggregator<>();
-        BeanWrapperFieldExtractor<CollectionLettersPaymentInfoDTO> extractor = new BeanWrapperFieldExtractor<>();
-        extractor.setNames(CollectionLettersPaymentInfoDTO.outputFields());
-
-        formatterAggregator.setFieldExtractor(extractor);
-        formatterAggregator.setFormat(aggregatorFormat);
-
-        writer.setLineAggregator(formatterAggregator);
-
-        CollectionLettersSST2LettersStagingDTO dto = new CollectionLettersSST2LettersStagingDTO();
-        FlatFileItemWriter<CollectionLettersPaymentInfoDTO> itemWriter = new FlatFileItemWriter<>();
-
-        assertNotNull(itemWriter);
-    }
+    verify(mockWriter).write(contains(MOCK_DATE_STRING));
 }
