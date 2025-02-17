@@ -1,150 +1,106 @@
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
-
-import javax.annotation.PostConstruct;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.*;
-import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
-import org.springframework.batch.core.step.builder.StepBuilder;
+import java.math.BigDecimal;
+import java.util.List;
+import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.batch.item.ItemProcessor;
-import org.springframework.batch.item.ItemReader;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.core.partition.support.Partitioner;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import com.bofa.sst.batch.repository.OraOdsDynamicConfigPropertiesRepository;
-import com.bofa.sst.batch.listener.CollectionLettersCustomJobListener;
-import com.bofa.sst.batch.tasklet.CollectionLettersAggregatorTasklet;
+@Component
+@Log4j2
+public class PaymentInfoProcessor implements ItemProcessor<PaymentInfoDTO, PaymentInfoDTO> {
 
-@RunWith(MockitoJUnitRunner.class)
-public class CollectionLettersBatchJobConfigurationTest {
+    private static final Logger log = LogManager.getLogger(PaymentInfoProcessor.class);
 
-    @InjectMocks
-    private CollectionLettersBatchJobConfiguration config;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+    @Override
+    public PaymentInfoDTO process(PaymentInfoDTO sda) throws Exception {
+        try {
+            log.info("Processing PaymentInfoDTO: {}", sda);
 
-    @Mock
-    private JobBuilderFactory jobBuilderFactory;
+            // Ignore Header and Trailer Records
+            if ("H".equals(sda.getDetailRecordId()) || "T".equals(sda.getDetailRecordId())) {
+                log.info("Skipping Header or Trailer Record: {}", sda.getDetailRecordId());
+                return null;
+            }
 
-    @Mock
-    private StepBuilderFactory stepBuilderFactory;
+            // Fetch additional data from database
+            List<PaymentInfoDTO> paymentInfoDTOs = fetchDataFromMainTables(sda);
+            log.info("Fetched {} records from main table", paymentInfoDTOs.size());
 
-    @Mock
-    private StepBuilder stepBuilder;
+            for (PaymentInfoDTO dataFromTable : paymentInfoDTOs) {
+                sda.setPaidAmt(dataFromTable.getPaidAmt());
+                sda.setTotalAmt(dataFromTable.getTotalAmt());
 
-    @Mock
-    private CollectionLettersCustomJobListener jobListener;
+                // Check if payment amount is greater than zero
+                if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal oldPaymentAmount = sda.getPaymentAmount();
+                    sda.setOldPaymentAmount(oldPaymentAmount);
+                    log.info("Stored old payment amount: {}", oldPaymentAmount);
+                }
 
-    @Mock
-    private CollectionLettersAggregatorTasklet aggregatorTasklet;
+                // Account status checks
+                if ("A".equals(sda.getAcctStatus()) || "P".equals(sda.getAcctStatus())) {
+                    log.info("Processing Account Status: {}", sda.getAcctStatus());
 
-    @Mock
-    private Partitioner mockPartitioner;
+                    if (sda.getPaymentAmount().compareTo(sda.getIalsBalance()) > 0) {
+                        sda.setPaymentAmount(sda.getIalsBalance());
+                        log.info("Payment Amount updated to IALS_BALANCE: {}", sda.getIalsBalance());
+                    }
 
-    @Mock
-    private JobRepository jobRepository;
+                    BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
+                    sda.setTotalAmt(newTotalAmount);
+                    log.info("Updated Total Amount: {}", newTotalAmount);
+                }
 
-    @Mock
-    private ItemReader<Object> mockReader;
+                if ("C".equals(sda.getAcctStatus())) {
+                    log.info("Processing Account Status: C");
 
-    @Mock
-    private ItemProcessor<Object, Object> mockProcessor;
+                    if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) == 0) {
+                        BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
+                        sda.setTotalAmt(newTotalAmount);
+                        log.info("Updated Total Amount for Status 'C': {}", newTotalAmount);
+                    } else {
+                        sda.setPaymentAmount(BigDecimal.ZERO);
+                        log.info("Payment Amount set to zero for Status 'C'");
+                    }
+                }
 
-    @Mock
-    private ItemWriter<Object> mockWriter;
+                sda.setUpdtBy("SDARETN");
+            }
 
-    @Mock
-    private TaskExecutor taskExecutor;
+            log.info("Final processed PaymentInfoDTO: {}", sda);
+            return sda;
 
-    @Before
-    public void setUp() {
-        MockitoAnnotations.initMocks(this);
-
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
-                .thenReturn("testValue");
-
-        when(stepBuilderFactory.get(anyString())).thenReturn(stepBuilder);
-        when(stepBuilder.chunk(10)).thenReturn(stepBuilder);
-        when(stepBuilder.reader(any())).thenReturn(stepBuilder);
-        when(stepBuilder.processor(any())).thenReturn(stepBuilder);
-        when(stepBuilder.writer(any())).thenReturn(stepBuilder);
-        when(stepBuilder.build()).thenReturn(mock(Step.class));
+        } catch (Exception e) {
+            log.error("Error processing PaymentInfoDTO: {}", sda, e);
+            throw new Exception("Error processing PaymentInfoDTO: " + sda, e);
+        }
     }
 
-    @Test
-    public void testInit_Success() {
-        config.init();
-        assertNotNull(config.inputFilePath);
-        assertNotNull(config.chunkSize);
-        assertNotNull(config.gridSize);
-    }
+    public List<PaymentInfoDTO> fetchDataFromMainTables(PaymentInfoDTO sda) {
+        try {
+            log.info("Fetching data from main tables for Confirmation Number: {}", sda.getConfirmationNbr());
 
-    @Test(expected = ApplicationContextException.class)
-    public void testInit_Failure() {
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName(anyString()))
-                .thenThrow(new RuntimeException("Error fetching config"));
+            RowMapper<PaymentInfoDTO> rowMapper = (rs, rowNum) -> {
+                PaymentInfoDTO sdaProcessedData = new PaymentInfoDTO();
+                sdaProcessedData.setTotalAmt(rs.getBigDecimal("TOT_AM"));
+                sdaProcessedData.setPaidAmt(rs.getBigDecimal("PD_AM"));
+                return sdaProcessedData;
+            };
 
-        config.init();
-    }
+            Object[] params = new Object[]{sda.getConfirmationNbr()};
+            List<PaymentInfoDTO> list = jdbcTemplate.query(SQLFactory.SELECT_SCHEDULE_M2M, rowMapper, params);
 
-    @Test
-    public void testTaskExecutor() {
-        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.taskExecutor();
-        assertNotNull(executor);
-    }
+            log.info("Fetched {} records from database", list.size());
+            return list;
 
-    @Test
-    public void testCollectionLettersJob() {
-        Job mockJob = mock(Job.class);
-        when(jobBuilderFactory.get(anyString())).thenReturn(mock(Job.class));
-        
-        Job job = config.collectionlettersJob();
-        assertNotNull(job);
-    }
-
-    @Test
-    public void testWeekendJob() {
-        Job job = config.weekendJob();
-        assertNotNull(job);
-    }
-
-    @Test
-    public void testProcessDatabaseToDatabasePartition() {
-        Step step = config.processDatabaseToDatabasePartition();
-        assertNotNull(step);
-    }
-
-    @Test
-    public void testStepBeans() {
-        assertNotNull(config.collectionLettersFinalAggregatorStep());
-        assertNotNull(config.letterAggregatorStep());
-        assertNotNull(config.NN3Step());
-        assertNotNull(config.NN5Step());
-        assertNotNull(config.NN8Step());
-        assertNotNull(config.NN14Step());
-        assertNotNull(config.NN28Step());
-        assertNotNull(config.NN30Step());
-    }
-
-    @Test
-    public void testPartitionerBeans() {
-        assertNotNull(config.collectionlettersNN3Partitioner());
-        assertNotNull(config.collectionlettersNN5Partitioner());
-        assertNotNull(config.collectionlettersNN8Partitioner());
-        assertNotNull(config.collectionlettersNN14Partitioner());
-        assertNotNull(config.collectionlettersNN28Partitioner());
-        assertNotNull(config.collectionlettersNN30Partitioner());
+        } catch (Exception e) {
+            log.error("Error fetching data from main tables for: {}", sda.getConfirmationNbr(), e);
+            return List.of(); // Return empty list to avoid null pointer exceptions
+        }
     }
 }
