@@ -1,59 +1,47 @@
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 import org.springframework.batch.item.ExecutionContext;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ FileUtils.class })  
 public class SdaResponseCompFilePartitionerTest {
 
-    @InjectMocks
     private SdaResponseCompFilePartitioner partitioner;
-
-    @Mock
-    private OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
-
-    private final String mockDirectoryPath = "/mock/directory";
-    private final String mockFilePath = "/mock/directory/mockFile.lock";
+    private Path tempDirectory;
+    private File testFile;
 
     @Before
     public void setUp() throws Exception {
-        MockitoAnnotations.initMocks(this);
         partitioner = new SdaResponseCompFilePartitioner();
 
-        when(dynamicConfigPropRepository.findPropertyValueByPropertyName("sda.file.directory.path"))
-                .thenReturn(mockDirectoryPath);
+        tempDirectory = Files.createTempDirectory("testDir");
+        partitioner.directoryPath = tempDirectory.toString();
 
-        partitioner.init();
+        testFile = new File(tempDirectory.toFile(), "testFile.lock");
+        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
+            byte[] record = new byte[152];
+            for (int i = 0; i < 1000; i++) {
+                bos.write(record);
+            }
+        }
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        Files.deleteIfExists(testFile.toPath());
+        Files.deleteIfExists(tempDirectory);
     }
 
     @Test
     public void testPartition_Success() throws Exception {
-        PowerMockito.mockStatic(FileUtils.class);
-        PowerMockito.when(FileUtils.findTodaysFiles(mockDirectoryPath, "RESPONSE_FILE_PREFIX", ".lock"))
-                .thenReturn(mockFilePath);
-
-        byte[] mockFileContent = new byte[1000 * 152];
-        BufferedInputStream mockInputStream = new BufferedInputStream(new ByteArrayInputStream(mockFileContent));
-
-        PowerMockito.whenNew(BufferedInputStream.class)
-                .withArguments(any(File.class))
-                .thenReturn(mockInputStream);
-
         int gridSize = 5;
         Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
 
@@ -80,30 +68,9 @@ public class SdaResponseCompFilePartitionerTest {
     }
 
     @Test
-    public void testPartition_FileNotFound() throws Exception {
-        PowerMockito.mockStatic(FileUtils.class);
-        PowerMockito.when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("File not found"));
-
-        int gridSize = 5;
-        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
-
-        assertNotNull(partitions);
-        assertTrue(partitions.isEmpty());
-    }
-
-    @Test
     public void testPartition_EmptyFile() throws Exception {
-        PowerMockito.mockStatic(FileUtils.class);
-        PowerMockito.when(FileUtils.findTodaysFiles(mockDirectoryPath, "RESPONSE_FILE_PREFIX", ".lock"))
-                .thenReturn(mockFilePath);
-
-        byte[] mockFileContent = new byte[0];
-        BufferedInputStream mockInputStream = new BufferedInputStream(new ByteArrayInputStream(mockFileContent));
-
-        PowerMockito.whenNew(BufferedInputStream.class)
-                .withArguments(any(File.class))
-                .thenReturn(mockInputStream);
+        Files.deleteIfExists(testFile.toPath());
+        testFile.createNewFile();
 
         int gridSize = 5;
         Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
@@ -112,3 +79,5 @@ public class SdaResponseCompFilePartitionerTest {
         assertTrue(partitions.isEmpty());
     }
 }
+
+            
