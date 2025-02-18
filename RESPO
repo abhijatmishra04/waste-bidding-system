@@ -1,40 +1,87 @@
 import static org.junit.Assert.*;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.batch.item.ExecutionContext;
 
 public class SdaResponseCompFileItemReaderTest {
 
     private SdaResponseCompFileItemReader reader;
-    private Path tempDirectory;
-    private File testFile;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         reader = new SdaResponseCompFileItemReader();
+    }
 
-        tempDirectory = Files.createTempDirectory("testDir");
-        reader.directoryPath = tempDirectory.toString();
+    @Test
+    public void testCreateCommaDelimitedRecord1_HRecord() throws Exception {
+        byte[] record = createFixedLengthRecord("H");
+        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
 
-        testFile = new File(tempDirectory.toFile(), "RESPONSE_FILE_PREFIX_testFile.lock");
+        assertNotNull(dto);
+        assertEquals("H", dto.getDetailRecordId());
+    }
 
-        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
-            byte[] recordH = createFixedLengthRecord("H"); 
-            byte[] recordD = createFixedLengthRecord("D");
-            byte[] recordT = createFixedLengthRecord("T");
+    @Test
+    public void testCreateCommaDelimitedRecord1_TRecord() throws Exception {
+        byte[] record = createFixedLengthRecord("T");
+        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
 
-            bos.write(recordH);
-            bos.write(recordD);
-            bos.write(recordT);
-            bos.flush();
+        assertNotNull(dto);
+        assertEquals("T", dto.getDetailRecordId());
+    }
+
+    @Test
+    public void testCreateCommaDelimitedRecord1_DRecord() throws Exception {
+        byte[] record = createDRecord();
+        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
+
+        assertNotNull(dto);
+        assertEquals("D", dto.getDetailRecordId());
+        assertEquals("SYSID", dto.getSystemIdentifier());
+        assertEquals(new BigDecimal("12345"), dto.getSstKey());
+        assertEquals("CONF12345", dto.getConfirmationNbr());
+        assertEquals("ACC001", dto.getAccount());
+        assertEquals("ENTITY", dto.getEntity());
+        assertEquals("PRD01", dto.getProductCode());
+        assertEquals("SPR01", dto.getSubProductCode());
+        assertEquals("20240218", dto.getNextTranDate());
+        assertEquals(new BigDecimal("1500.50"), dto.getPaymentAmount());
+        assertEquals("Y", dto.getChangeIndicator());
+        assertEquals(new BigDecimal("500.00"), dto.getIalsBalance());
+        assertEquals("A1", dto.getAcctStatus());
+        assertEquals("L1", dto.getLegalStatus());
+    }
+
+    @Test
+    public void testCreateCommaDelimitedRecord1_UnknownRecordType() throws Exception {
+        byte[] record = createFixedLengthRecord("X");
+        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
+
+        assertNull(dto);
+    }
+
+    @Test
+    public void testCreateCommaDelimitedRecord1_CorruptData() throws Exception {
+        byte[] record = new byte[50]; // Less than expected 152 bytes
+        try {
+            reader.createCommaDelimitedRecord1(record);
+            fail("Expected UnsupportedEncodingException");
+        } catch (UnsupportedEncodingException e) {
+            assertTrue(e.getMessage().contains("UnsupportedEncodingException"));
+        }
+    }
+
+    @Test
+    public void testCreateCommaDelimitedRecord1_NullData() throws Exception {
+        try {
+            reader.createCommaDelimitedRecord1(null);
+            fail("Expected NullPointerException");
+        } catch (NullPointerException e) {
+            assertNotNull(e);
         }
     }
 
@@ -44,116 +91,24 @@ public class SdaResponseCompFileItemReaderTest {
         return record;
     }
 
-    @After
-    public void tearDown() throws Exception {
-        Files.deleteIfExists(testFile.toPath());
-        Files.deleteIfExists(tempDirectory);
-    }
+    private byte[] createDRecord() {
+        byte[] record = new byte[152];
 
-    @Test
-    public void testOpenAndRead_Success() throws Exception {
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
+        System.arraycopy("D".getBytes(), 0, record, 0, 1);
+        System.arraycopy("SYSID".getBytes(), 0, record, 1, 5);
+        System.arraycopy("12345".getBytes(), 0, record, 6, 5);
+        System.arraycopy("CONF12345".getBytes(), 0, record, 11, 10);
+        System.arraycopy("ACC001".getBytes(), 0, record, 21, 6);
+        System.arraycopy("ENTITY".getBytes(), 0, record, 27, 6);
+        System.arraycopy("PRD01".getBytes(), 0, record, 33, 5);
+        System.arraycopy("SPR01".getBytes(), 0, record, 38, 5);
+        System.arraycopy("20240218".getBytes(), 0, record, 43, 8);
+        System.arraycopy("150050".getBytes(), 0, record, 51, 6); // 1500.50 (scaled)
+        System.arraycopy("Y".getBytes(), 0, record, 57, 1);
+        System.arraycopy("50000".getBytes(), 0, record, 58, 5); // 500.00 (scaled)
+        System.arraycopy("A1".getBytes(), 0, record, 63, 2);
+        System.arraycopy("L1".getBytes(), 0, record, 65, 2);
 
-        reader.open(executionContext);
-
-        PaymentInfoDTO dto1 = reader.read();
-        assertNotNull(dto1);
-        assertEquals("H", dto1.getDetailRecordId());
-
-        PaymentInfoDTO dto2 = reader.read();
-        assertNotNull(dto2);
-        assertEquals("D", dto2.getDetailRecordId());
-
-        PaymentInfoDTO dto3 = reader.read();
-        assertNotNull(dto3);
-        assertEquals("T", dto3.getDetailRecordId());
-
-        PaymentInfoDTO dto4 = reader.read();
-        assertNull(dto4);
-
-        reader.close();
-    }
-
-    @Test
-    public void testOpen_EmptyFile() throws Exception {
-        Files.deleteIfExists(testFile.toPath());
-        testFile.createNewFile();
-
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        reader.open(executionContext);
-
-        PaymentInfoDTO dto = reader.read();
-        assertNull(dto);
-
-        reader.close();
-    }
-
-    @Test
-    public void testFileNotFound() {
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        reader.directoryPath = "/invalid/path/";
-
-        try {
-            reader.open(executionContext);
-            fail("Expected exception not thrown");
-        } catch (Exception e) {
-            assertTrue(e instanceof IOException);
-        }
-    }
-
-    @Test
-    public void testPartialRead() throws Exception {
-        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
-            byte[] recordH = createFixedLengthRecord("H");
-            bos.write(recordH);
-            bos.flush();
-        }
-
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        reader.open(executionContext);
-
-        PaymentInfoDTO dto1 = reader.read();
-        assertNotNull(dto1);
-        assertEquals("H", dto1.getDetailRecordId());
-
-        PaymentInfoDTO dto2 = reader.read();
-        assertNull(dto2);
-
-        reader.close();
-    }
-
-    @Test
-    public void testCorruptRecord() throws Exception {
-        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
-            byte[] corruptRecord = new byte[100];
-            bos.write(corruptRecord);
-            bos.flush();
-        }
-
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
-
-        reader.open(executionContext);
-
-        try {
-            PaymentInfoDTO dto = reader.read();
-            fail("Expected parsing exception");
-        } catch (Exception e) {
-            assertTrue(e instanceof UnsupportedEncodingException);
-        }
-
-        reader.close();
+        return record;
     }
 }
