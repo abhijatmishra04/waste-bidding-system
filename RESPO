@@ -1,171 +1,118 @@
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.mockito.*;
 import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.repeat.RepeatStatus;
 
 @RunWith(MockitoJUnitRunner.class)
-public class SdaResponseCompFileItemReaderTest {
+public class SdaResponseHeaderAndTrailerValidatorTaskletTest {
 
     @InjectMocks
-    private SdaResponseCompFileItemReader reader;
+    private SdaResponseHeaderAndTrailerValidatorTasklet tasklet;
 
     @Mock
-    private BufferedInputStream mockBufferedInputStream;
+    private StepContribution stepContribution;
 
     @Mock
-    private CompCharaterUtil mockCompCharaterUtil;
+    private ExecutionContext executionContext;
+
+    @Mock
+    private FileUtils fileUtils;
+
+    @Mock
+    private CompCharaterUtil compCharaterUtil;
 
     @Before
     public void setUp() throws Exception {
-        reader = new SdaResponseCompFileItemReader();
-        reader.directoryPath = "/mock/directory";
+        when(stepContribution.getStepExecution()).thenReturn(mock(org.springframework.batch.core.StepExecution.class));
+        when(stepContribution.getStepExecution().getJobExecution()).thenReturn(mock(org.springframework.batch.core.JobExecution.class));
+        when(stepContribution.getStepExecution().getJobExecution().getExecutionContext()).thenReturn(executionContext);
+
+        when(executionContext.getString(SdaResponseBatchConstants.RESPONSE_DIRECTORY_PATH)).thenReturn("/mock/response");
+        when(executionContext.getString(SdaResponseBatchConstants.RESPONSE_INPUT_FILE_PREFIX)).thenReturn("responseFile");
+        when(executionContext.getString(SdaResponseBatchConstants.REQUEST_DIRECTORY_PATH)).thenReturn("/mock/request");
+        when(executionContext.getString(SdaResponseBatchConstants.REQUEST_INPUT_FILE_PREFIX)).thenReturn("requestFile");
     }
 
     @Test
-    public void testOpen_Success() throws Exception {
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
+    public void testExecute_Success() throws Exception {
+        mockFileReading("HEADER123", "TRAILER123", "HEADER123", "TRAILER123");
 
-        byte[] mockFileContent = createMockFileContent();
-        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(mockFileContent);
-        mockBufferedInputStream = spy(new BufferedInputStream(byteArrayInputStream));
+        RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        doNothing().when(mockBufferedInputStream).skip(anyLong());
-
-        reader.bis = mockBufferedInputStream;
-        reader.open(executionContext);
-
-        assertEquals(3, reader.numberOfRecordToRead.intValue());
+        verify(stepContribution, never()).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    public void testRead_ValidRecords() throws Exception {
-        byte[] mockFileContent = createMockFileContent();
-        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(mockFileContent);
-        mockBufferedInputStream = spy(new BufferedInputStream(byteArrayInputStream));
+    public void testExecute_HeaderMismatch() throws Exception {
+        mockFileReading("HEADER123", "TRAILER123", "HEADER999", "TRAILER123");
 
-        when(mockBufferedInputStream.readNBytes(any(byte[].class), anyInt(), anyInt())).thenAnswer(invocation -> {
-            byte[] buffer = invocation.getArgument(0);
-            int length = invocation.getArgument(2);
-            return byteArrayInputStream.read(buffer, 0, length);
-        });
+        RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        reader.bis = mockBufferedInputStream;
-
-        PaymentInfoDTO dto = reader.read();
-        assertNotNull(dto);
-        assertEquals("H", dto.getDetailRecordId());
-
-        dto = reader.read();
-        assertNotNull(dto);
-        assertEquals("D", dto.getDetailRecordId());
-
-        dto = reader.read();
-        assertNotNull(dto);
-        assertEquals("T", dto.getDetailRecordId());
-
-        assertNull(reader.read());
+        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_DRecord() throws Exception {
-        when(mockCompCharaterUtil.ebcdicToAscii(any(byte[].class))).thenReturn("D");
-        when(mockCompCharaterUtil.packedToString(any(byte[].class))).thenReturn("150050");
+    public void testExecute_TrailerMismatch() throws Exception {
+        mockFileReading("HEADER123", "TRAILER123", "HEADER123", "TRAILER999");
 
-        byte[] record = createDRecord();
-        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
+        RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        assertNotNull(dto);
-        assertEquals("D", dto.getDetailRecordId());
-        assertEquals(new BigDecimal("1500.50").setScale(2, RoundingMode.HALF_UP), dto.getPaymentAmount());
+        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_UnknownRecordType() throws Exception {
-        byte[] record = createFixedLengthRecord("X");
-        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
-        assertNull(dto);
+    public void testExecute_BothHeaderAndTrailerMismatch() throws Exception {
+        mockFileReading("HEADER123", "TRAILER123", "HEADER999", "TRAILER999");
+
+        RepeatStatus status = tasklet.execute(stepContribution, null);
+
+        verify(stepContribution, times(2)).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_CorruptData() {
-        byte[] record = new byte[50];
-        try {
-            reader.createCommaDelimitedRecord1(record);
-            fail("Expected UnsupportedEncodingException");
-        } catch (UnsupportedEncodingException e) {
-            assertTrue(e.getMessage().contains("UnsupportedEncodingException"));
-        }
+    public void testExecute_NullHeadersAndTrailers() throws Exception {
+        mockFileReading(null, null, null, null);
+
+        RepeatStatus status = tasklet.execute(stepContribution, null);
+
+        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_NullData() {
-        try {
-            reader.createCommaDelimitedRecord1(null);
-            fail("Expected NullPointerException");
-        } catch (NullPointerException e) {
-            assertNotNull(e);
-        }
+    public void testExecute_FileReadFailure() throws Exception {
+        when(FileUtils.findTodaysFiles(anyString(), anyString(), anyString())).thenThrow(new IOException("File not found"));
+
+        RepeatStatus status = tasklet.execute(stepContribution, null);
+
+        verify(stepContribution, never()).setExitStatus(ExitStatus.FAILED);
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
-    @Test
-    public void testFileNotFound() {
-        ExecutionContext executionContext = new ExecutionContext();
-        executionContext.putInt("fromLine", 1);
-        executionContext.putInt("toLine", 3);
+    private void mockFileReading(String resHeader, String resTrailer, String reqHeader, String reqTrailer) throws IOException {
+        when(FileUtils.findTodaysFiles("/mock/response", "responseFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn("/mock/response/responseFile.txt");
+        when(FileUtils.findTodaysFiles("/mock/request", "requestFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn("/mock/request/requestFile.txt");
 
-        reader.directoryPath = "/invalid/path/";
+        when(Files.readAllBytes(Paths.get("/mock/response/responseFile.txt"))).thenReturn(new byte[304]);
+        when(Files.readAllBytes(Paths.get("/mock/request/requestFile.txt"))).thenReturn(new byte[304]);
 
-        try {
-            reader.open(executionContext);
-            fail("Expected exception not thrown");
-        } catch (Exception e) {
-            assertTrue(e instanceof IOException);
-        }
-    }
-
-    private byte[] createMockFileContent() {
-        byte[] fileContent = new byte[152 * 3];
-        System.arraycopy("H".getBytes(), 0, fileContent, 0, 1);
-        System.arraycopy("D".getBytes(), 0, fileContent, 152, 1);
-        System.arraycopy("T".getBytes(), 0, fileContent, 304, 1);
-        return fileContent;
-    }
-
-    private byte[] createFixedLengthRecord(String type) {
-        byte[] record = new byte[152];
-        System.arraycopy(type.getBytes(), 0, record, 0, type.length());
-        return record;
-    }
-
-    private byte[] createDRecord() {
-        byte[] record = new byte[152];
-        System.arraycopy("D".getBytes(), 0, record, 0, 1);
-        System.arraycopy("SYSID".getBytes(), 0, record, 1, 5);
-        System.arraycopy("12345".getBytes(), 0, record, 6, 5);
-        System.arraycopy("CONF12345".getBytes(), 0, record, 11, 10);
-        System.arraycopy("ACC001".getBytes(), 0, record, 21, 6);
-        System.arraycopy("ENTITY".getBytes(), 0, record, 27, 6);
-        System.arraycopy("PRD01".getBytes(), 0, record, 33, 5);
-        System.arraycopy("SPR01".getBytes(), 0, record, 38, 5);
-        System.arraycopy("20240218".getBytes(), 0, record, 43, 8);
-        System.arraycopy("150050".getBytes(), 0, record, 51, 6);
-        System.arraycopy("Y".getBytes(), 0, record, 57, 1);
-        System.arraycopy("50000".getBytes(), 0, record, 58, 5);
-        System.arraycopy("A1".getBytes(), 0, record, 63, 2);
-        System.arraycopy("L1".getBytes(), 0, record, 65, 2);
-        return record;
+        when(compCharaterUtil.ebcdicToAscii(any(byte[].class))).thenReturn(resHeader, resTrailer, reqHeader, reqTrailer);
     }
 }
