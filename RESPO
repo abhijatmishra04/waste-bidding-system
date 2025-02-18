@@ -5,33 +5,43 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.batch.item.ExecutionContext;
 
-public class SdaResponseCompFilePartitionerTest {
+public class SdaResponseCompFileItemReaderTest {
 
-    private SdaResponseCompFilePartitioner partitioner;
+    private SdaResponseCompFileItemReader reader;
     private Path tempDirectory;
     private File testFile;
 
     @Before
     public void setUp() throws Exception {
-        partitioner = new SdaResponseCompFilePartitioner();
+        reader = new SdaResponseCompFileItemReader();
 
         tempDirectory = Files.createTempDirectory("testDir");
-        partitioner.directoryPath = tempDirectory.toString();
+        reader.directoryPath = tempDirectory.toString();
 
-        testFile = new File(tempDirectory.toFile(), "testFile.lock");
+        testFile = new File(tempDirectory.toFile(), "RESPONSE_FILE_PREFIX_testFile.lock");
+
         try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
-            byte[] record = new byte[152];
-            for (int i = 0; i < 1000; i++) {
-                bos.write(record);
-            }
+            byte[] recordH = createFixedLengthRecord("H"); 
+            byte[] recordD = createFixedLengthRecord("D");
+            byte[] recordT = createFixedLengthRecord("T");
+
+            bos.write(recordH);
+            bos.write(recordD);
+            bos.write(recordT);
+            bos.flush();
         }
+    }
+
+    private byte[] createFixedLengthRecord(String type) {
+        byte[] record = new byte[152];
+        System.arraycopy(type.getBytes(), 0, record, 0, type.length());
+        return record;
     }
 
     @After
@@ -41,43 +51,109 @@ public class SdaResponseCompFilePartitionerTest {
     }
 
     @Test
-    public void testPartition_Success() throws Exception {
-        int gridSize = 5;
-        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
+    public void testOpenAndRead_Success() throws Exception {
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
 
-        assertNotNull(partitions);
-        assertEquals(gridSize, partitions.size());
+        reader.open(executionContext);
 
-        int expectedFromLine = 1;
-        int totalRecords = 1000;
-        int recordsPerPartition = totalRecords / gridSize;
-        int remainder = totalRecords % gridSize;
+        PaymentInfoDTO dto1 = reader.read();
+        assertNotNull(dto1);
+        assertEquals("H", dto1.getDetailRecordId());
 
-        for (int i = 0; i < gridSize; i++) {
-            ExecutionContext context = partitions.get("partition" + i);
-            assertNotNull(context);
+        PaymentInfoDTO dto2 = reader.read();
+        assertNotNull(dto2);
+        assertEquals("D", dto2.getDetailRecordId());
 
-            int expectedToLine = expectedFromLine + recordsPerPartition - 1;
-            if (i < remainder) expectedToLine++;
+        PaymentInfoDTO dto3 = reader.read();
+        assertNotNull(dto3);
+        assertEquals("T", dto3.getDetailRecordId());
 
-            assertEquals(expectedFromLine, context.getInt("fromLine"));
-            assertEquals(expectedToLine, context.getInt("toLine"));
+        PaymentInfoDTO dto4 = reader.read();
+        assertNull(dto4);
 
-            expectedFromLine = expectedToLine + 1;
+        reader.close();
+    }
+
+    @Test
+    public void testOpen_EmptyFile() throws Exception {
+        Files.deleteIfExists(testFile.toPath());
+        testFile.createNewFile();
+
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        reader.open(executionContext);
+
+        PaymentInfoDTO dto = reader.read();
+        assertNull(dto);
+
+        reader.close();
+    }
+
+    @Test
+    public void testFileNotFound() {
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        reader.directoryPath = "/invalid/path/";
+
+        try {
+            reader.open(executionContext);
+            fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertTrue(e instanceof IOException);
         }
     }
 
     @Test
-    public void testPartition_EmptyFile() throws Exception {
-        Files.deleteIfExists(testFile.toPath());
-        testFile.createNewFile();
+    public void testPartialRead() throws Exception {
+        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
+            byte[] recordH = createFixedLengthRecord("H");
+            bos.write(recordH);
+            bos.flush();
+        }
 
-        int gridSize = 5;
-        Map<String, ExecutionContext> partitions = partitioner.partition(gridSize);
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
 
-        assertNotNull(partitions);
-        assertTrue(partitions.isEmpty());
+        reader.open(executionContext);
+
+        PaymentInfoDTO dto1 = reader.read();
+        assertNotNull(dto1);
+        assertEquals("H", dto1.getDetailRecordId());
+
+        PaymentInfoDTO dto2 = reader.read();
+        assertNull(dto2);
+
+        reader.close();
+    }
+
+    @Test
+    public void testCorruptRecord() throws Exception {
+        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(testFile))) {
+            byte[] corruptRecord = new byte[100];
+            bos.write(corruptRecord);
+            bos.flush();
+        }
+
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        reader.open(executionContext);
+
+        try {
+            PaymentInfoDTO dto = reader.read();
+            fail("Expected parsing exception");
+        } catch (Exception e) {
+            assertTrue(e instanceof UnsupportedEncodingException);
+        }
+
+        reader.close();
     }
 }
-
-            
