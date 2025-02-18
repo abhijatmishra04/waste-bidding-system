@@ -3,6 +3,7 @@ import static org.mockito.Mockito.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import org.junit.*;
@@ -46,52 +47,62 @@ public class SdaResponseHeaderAndTrailerValidatorTaskletTest {
 
     @Test
     public void testExecute_Success() throws Exception {
-        mockFileReading("HEADER123", "TRAILER123", "HEADER123", "TRAILER123");
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            mockFileReading(filesMock, "HEADER123", "TRAILER123", "HEADER123", "TRAILER123");
 
-        RepeatStatus status = tasklet.execute(stepContribution, null);
+            RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        verify(stepContribution, never()).setExitStatus(ExitStatus.FAILED);
-        assertEquals(RepeatStatus.FINISHED, status);
+            verify(stepContribution, never()).setExitStatus(ExitStatus.FAILED);
+            assertEquals(RepeatStatus.FINISHED, status);
+        }
     }
 
     @Test
     public void testExecute_HeaderMismatch() throws Exception {
-        mockFileReading("HEADER123", "TRAILER123", "HEADER999", "TRAILER123");
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            mockFileReading(filesMock, "HEADER123", "TRAILER123", "HEADER999", "TRAILER123");
 
-        RepeatStatus status = tasklet.execute(stepContribution, null);
+            RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
-        assertEquals(RepeatStatus.FINISHED, status);
+            verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+            assertEquals(RepeatStatus.FINISHED, status);
+        }
     }
 
     @Test
     public void testExecute_TrailerMismatch() throws Exception {
-        mockFileReading("HEADER123", "TRAILER123", "HEADER123", "TRAILER999");
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            mockFileReading(filesMock, "HEADER123", "TRAILER123", "HEADER123", "TRAILER999");
 
-        RepeatStatus status = tasklet.execute(stepContribution, null);
+            RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
-        assertEquals(RepeatStatus.FINISHED, status);
+            verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+            assertEquals(RepeatStatus.FINISHED, status);
+        }
     }
 
     @Test
     public void testExecute_BothHeaderAndTrailerMismatch() throws Exception {
-        mockFileReading("HEADER123", "TRAILER123", "HEADER999", "TRAILER999");
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            mockFileReading(filesMock, "HEADER123", "TRAILER123", "HEADER999", "TRAILER999");
 
-        RepeatStatus status = tasklet.execute(stepContribution, null);
+            RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        verify(stepContribution, times(2)).setExitStatus(ExitStatus.FAILED);
-        assertEquals(RepeatStatus.FINISHED, status);
+            verify(stepContribution, times(2)).setExitStatus(ExitStatus.FAILED);
+            assertEquals(RepeatStatus.FINISHED, status);
+        }
     }
 
     @Test
     public void testExecute_NullHeadersAndTrailers() throws Exception {
-        mockFileReading(null, null, null, null);
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            mockFileReading(filesMock, null, null, null, null);
 
-        RepeatStatus status = tasklet.execute(stepContribution, null);
+            RepeatStatus status = tasklet.execute(stepContribution, null);
 
-        verify(stepContribution).setExitStatus(ExitStatus.FAILED);
-        assertEquals(RepeatStatus.FINISHED, status);
+            verify(stepContribution).setExitStatus(ExitStatus.FAILED);
+            assertEquals(RepeatStatus.FINISHED, status);
+        }
     }
 
     @Test
@@ -104,14 +115,17 @@ public class SdaResponseHeaderAndTrailerValidatorTaskletTest {
         assertEquals(RepeatStatus.FINISHED, status);
     }
 
-    private void mockFileReading(String resHeader, String resTrailer, String reqHeader, String reqTrailer) throws IOException {
-        when(FileUtils.findTodaysFiles("/mock/response", "responseFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn("/mock/response/responseFile.txt");
-        when(FileUtils.findTodaysFiles("/mock/request", "requestFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
-                .thenReturn("/mock/request/requestFile.txt");
+    private void mockFileReading(MockedStatic<Files> filesMock, String resHeader, String resTrailer, String reqHeader, String reqTrailer) throws IOException {
+        Path responsePath = Paths.get("/mock/response/responseFile.txt");
+        Path requestPath = Paths.get("/mock/request/requestFile.txt");
 
-        when(Files.readAllBytes(Paths.get("/mock/response/responseFile.txt"))).thenReturn(new byte[304]);
-        when(Files.readAllBytes(Paths.get("/mock/request/requestFile.txt"))).thenReturn(new byte[304]);
+        when(FileUtils.findTodaysFiles("/mock/response", "responseFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn(responsePath.toString());
+        when(FileUtils.findTodaysFiles("/mock/request", "requestFile", SdaResponseBatchConstants.LOCK_FILE_EXTENSION))
+                .thenReturn(requestPath.toString());
+
+        filesMock.when(() -> Files.readAllBytes(responsePath)).thenReturn(new byte[304]);
+        filesMock.when(() -> Files.readAllBytes(requestPath)).thenReturn(new byte[304]);
 
         when(compCharaterUtil.ebcdicToAscii(any(byte[].class))).thenReturn(resHeader, resTrailer, reqHeader, reqTrailer);
     }
