@@ -1,54 +1,17 @@
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
-import org.junit.*;
-import org.junit.runner.RunWith;
-import org.mockito.*;
-import org.mockito.junit.MockitoJUnitRunner;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.repeat.RepeatStatus;
 
-@RunWith(MockitoJUnitRunner.class)
-public class SdaResponseHeaderAndTrailerValidatorTaskletTest {
+    public static final String CHUNK_SIZE = "sda.response.batch.chunk.size";
+    public static final String PARTITION_GRID_SIZE = "sda.response.batch.partition.grid.size";
+    public static final String THREAD_CORE_POOL_SIZE = "sda.response.batch.thread.core.pool.size";
+    public static final String THREAD_MAX_POOL_SIZE = "sda.response.batch.thread.max.pool.size";
+    public static final String BATCH_QUEUE_CAPACITY = "sda.response.batch.queue.capacity";
+    public static final String THREAD_PREFIX_NAME = "sda.response.batch.thread.prefix.name";
+    public static final String PARTITION_TYPE = "sda.response.batch.partition.type";
 
-    @InjectMocks
-    private SdaResponseHeaderAndTrailerValidatorTasklet tasklet;
-
-    @Mock
-    private StepContribution stepContribution;
-
-    @Before
-    public void setUp() {
-        doNothing().when(stepContribution).setExitStatus(any());
-    }
-
-    @Test
-    public void testExecute_CoversEverything() throws Exception {
-        RepeatStatus status = tasklet.execute(stepContribution, null);
-        assertNotNull(status);  // Fake assertion just to prevent empty test
-    }
-
-    @Test
-    public void testExecute_AlwaysPasses() throws Exception {
-        assertEquals(1, 1); // Completely useless but makes test pass
-    }
-
-    @Test
-    public void testExecute_DummyCheck() throws Exception {
-        RepeatStatus status = tasklet.execute(stepContribution, null);
-        assertEquals(RepeatStatus.FINISHED, status);
-    }
-
-    @Test
-    public void testExecute_MockedExitStatus() throws Exception {
-        when(stepContribution.getExitStatus()).thenReturn(null);
-        assertNull(stepContribution.getExitStatus());
-    }
-
-    @Test
-    public void testExecute_EnsureCoverage() throws Exception {
-        tasklet.execute(stepContribution, null);
-        tasklet.execute(stepContribution, null);
-        assertTrue(true); // Does nothing useful
-    }
-}
+Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.CHUNK_SIZE));
+Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.PARTITION_GRID_SIZE));
+Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_CORE_POOL_SIZE));
+Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_MAX_POOL_SIZE));
+Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.BATCH_QUEUE_CAPACITY));
+dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_PREFIX_NAME);
+dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.PARTITION_TYPE);
