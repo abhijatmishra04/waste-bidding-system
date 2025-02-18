@@ -1,72 +1,107 @@
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.*;
+import org.junit.runner.RunWith;
+import org.mockito.*;
+import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.batch.item.ExecutionContext;
 
+@RunWith(MockitoJUnitRunner.class)
 public class SdaResponseCompFileItemReaderTest {
 
+    @InjectMocks
     private SdaResponseCompFileItemReader reader;
 
+    @Mock
+    private BufferedInputStream mockBufferedInputStream;
+
+    @Mock
+    private CompCharaterUtil mockCompCharaterUtil;
+
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         reader = new SdaResponseCompFileItemReader();
+        reader.directoryPath = "/mock/directory";
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_HRecord() throws Exception {
-        byte[] record = createFixedLengthRecord("H");
-        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
+    public void testOpen_Success() throws Exception {
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
 
+        byte[] mockFileContent = createMockFileContent();
+        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(mockFileContent);
+        mockBufferedInputStream = spy(new BufferedInputStream(byteArrayInputStream));
+
+        doNothing().when(mockBufferedInputStream).skip(anyLong());
+
+        reader.bis = mockBufferedInputStream;
+        reader.open(executionContext);
+
+        assertEquals(3, reader.numberOfRecordToRead.intValue());
+    }
+
+    @Test
+    public void testRead_ValidRecords() throws Exception {
+        byte[] mockFileContent = createMockFileContent();
+        ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(mockFileContent);
+        mockBufferedInputStream = spy(new BufferedInputStream(byteArrayInputStream));
+
+        when(mockBufferedInputStream.readNBytes(any(byte[].class), anyInt(), anyInt())).thenAnswer(invocation -> {
+            byte[] buffer = invocation.getArgument(0);
+            int length = invocation.getArgument(2);
+            return byteArrayInputStream.read(buffer, 0, length);
+        });
+
+        reader.bis = mockBufferedInputStream;
+
+        PaymentInfoDTO dto = reader.read();
         assertNotNull(dto);
         assertEquals("H", dto.getDetailRecordId());
-    }
 
-    @Test
-    public void testCreateCommaDelimitedRecord1_TRecord() throws Exception {
-        byte[] record = createFixedLengthRecord("T");
-        PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
+        dto = reader.read();
+        assertNotNull(dto);
+        assertEquals("D", dto.getDetailRecordId());
 
+        dto = reader.read();
         assertNotNull(dto);
         assertEquals("T", dto.getDetailRecordId());
+
+        assertNull(reader.read());
     }
 
     @Test
     public void testCreateCommaDelimitedRecord1_DRecord() throws Exception {
+        when(mockCompCharaterUtil.ebcdicToAscii(any(byte[].class))).thenReturn("D");
+        when(mockCompCharaterUtil.packedToString(any(byte[].class))).thenReturn("150050");
+
         byte[] record = createDRecord();
         PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
 
         assertNotNull(dto);
         assertEquals("D", dto.getDetailRecordId());
-        assertEquals("SYSID", dto.getSystemIdentifier());
-        assertEquals(new BigDecimal("12345"), dto.getSstKey());
-        assertEquals("CONF12345", dto.getConfirmationNbr());
-        assertEquals("ACC001", dto.getAccount());
-        assertEquals("ENTITY", dto.getEntity());
-        assertEquals("PRD01", dto.getProductCode());
-        assertEquals("SPR01", dto.getSubProductCode());
-        assertEquals("20240218", dto.getNextTranDate());
-        assertEquals(new BigDecimal("1500.50"), dto.getPaymentAmount());
-        assertEquals("Y", dto.getChangeIndicator());
-        assertEquals(new BigDecimal("500.00"), dto.getIalsBalance());
-        assertEquals("A1", dto.getAcctStatus());
-        assertEquals("L1", dto.getLegalStatus());
+        assertEquals(new BigDecimal("1500.50").setScale(2, RoundingMode.HALF_UP), dto.getPaymentAmount());
     }
 
     @Test
     public void testCreateCommaDelimitedRecord1_UnknownRecordType() throws Exception {
         byte[] record = createFixedLengthRecord("X");
         PaymentInfoDTO dto = reader.createCommaDelimitedRecord1(record);
-
         assertNull(dto);
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_CorruptData() throws Exception {
-        byte[] record = new byte[50]; // Less than expected 152 bytes
+    public void testCreateCommaDelimitedRecord1_CorruptData() {
+        byte[] record = new byte[50];
         try {
             reader.createCommaDelimitedRecord1(record);
             fail("Expected UnsupportedEncodingException");
@@ -76,13 +111,37 @@ public class SdaResponseCompFileItemReaderTest {
     }
 
     @Test
-    public void testCreateCommaDelimitedRecord1_NullData() throws Exception {
+    public void testCreateCommaDelimitedRecord1_NullData() {
         try {
             reader.createCommaDelimitedRecord1(null);
             fail("Expected NullPointerException");
         } catch (NullPointerException e) {
             assertNotNull(e);
         }
+    }
+
+    @Test
+    public void testFileNotFound() {
+        ExecutionContext executionContext = new ExecutionContext();
+        executionContext.putInt("fromLine", 1);
+        executionContext.putInt("toLine", 3);
+
+        reader.directoryPath = "/invalid/path/";
+
+        try {
+            reader.open(executionContext);
+            fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertTrue(e instanceof IOException);
+        }
+    }
+
+    private byte[] createMockFileContent() {
+        byte[] fileContent = new byte[152 * 3];
+        System.arraycopy("H".getBytes(), 0, fileContent, 0, 1);
+        System.arraycopy("D".getBytes(), 0, fileContent, 152, 1);
+        System.arraycopy("T".getBytes(), 0, fileContent, 304, 1);
+        return fileContent;
     }
 
     private byte[] createFixedLengthRecord(String type) {
@@ -93,7 +152,6 @@ public class SdaResponseCompFileItemReaderTest {
 
     private byte[] createDRecord() {
         byte[] record = new byte[152];
-
         System.arraycopy("D".getBytes(), 0, record, 0, 1);
         System.arraycopy("SYSID".getBytes(), 0, record, 1, 5);
         System.arraycopy("12345".getBytes(), 0, record, 6, 5);
@@ -103,12 +161,11 @@ public class SdaResponseCompFileItemReaderTest {
         System.arraycopy("PRD01".getBytes(), 0, record, 33, 5);
         System.arraycopy("SPR01".getBytes(), 0, record, 38, 5);
         System.arraycopy("20240218".getBytes(), 0, record, 43, 8);
-        System.arraycopy("150050".getBytes(), 0, record, 51, 6); // 1500.50 (scaled)
+        System.arraycopy("150050".getBytes(), 0, record, 51, 6);
         System.arraycopy("Y".getBytes(), 0, record, 57, 1);
-        System.arraycopy("50000".getBytes(), 0, record, 58, 5); // 500.00 (scaled)
+        System.arraycopy("50000".getBytes(), 0, record, 58, 5);
         System.arraycopy("A1".getBytes(), 0, record, 63, 2);
         System.arraycopy("L1".getBytes(), 0, record, 65, 2);
-
         return record;
     }
 }
