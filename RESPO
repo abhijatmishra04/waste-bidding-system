@@ -1,102 +1,103 @@
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import java.math.BigDecimal;
 
 public class UdapRequestPaymentInfoProcessorTest {
 
-    @InjectMocks
     private UdapRequestPaymentInfoProcessor processor;
-
-    @Mock
-    private UdapRequestPaymentInfoDTO dto;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        processor = new UdapRequestPaymentInfoProcessor();
     }
 
-    /** Test Case: REM_STMT_BAL **/
     @Test
     public void testProcess_RemStmtBal_Success() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
-        when(dto.getPmtAmt()).thenReturn(100.00);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
+        dto.setPmtAmt(new BigDecimal("100.00"));
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
 
         assertNotNull(result);
         assertEquals(UdapRequestBatchConstants.SST_REM_STMT_BAL_ONETIME, result.getPaymentType());
-        assertEquals(Double.valueOf(100.00), result.getOrigPaymentAmt());
+        assertEquals(new BigDecimal("100.00"), result.getOrigPaymentAmt());
         assertEquals(UdapRequestBatchConstants.AMT_TYPE_RSB, result.getAmtType());
     }
 
     @Test
     public void testProcess_RemStmtBal_NullPmtAmt() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
-        when(dto.getPmtAmt()).thenReturn(null);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
+        dto.setPmtAmt(null);
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
+
         assertNull(result);
     }
 
-    /** Test Case: ISB **/
     @Test
     public void testProcess_ISB_Success() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
-        when(dto.getProcessCode()).thenReturn(UdapRequestBatchConstants.PROCESS_CODE_P00);
-        when(dto.getMinStmtCrtRegAmt()).thenReturn(200.00);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_ISB);
+        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setMinStmtCrtRegAmt(new BigDecimal("200.00"));
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
 
         assertNotNull(result);
         assertEquals(UdapRequestBatchConstants.SST_ONETIME_ISB, result.getPaymentType());
-        assertEquals(Double.valueOf(200.00), result.getOrigPaymentAmt());
+        assertEquals(new BigDecimal("200.00"), result.getOrigPaymentAmt());
         assertEquals(UdapRequestBatchConstants.AMT_TYPE_ISB, result.getAmtType());
     }
 
     @Test
     public void testProcess_ISB_NullProcessCode() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
-        when(dto.getProcessCode()).thenReturn(null);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_ISB);
+        dto.setProcessCode(null);
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
+
         assertNull(result);
     }
 
     @Test
     public void testProcess_ISB_NullMinStmtCrtRegAmt() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
-        when(dto.getProcessCode()).thenReturn(UdapRequestBatchConstants.PROCESS_CODE_P00);
-        when(dto.getMinStmtCrtRegAmt()).thenReturn(null);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_ISB);
+        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setMinStmtCrtRegAmt(null);
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
+
         assertNull(result);
     }
 
-    /** Test Case: REM_ISB **/
     @Test
     public void testProcess_RemIsb_Success() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_ISB);
-        when(dto.getPmtAmt()).thenReturn(300.00);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_REM_ISB);
+        dto.setPmtAmt(new BigDecimal("300.00"));
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
 
         assertNotNull(result);
         assertEquals(UdapRequestBatchConstants.SST_REM_ISB, result.getPaymentType());
-        assertEquals(Double.valueOf(300.00), result.getOrigPaymentAmt());
+        assertEquals(new BigDecimal("300.00"), result.getOrigPaymentAmt());
         assertEquals(UdapRequestBatchConstants.AMT_TYPE_RIS, result.getAmtType());
     }
 
     @Test
     public void testProcess_RemIsb_NullPmtAmt() throws Exception {
-        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_ISB);
-        when(dto.getPmtAmt()).thenReturn(null);
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_REM_ISB);
+        dto.setPmtAmt(null);
 
         UdapRequestPaymentInfoDTO result = processor.process(dto);
+
         assertNull(result);
     }
 }
