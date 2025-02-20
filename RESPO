@@ -29,6 +29,19 @@ public class UdapRequestBatchConstants {
     public static final String AMT_TYPE_ISB = "ISB";
     public static final String AMT_TYPE_RIS = "RIS";
 
+    // Case Values for Switch Statement
+    public static final String CASE_MIN = "MIN";
+    public static final String CASE_MIN_ADDL = "MIN_ADDL";
+    public static final String CASE_STMT_BAL = "STMT_BAL";
+    public static final String CASE_CUR_BAL = "CUR_BAL";
+    public static final String CASE_OTHER_AMT = "OTHER_AMT";
+    public static final String CASE_CONST_RECUR = "CONST_RECUR";
+    public static final String CASE_OTHER = "OTHER";
+    public static final String CASE_RMPD = "RMPD";
+    public static final String CASE_REM_STMT_BAL = "REM_STMT_BAL";
+    public static final String CASE_ISB = "ISB";
+    public static final String CASE_REM_ISB = "REM_ISB";
+
     // Logging Messages
     public static final String LOG_PROCESSING = "ENTERED INTO SWITCH CASE {} {}";
     public static final String LOG_NULL_VALUE = "{} value is null for item with ID: {}";
