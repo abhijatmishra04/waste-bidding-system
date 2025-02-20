@@ -1,134 +1,111 @@
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-import org.junit.Before;
-import org.junit.Test;
-import java.math.BigDecimal;
+import java.io.File;
+import java.io.FileWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
-public class UdapRequestPaymentInfoProcessorTest {
+import org.apache.commons.lang3.reflect.FieldUtils;
+import org.junit.*;
+import org.junit.rules.TemporaryFolder;
+import org.mockito.*;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.item.ExecutionContext;
 
-    private UdapRequestPaymentInfoProcessor processor;
+public class UdapRequestAggregatorTaskletTest {
+
+    @InjectMocks
+    private UdapRequestAggregatorTasklet tasklet;
+
+    @Mock
+    private StepContribution stepContribution;
+
+    @Mock
+    private ChunkContext chunkContext;
+
+    @Mock
+    private StepExecution stepExecution;
+
+    @Mock
+    private JobExecution jobExecution;
+
+    @Mock
+    private ExecutionContext executionContext;
+
+    @Mock
+    private StepContext stepContext;
+
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
+
+    private String filePath;
+    private String filePrefix = "testFile_";
+    private String fileSuffix = ".txt";
+    private String outputFileName = "aggregated_output";
 
     @Before
-    public void setUp() {
-        processor = new UdapRequestPaymentInfoProcessor();
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+        filePath = tempFolder.getRoot().getAbsolutePath() + "/";
+        when(stepContribution.getStepExecution()).thenReturn(stepExecution);
+        when(stepExecution.getJobExecution()).thenReturn(jobExecution);
+        when(jobExecution.getExecutionContext()).thenReturn(executionContext);
+        FieldUtils.writeField(tasklet, "filePath", filePath, true);
+        FieldUtils.writeField(tasklet, "filePrefix", filePrefix, true);
+        FieldUtils.writeField(tasklet, "fileSuffix", fileSuffix, true);
+        FieldUtils.writeField(tasklet, "outputFileName", outputFileName, true);
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("MIN");
-        dto.setProcessCode("P01");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("MIN", result.getAmtType());
+    public void testExecute_SuccessfulAggregation() throws Exception {
+        createSampleFile("testFile_1.txt", Arrays.asList("HEADER", "Data1", "Data2", "TRAILER"));
+        createSampleFile("testFile_2.txt", Arrays.asList("HEADER", "Data3", "Data4", "TRAILER"));
+        createSampleFile("testFile_3.txt", Arrays.asList("HEADER", "Data5", "Data6", "TRAILER"));
+        when(executionContext.getString(UdapRequestBatchConstants.DIRECTORY_PATH)).thenReturn(filePath);
+        when(executionContext.getString(UdapRequestBatchConstants.EXTENSION)).thenReturn(fileSuffix);
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
+        File outputFile = new File(filePath, outputFileName + "_" + getCurrentDate() + fileSuffix);
+        assertTrue(outputFile.exists());
+        List<String> lines = Files.readAllLines(outputFile.toPath());
+        assertEquals(Arrays.asList("HEADER", "Data1", "Data2", "Data3", "Data4", "Data5", "Data6", "TRAILER"), lines);
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully2() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("MIN_ADDL");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("MIN", result.getAmtType());
+    public void testExecute_NoFiles() throws Exception {
+        when(executionContext.getString(UdapRequestBatchConstants.DIRECTORY_PATH)).thenReturn(filePath);
+        when(executionContext.getString(UdapRequestBatchConstants.EXTENSION)).thenReturn(fileSuffix);
+        RepeatStatus status = tasklet.execute(stepContribution, chunkContext);
+        assertEquals(RepeatStatus.FINISHED, status);
+        File outputFile = new File(filePath, outputFileName + "_" + getCurrentDate() + fileSuffix);
+        assertFalse(outputFile.exists());
     }
 
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully3() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("STMT_BAL");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("BAL", result.getAmtType());
+    @Test(expected = Exception.class)
+    public void testExecute_FileWritingFailure() throws Exception {
+        when(executionContext.getString(UdapRequestBatchConstants.DIRECTORY_PATH)).thenReturn(filePath);
+        when(executionContext.getString(UdapRequestBatchConstants.EXTENSION)).thenReturn(fileSuffix);
+        File outputFile = new File(filePath, outputFileName + "_" + getCurrentDate() + fileSuffix);
+        outputFile.createNewFile();
+        outputFile.setWritable(false);
+        tasklet.execute(stepContribution, chunkContext);
     }
 
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully4() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("CUR_BAL");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("FIX", result.getAmtType());
+    private void createSampleFile(String fileName, List<String> lines) throws Exception {
+        Path filePath = Paths.get(this.filePath + fileName);
+        Files.write(filePath, lines);
     }
 
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully5() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("OTHER_AMT");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("FIX", result.getAmtType());
-    }
-
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully6() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("CONST_RECUR");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("FIX", result.getAmtType());
-    }
-
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully7() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType("OTHER");
-        dto.setProcessCode("P00");
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("CCA", result.getAmtType());
+    private String getCurrentDate() {
+        return new SimpleDateFormat("yyyyMMdd").format(new Date());
     }
 }
