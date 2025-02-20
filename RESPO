@@ -1,15 +1,8 @@
 package com.bofa.sst.batch.core;
 
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.stereotype.Component;
-import lombok.extern.log4j.Log4j2;
+public class UdapRequestBatchConstants {
 
-@Component
-@Log4j2
-public class UdapRequestPaymentInfoProcessor
-        implements ItemProcessor<UdapRequestPaymentInfoDTO, UdapRequestPaymentInfoDTO> {
-
-    // Existing Constants
+    // Payment Types
     public static final String SST_AUTOPAY_PIF = "A";
     public static final String SST_ONETIME_PIF = "B";
     public static final String SST_AUTOPAY_MIN = "C";
@@ -18,108 +11,25 @@ public class UdapRequestPaymentInfoProcessor
     public static final String SST_FIXED_ONETIME = "F";
     public static final String SST_RMPD_ONETIME = "H";
     public static final String SST_OTHER = "3";
-
-    // Newly Added Constants
     public static final String SST_REM_STMT_BAL_ONETIME = "G";
     public static final String SST_AUTOPAY_ISB = "I";
     public static final String SST_ONETIME_ISB = "J";
     public static final String SST_REM_ISB = "K";
 
-    @Override
-    public UdapRequestPaymentInfoDTO process(UdapRequestPaymentInfoDTO dto) throws Exception {
-        if (dto.getRecurAmtType() == null) {
-            log.info("RecurAmtType value is null for item with ID: {}");
-            return null;
-        }
+    // Process Codes
+    public static final String PROCESS_CODE_P00 = "P00";
+    public static final String PROCESS_CODE_P03 = "P03";
 
-        UdapRequestPaymentInfoDTO stagingTable = new UdapRequestPaymentInfoDTO();
-        log.info("main table data is: {}", dto);
+    // Amount Types (Mapped to SST_REFERENCE_AREA(49.03))
+    public static final String AMT_TYPE_MIN = "MIN";
+    public static final String AMT_TYPE_BAL = "BAL";
+    public static final String AMT_TYPE_FIX = "FIX";
+    public static final String AMT_TYPE_CCA = "CCA";
+    public static final String AMT_TYPE_RSB = "RSB";
+    public static final String AMT_TYPE_ISB = "ISB";
+    public static final String AMT_TYPE_RIS = "RIS";
 
-        switch (dto.getRecurAmtType()) {
-            case "REM_STMT_BAL":
-                log.info("ENTERED INTO SWITCH CASE REM_STMT_BAL {}", dto.getProcessCode());
-                if (dto.getPmtAmt() == null) {
-                    log.info("Payment Amount is null for item with ID: {}");
-                    return null;
-                }
-                stagingTable.setPaymentType(SST_REM_STMT_BAL_ONETIME);
-                stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
-                stagingTable.setAmtType("RSB");
-                break;
-
-            case "ISB":
-                log.info("ENTERED INTO SWITCH CASE ISB {}", dto.getProcessCode());
-                if (dto.getProcessCode() == null || dto.getMinStmtCrtRegAmt() == null) {
-                    log.info("ProcessCode or MinStmtCrtRegAmt is null for item with ID: {}");
-                    return null;
-                }
-                stagingTable.setPaymentType("P00".equals(dto.getProcessCode()) ? SST_ONETIME_ISB : SST_AUTOPAY_ISB);
-                stagingTable.setOrigPaymentAmt(dto.getMinStmtCrtRegAmt());
-                stagingTable.setAmtType("ISB");
-                break;
-
-            case "REM_ISB":
-                log.info("ENTERED INTO SWITCH CASE REM_ISB {}", dto.getProcessCode());
-                if (dto.getPmtAmt() == null) {
-                    log.info("Payment Amount is null for item with ID: {}");
-                    return null;
-                }
-                stagingTable.setPaymentType(SST_REM_ISB);
-                stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
-                stagingTable.setAmtType("RIS");
-                break;
-
-            case "OTHER":
-                log.info("ENTERED INTO SWITCH CASE OTHER {}", dto.getProcessCode());
-                if (dto.getProcessCode() == null) {
-                    log.info("ProcessCode is null for item with ID: {}");
-                    return null;
-                }
-                if ("P00".equals(dto.getProcessCode())) {
-                    stagingTable.setPaymentType(SST_FIXED_ONETIME);
-                } else {
-                    stagingTable.setPaymentType(SST_FIXED_RECCUR);
-                }
-                if ("P03".equals(dto.getProcessCode()) && dto.getRmanOccur() == 1) {
-                    stagingTable.setOrigPaymentAmt(dto.getFinalAmt());
-                }
-                if (!"P03".equals(dto.getProcessCode()) || ("P03".equals(dto.getProcessCode()) && dto.getRemainOccurrences() != 1)) {
-                    stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
-                }
-                stagingTable.setAmtType("CCA");
-                break;
-
-            default:
-                break;
-        }
-
-        // Assigning additional fields
-        stagingTable.setSystemId(dto.getSystemId());
-        stagingTable.setSchdId(dto.getSchdId());
-        stagingTable.setSstKey(dto.getSstKey());
-        stagingTable.setSystemIdentifier(dto.getSystemIdentifier());
-        stagingTable.setRemainOccurrences(dto.getRmanOccur());
-        stagingTable.setAcctNo(dto.getAcctNo());
-        stagingTable.setTransferReferenceId(dto.getTransRefId());
-        stagingTable.setConfirmationNbr(dto.getConfirmNo());
-        stagingTable.setSchdId(dto.getSchdId());
-        stagingTable.setInAmt(dto.getInAmt());
-        stagingTable.setNextTranDate(dto.getNextTranDt());
-        stagingTable.setProcessCode(dto.getProcessCode());
-        stagingTable.setOutFileName(dto.getOutFileName());
-        stagingTable.setInFileName(dto.getInFileName());
-        stagingTable.setActionInd(dto.getActionInd());
-        stagingTable.setResponsePrcsStat(dto.getResponsePrcsStat());
-        stagingTable.setOutPrcsStat(dto.getOutPrcsStat());
-        stagingTable.setFreeTextField1(dto.getFreeTextField1());
-        stagingTable.setFreeTextField2(dto.getFreeTextField2());
-        stagingTable.setFreeTextField3(dto.getFreeTextField3());
-        stagingTable.setCreatedBy(dto.getCreatedBy());
-        stagingTable.setCreateTs(dto.getCreateTs());
-
-        log.info("staging table data is is: {}", stagingTable);
-        log.info("Processed item with ID: {}", System.identityHashCode(stagingTable));
-
-        return stagingTable;
-    }
+    // Logging Messages
+    public static final String LOG_PROCESSING = "ENTERED INTO SWITCH CASE {} {}";
+    public static final String LOG_NULL_VALUE = "{} value is null for item with ID: {}";
 }
