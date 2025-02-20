@@ -14,10 +14,10 @@ public class UdapRequestPaymentInfoProcessorTest {
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully123() throws Exception {
+    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully() throws Exception {
         UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_CONST_RECUR);
-        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setRecurAmtType("OTHER");
+        dto.setProcessCode("P00");
         dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
         dto.setAdditionalAmt(new BigDecimal("50.00"));
         dto.setMinOrRecurAmt(new BigDecimal("30.00"));
@@ -31,27 +31,10 @@ public class UdapRequestPaymentInfoProcessorTest {
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully716() throws Exception {
+    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully124() throws Exception {
         UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_OTHER);
-        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
-        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
-        dto.setAdditionalAmt(new BigDecimal("50.00"));
-        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
-        dto.setPmtAmt(new BigDecimal("200.00"));
-        dto.setTransRefId("ABC123");
-
-        UdapRequestPaymentInfoDTO result = processor.process(dto);
-
-        assertNotNull(result);
-        assertEquals("CCA", result.getAmtType());
-    }
-
-    @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully722() throws Exception {
-        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_CONST_RECUR);
-        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setRecurAmtType("CONST_RECUR");
+        dto.setProcessCode("P00");
         dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
         dto.setAdditionalAmt(new BigDecimal("50.00"));
         dto.setMinOrRecurAmt(new BigDecimal("30.00"));
@@ -65,10 +48,10 @@ public class UdapRequestPaymentInfoProcessorTest {
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully983() throws Exception {
+    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully9891() throws Exception {
         UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_OTHER);
-        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setRecurAmtType("MIN");
+        dto.setProcessCode("P01");
         dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
         dto.setAdditionalAmt(new BigDecimal("50.00"));
         dto.setMinOrRecurAmt(new BigDecimal("30.00"));
@@ -78,14 +61,14 @@ public class UdapRequestPaymentInfoProcessorTest {
         UdapRequestPaymentInfoDTO result = processor.process(dto);
 
         assertNotNull(result);
-        assertEquals("FIX", result.getAmtType());
+        assertEquals("MIN", result.getAmtType());
     }
 
     @Test
-    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully896() throws Exception {
+    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully90800() throws Exception {
         UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
-        dto.setRecurAmtType(UdapRequestBatchConstants.CASE_CUR_BAL);
-        dto.setProcessCode(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        dto.setRecurAmtType("MIN_ADDL");
+        dto.setProcessCode("P00");
         dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
         dto.setAdditionalAmt(new BigDecimal("50.00"));
         dto.setMinOrRecurAmt(new BigDecimal("30.00"));
@@ -95,6 +78,23 @@ public class UdapRequestPaymentInfoProcessorTest {
         UdapRequestPaymentInfoDTO result = processor.process(dto);
 
         assertNotNull(result);
-        assertEquals("FIX", result.getAmtType());
+        assertEquals("MIN", result.getAmtType());
+    }
+
+    @Test
+    public void whenAllRequiredFieldsAreNonNull_thenProcessSuccessfully9897() throws Exception {
+        UdapRequestPaymentInfoDTO dto = new UdapRequestPaymentInfoDTO();
+        dto.setRecurAmtType("STMT_BAL");
+        dto.setProcessCode("P00");
+        dto.setMinStmtCrtRegAmt(new BigDecimal("100.00"));
+        dto.setAdditionalAmt(new BigDecimal("50.00"));
+        dto.setMinOrRecurAmt(new BigDecimal("30.00"));
+        dto.setPmtAmt(new BigDecimal("200.00"));
+        dto.setTransRefId("ABC123");
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+
+        assertNotNull(result);
+        assertEquals("BAL", result.getAmtType());
     }
 }
