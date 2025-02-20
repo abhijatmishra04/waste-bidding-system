@@ -1,17 +1,142 @@
+package com.bofa.sst.batch.core;
 
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+import lombok.extern.log4j.Log4j2;
 
-    public static final String CHUNK_SIZE = "sda.response.batch.chunk.size";
-    public static final String PARTITION_GRID_SIZE = "sda.response.batch.partition.grid.size";
-    public static final String THREAD_CORE_POOL_SIZE = "sda.response.batch.thread.core.pool.size";
-    public static final String THREAD_MAX_POOL_SIZE = "sda.response.batch.thread.max.pool.size";
-    public static final String BATCH_QUEUE_CAPACITY = "sda.response.batch.queue.capacity";
-    public static final String THREAD_PREFIX_NAME = "sda.response.batch.thread.prefix.name";
-    public static final String PARTITION_TYPE = "sda.response.batch.partition.type";
+// Custom Exception Class
+class ProcessingException extends Exception {
+    public ProcessingException(String message) {
+        super(message);
+    }
+}
 
-Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.CHUNK_SIZE));
-Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.PARTITION_GRID_SIZE));
-Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_CORE_POOL_SIZE));
-Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_MAX_POOL_SIZE));
-Integer.parseInt(dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.BATCH_QUEUE_CAPACITY));
-dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.THREAD_PREFIX_NAME);
-dynamicConfigPropRepository.findPropertyValueByPropertyName(BatchConstants.PARTITION_TYPE);
+@Component
+@Log4j2
+public class UdapRequestPaymentInfoProcessor
+        implements ItemProcessor<UdapRequestPaymentInfoDTO, UdapRequestPaymentInfoDTO> {
+
+    // Existing Constants
+    public static final String SST_AUTOPAY_PIF = "A";
+    public static final String SST_ONETIME_PIF = "B";
+    public static final String SST_AUTOPAY_MIN = "C";
+    public static final String SST_ONETIME_MIN = "D";
+    public static final String SST_FIXED_RECCUR = "E";
+    public static final String SST_FIXED_ONETIME = "F";
+    public static final String SST_RMPD_ONETIME = "H";
+    public static final String SST_OTHER = "3";
+
+    // Newly Added Constants
+    public static final String SST_REM_STMT_BAL_ONETIME = "G";
+    public static final String SST_AUTOPAY_ISB = "I";
+    public static final String SST_ONETIME_ISB = "J";
+    public static final String SST_REM_ISB = "K";
+
+    @Override
+    public UdapRequestPaymentInfoDTO process(UdapRequestPaymentInfoDTO dto) throws ProcessingException {
+        try {
+            if (dto == null) {
+                throw new ProcessingException("Input DTO is null.");
+            }
+
+            if (dto.getRecurAmtType() == null) {
+                throw new ProcessingException("RecurAmtType value is null for item.");
+            }
+
+            UdapRequestPaymentInfoDTO stagingTable = new UdapRequestPaymentInfoDTO();
+            log.info("Processing main table data: {}", dto);
+
+            switch (dto.getRecurAmtType()) {
+                case "REM_STMT_BAL":
+                    log.info("Processing REM_STMT_BAL for ProcessCode: {}", dto.getProcessCode());
+                    if (dto.getPmtAmt() == null) {
+                        throw new ProcessingException("Payment Amount is null for item.");
+                    }
+                    stagingTable.setPaymentType(SST_REM_STMT_BAL_ONETIME);
+                    stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
+                    stagingTable.setAmtType("RSB");
+                    break;
+
+                case "ISB":
+                    log.info("Processing ISB for ProcessCode: {}", dto.getProcessCode());
+                    if (dto.getProcessCode() == null || dto.getMinStmtCrtRegAmt() == null) {
+                        throw new ProcessingException("ProcessCode or MinStmtCrtRegAmt is null for item.");
+                    }
+                    stagingTable.setPaymentType("P00".equals(dto.getProcessCode()) ? SST_ONETIME_ISB : SST_AUTOPAY_ISB);
+                    stagingTable.setOrigPaymentAmt(dto.getMinStmtCrtRegAmt());
+                    stagingTable.setAmtType("ISB");
+                    break;
+
+                case "REM_ISB":
+                    log.info("Processing REM_ISB for ProcessCode: {}", dto.getProcessCode());
+                    if (dto.getPmtAmt() == null) {
+                        throw new ProcessingException("Payment Amount is null for item.");
+                    }
+                    stagingTable.setPaymentType(SST_REM_ISB);
+                    stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
+                    stagingTable.setAmtType("RIS");
+                    break;
+
+                case "OTHER":
+                    log.info("Processing OTHER for ProcessCode: {}", dto.getProcessCode());
+                    if (dto.getProcessCode() == null) {
+                        throw new ProcessingException("ProcessCode is null for item.");
+                    }
+                    if ("P00".equals(dto.getProcessCode())) {
+                        stagingTable.setPaymentType(SST_FIXED_ONETIME);
+                    } else {
+                        stagingTable.setPaymentType(SST_FIXED_RECCUR);
+                    }
+                    if ("P03".equals(dto.getProcessCode()) && dto.getRmanOccur() == 1) {
+                        stagingTable.setOrigPaymentAmt(dto.getFinalAmt());
+                    }
+                    if (!"P03".equals(dto.getProcessCode()) || ("P03".equals(dto.getProcessCode()) && dto.getRemainOccurrences() != 1)) {
+                        stagingTable.setOrigPaymentAmt(dto.getPmtAmt());
+                    }
+                    stagingTable.setAmtType("CCA");
+                    break;
+
+                default:
+                    log.warn("Unhandled RecurAmtType: {}", dto.getRecurAmtType());
+                    throw new ProcessingException("Unsupported RecurAmtType: " + dto.getRecurAmtType());
+            }
+
+            // Assigning additional fields
+            stagingTable.setSystemId(dto.getSystemId());
+            stagingTable.setSchdId(dto.getSchdId());
+            stagingTable.setSstKey(dto.getSstKey());
+            stagingTable.setSystemIdentifier(dto.getSystemIdentifier());
+            stagingTable.setRemainOccurrences(dto.getRmanOccur());
+            stagingTable.setAcctNo(dto.getAcctNo());
+            stagingTable.setTransferReferenceId(dto.getTransRefId());
+            stagingTable.setConfirmationNbr(dto.getConfirmNo());
+            stagingTable.setSchdId(dto.getSchdId());
+            stagingTable.setInAmt(dto.getInAmt());
+            stagingTable.setNextTranDate(dto.getNextTranDt());
+            stagingTable.setProcessCode(dto.getProcessCode());
+            stagingTable.setOutFileName(dto.getOutFileName());
+            stagingTable.setInFileName(dto.getInFileName());
+            stagingTable.setActionInd(dto.getActionInd());
+            stagingTable.setResponsePrcsStat(dto.getResponsePrcsStat());
+            stagingTable.setOutPrcsStat(dto.getOutPrcsStat());
+            stagingTable.setFreeTextField1(dto.getFreeTextField1());
+            stagingTable.setFreeTextField2(dto.getFreeTextField2());
+            stagingTable.setFreeTextField3(dto.getFreeTextField3());
+            stagingTable.setCreatedBy(dto.getCreatedBy());
+            stagingTable.setCreateTs(dto.getCreateTs());
+
+            log.info("Staging table data: {}", stagingTable);
+            log.info("Processed item with ID: {}", System.identityHashCode(stagingTable));
+
+            return stagingTable;
+        } catch (ProcessingException e) {
+            log.error("ProcessingException occurred: {}", e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error while processing item: {}", e.getMessage(), e);
+            throw new ProcessingException("Unexpected error during processing.");
+        }
+    }
+}
+
+    
