@@ -1,48 +1,102 @@
-package com.bofa.sst.batch.core;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-public class UdapRequestBatchConstants {
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
-    // Payment Types
-    public static final String SST_AUTOPAY_PIF = "A";
-    public static final String SST_ONETIME_PIF = "B";
-    public static final String SST_AUTOPAY_MIN = "C";
-    public static final String SST_ONETIME_MIN = "D";
-    public static final String SST_FIXED_RECCUR = "E";
-    public static final String SST_FIXED_ONETIME = "F";
-    public static final String SST_RMPD_ONETIME = "H";
-    public static final String SST_OTHER = "3";
-    public static final String SST_REM_STMT_BAL_ONETIME = "G";
-    public static final String SST_AUTOPAY_ISB = "I";
-    public static final String SST_ONETIME_ISB = "J";
-    public static final String SST_REM_ISB = "K";
+public class UdapRequestPaymentInfoProcessorTest {
 
-    // Process Codes
-    public static final String PROCESS_CODE_P00 = "P00";
-    public static final String PROCESS_CODE_P03 = "P03";
+    @InjectMocks
+    private UdapRequestPaymentInfoProcessor processor;
 
-    // Amount Types (Mapped to SST_REFERENCE_AREA(49.03))
-    public static final String AMT_TYPE_MIN = "MIN";
-    public static final String AMT_TYPE_BAL = "BAL";
-    public static final String AMT_TYPE_FIX = "FIX";
-    public static final String AMT_TYPE_CCA = "CCA";
-    public static final String AMT_TYPE_RSB = "RSB";
-    public static final String AMT_TYPE_ISB = "ISB";
-    public static final String AMT_TYPE_RIS = "RIS";
+    @Mock
+    private UdapRequestPaymentInfoDTO dto;
 
-    // Case Values for Switch Statement
-    public static final String CASE_MIN = "MIN";
-    public static final String CASE_MIN_ADDL = "MIN_ADDL";
-    public static final String CASE_STMT_BAL = "STMT_BAL";
-    public static final String CASE_CUR_BAL = "CUR_BAL";
-    public static final String CASE_OTHER_AMT = "OTHER_AMT";
-    public static final String CASE_CONST_RECUR = "CONST_RECUR";
-    public static final String CASE_OTHER = "OTHER";
-    public static final String CASE_RMPD = "RMPD";
-    public static final String CASE_REM_STMT_BAL = "REM_STMT_BAL";
-    public static final String CASE_ISB = "ISB";
-    public static final String CASE_REM_ISB = "REM_ISB";
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+    }
 
-    // Logging Messages
-    public static final String LOG_PROCESSING = "ENTERED INTO SWITCH CASE {} {}";
-    public static final String LOG_NULL_VALUE = "{} value is null for item with ID: {}";
+    /** Test Case: REM_STMT_BAL **/
+    @Test
+    public void testProcess_RemStmtBal_Success() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
+        when(dto.getPmtAmt()).thenReturn(100.00);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+
+        assertNotNull(result);
+        assertEquals(UdapRequestBatchConstants.SST_REM_STMT_BAL_ONETIME, result.getPaymentType());
+        assertEquals(Double.valueOf(100.00), result.getOrigPaymentAmt());
+        assertEquals(UdapRequestBatchConstants.AMT_TYPE_RSB, result.getAmtType());
+    }
+
+    @Test
+    public void testProcess_RemStmtBal_NullPmtAmt() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_STMT_BAL);
+        when(dto.getPmtAmt()).thenReturn(null);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+        assertNull(result);
+    }
+
+    /** Test Case: ISB **/
+    @Test
+    public void testProcess_ISB_Success() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
+        when(dto.getProcessCode()).thenReturn(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        when(dto.getMinStmtCrtRegAmt()).thenReturn(200.00);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+
+        assertNotNull(result);
+        assertEquals(UdapRequestBatchConstants.SST_ONETIME_ISB, result.getPaymentType());
+        assertEquals(Double.valueOf(200.00), result.getOrigPaymentAmt());
+        assertEquals(UdapRequestBatchConstants.AMT_TYPE_ISB, result.getAmtType());
+    }
+
+    @Test
+    public void testProcess_ISB_NullProcessCode() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
+        when(dto.getProcessCode()).thenReturn(null);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+        assertNull(result);
+    }
+
+    @Test
+    public void testProcess_ISB_NullMinStmtCrtRegAmt() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_ISB);
+        when(dto.getProcessCode()).thenReturn(UdapRequestBatchConstants.PROCESS_CODE_P00);
+        when(dto.getMinStmtCrtRegAmt()).thenReturn(null);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+        assertNull(result);
+    }
+
+    /** Test Case: REM_ISB **/
+    @Test
+    public void testProcess_RemIsb_Success() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_ISB);
+        when(dto.getPmtAmt()).thenReturn(300.00);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+
+        assertNotNull(result);
+        assertEquals(UdapRequestBatchConstants.SST_REM_ISB, result.getPaymentType());
+        assertEquals(Double.valueOf(300.00), result.getOrigPaymentAmt());
+        assertEquals(UdapRequestBatchConstants.AMT_TYPE_RIS, result.getAmtType());
+    }
+
+    @Test
+    public void testProcess_RemIsb_NullPmtAmt() throws Exception {
+        when(dto.getRecurAmtType()).thenReturn(UdapRequestBatchConstants.CASE_REM_ISB);
+        when(dto.getPmtAmt()).thenReturn(null);
+
+        UdapRequestPaymentInfoDTO result = processor.process(dto);
+        assertNull(result);
+    }
 }
