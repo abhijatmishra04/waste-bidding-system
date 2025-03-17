@@ -1,15 +1,25 @@
-@ExceptionHandler(SdaRequestDatabaseException.class)
-public ResponseEntity<JobError> handleDatabaseException(SdaRequestDatabaseException exception) {
-    log.error(LoggingUtil.logJobMessage(
-            exception.getJobErrorEnum().getErrorCode(), 
-            exception.getMessage()
-    ));
+package com.bofa.sst.batch.util;
 
-    JobError jobError = new JobError(
-            exception.getJobErrorEnum().getErrorCode(),
-            exception.getJobErrorEnum().getErrorDescription(),
-            exception.getJobErrorEnum().getStatusCode() // Keep it as String
-    );
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
-    return new ResponseEntity<>(jobError, HttpStatus.BAD_REQUEST);
+/**
+ * This enum is used to store the error messages
+ * @author Chandrasekar
+ */
+@Getter
+@AllArgsConstructor
+public enum JobErrorEnum {
+
+    VALIDATION_FAILED("1000", "Validation is failed", "400"), // Occurs when input validation fails
+    UNEXPECTED_ERROR("1001", "Unexpected Error has occurred", "400"), // Used for unknown/unexpected errors
+    FILE_NOT_FOUND("1002", "File not found", "404"), // Used when file is missing
+    JOBTYPE_ERROR("1003", "Job Type is not valid", "400"), // Occurs when an invalid job type is passed
+    PARSE_EXCEPTION("1004", "Parse exception occurred", "400"), // Used for parsing errors
+    DATA_ACCESS_EXCEPTION("1005", "Datasource must not be null", "500"), // Data source misconfiguration
+    SQL_EXCEPTION("1006", "SQL Statement error occurred", "500"); // SQL statement failure
+
+    private final String errorCode;
+    private final String errorDescription;
+    private final String statusCode;
 }
