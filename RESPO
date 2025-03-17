@@ -162,6 +162,70 @@ public class DataWriteException extends RuntimeException {
         super(err);
         this.jobErrorEnum = jobErrorEnum;
     }
+@Override
+public void write(List<? extends PaymentInfoDTO> items) throws Exception {
+    try {
+        log.info(LoggingUtil.logJobMessage(
+            "DATA_WRITE",
+            "PAYMENT_PROCESS",
+            "Starting data write operation"
+        ));
+
+        items.forEach(paymentInfoDTO -> {
+            try {
+                log.info(LoggingUtil.logJobMessage(
+                    "DATA_WRITE",
+                    paymentInfoDTO.getConfirmationNbr(),
+                    "Writing data: " + paymentInfoDTO
+                ));
+
+                Object[] params = new Object[]{
+                    paymentInfoDTO.getPaymentAmount(),
+                    paymentInfoDTO.getPaymentAmount(),
+                    paymentInfoDTO.getTotalAmt(),
+                    paymentInfoDTO.getPaymentAmount(),
+                    paymentInfoDTO.getUpdDtBy(),
+                    paymentInfoDTO.getConfirmationNbr()
+                };
+
+                int count = jdbcTemplate.update(SQLFactory.UPDATE_SCHEDULE_M2M_1, params);
+
+                log.info(LoggingUtil.logJobMessage(
+                    "DATA_WRITE",
+                    paymentInfoDTO.getConfirmationNbr(),
+                    "Update query executed. Rows affected: " + count
+                ));
+
+                // Process audit logs
+                List<ScheduleM2mLogDto> logDtoList = auditService.process(paymentInfoDTO);
+                logDtoList.forEach(this::insertIntoScheduleM2mLog);
+
+            } catch (Exception e) {
+                log.error(LoggingUtil.logJobMessage(
+                    "DATA_WRITE",
+                    paymentInfoDTO.getConfirmationNbr(),
+                    "Failed to update payment data: " + e.getMessage()
+                ));
+                throw new DataWriteException(JobErrorEnum.DATA_WRITE_FAILED, e);
+            }
+        });
+
+        log.info(LoggingUtil.logJobMessage(
+            "DATA_WRITE",
+            "PAYMENT_PROCESS",
+            "Data write operation completed successfully"
+        ));
+
+    } catch (Exception e) {
+        log.error(LoggingUtil.logJobMessage(
+            "DATA_WRITE",
+            "PAYMENT_PROCESS",
+            "Failed to complete data write operation: " + e.getMessage()
+        ));
+        throw new DataWriteException(JobErrorEnum.DATA_WRITE_FAILED, e);
+    }
+}
+
 
     public DataWriteException(JobErrorEnum jobErrorEnum) {
         this.jobErrorEnum = jobErrorEnum;
