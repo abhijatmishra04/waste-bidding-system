@@ -1,5 +1,5 @@
-@ExceptionHandler(PaymentProcessingException.class)
-public ResponseEntity<JobError> handlePaymentProcessingException(PaymentProcessingException exception) {
+@ExceptionHandler(FileValidationException.class)
+public ResponseEntity<JobError> handleFileValidationException(FileValidationException exception) {
     log.error(LoggingUtil.logJobMessage(
             exception.getJobErrorEnum().getErrorCode(),
             exception.getMessage()
@@ -14,174 +14,141 @@ public ResponseEntity<JobError> handlePaymentProcessingException(PaymentProcessi
     return new ResponseEntity<>(jobError, HttpStatus.INTERNAL_SERVER_ERROR);
 }
 
-PAYMENT_FETCH_FAILED("1008", "Failed to fetch payment details", "500"),
-PAYMENT_PROCESS_FAILED("1009", "Failed to process payment info", "500");
-
-
+@StepScope
 @Component
-@Log4j2
-public class PaymentInfoProcessor implements ItemProcessor<PaymentInfoDTO, PaymentInfoDTO> {
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
+public class SdaResponseFileValidationTasklet implements Tasklet {
 
     @Override
-    public PaymentInfoDTO process(PaymentInfoDTO sda) throws Exception {
+    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+        ExecutionContext executionContext = stepContribution.getStepExecution().getJobExecution().getExecutionContext();
+
+        String responseDirectoryPath = executionContext.getString(SdaResponseBatchConstants.RESPONSE_DIRECTORY_PATH);
+        String responseInputFilePrefix = executionContext.getString(SdaResponseBatchConstants.RESPONSE_INPUT_FILE_PREFIX);
+        String requestDirectoryPath = executionContext.getString(SdaResponseBatchConstants.REQUEST_DIRECTORY_PATH);
+        String requestInputFilePrefix = executionContext.getString(SdaResponseBatchConstants.REQUEST_INPUT_FILE_PREFIX);
+
+        log.debug(LoggingUtil.logJobMessage(
+                "FILE_VALIDATION",
+                responseInputFilePrefix,
+                "Response Directory Path: " + responseDirectoryPath + ", Response Prefix: " + responseInputFilePrefix
+        ));
+
+        log.debug(LoggingUtil.logJobMessage(
+                "FILE_VALIDATION",
+                requestInputFilePrefix,
+                "Request Directory Path: " + requestDirectoryPath + ", Request Prefix: " + requestInputFilePrefix
+        ));
+
+        String responseFilePath = "";
+        String requestFilePath = "";
+
         try {
+            responseFilePath = FileUtils.findTodaysFile(
+                    responseDirectoryPath, 
+                    responseInputFilePrefix, 
+                    SdaResponseBatchConstants.INPUT_FILE_EXTENSION
+            );
+
             log.info(LoggingUtil.logJobMessage(
-                "PAYMENT_PROCESS",
-                sda.getConfirmationNbr(),
-                "Processing PaymentInfoDTO: " + sda
+                    "FILE_VALIDATION",
+                    responseInputFilePrefix,
+                    "Response File Path: " + responseFilePath
             ));
 
-            if ("H".equals(sda.getDetailRecordId()) || "T".equals(sda.getDetailRecordId())) {
+            try (BufferedInputStream bisResponse = new BufferedInputStream(new FileInputStream(new File(responseFilePath)))) {
+                Long responseTotalRecords = (long) (bisResponse.readAllBytes().length);
+                executionContext.put(SdaResponseBatchConstants.RESPONSE_COUNT, responseTotalRecords);
+
                 log.info(LoggingUtil.logJobMessage(
-                    "PAYMENT_PROCESS",
-                    sda.getConfirmationNbr(),
-                    "Skipping Header or Trailer Record: " + sda.getDetailRecordId()
-                ));
-                return null;
-            }
-
-            List<PaymentInfoDTO> paymentInfoDTOs = fetchDataFromMainTables(sda);
-            log.info(LoggingUtil.logJobMessage(
-                "PAYMENT_PROCESS",
-                sda.getConfirmationNbr(),
-                "Fetched [" + paymentInfoDTOs.size() + "] records from main table"
-            ));
-
-            for (PaymentInfoDTO dataFromTable : paymentInfoDTOs) {
-                sda.setPaidAmt(dataFromTable.getPaidAmt());
-                sda.setTotalAmt(dataFromTable.getTotalAmt());
-            }
-
-            if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal oldPaymentAmount = sda.getPaymentAmount();
-                sda.setOldPaymentAmount(oldPaymentAmount);
-                log.info(LoggingUtil.logJobMessage(
-                    "PAYMENT_PROCESS",
-                    sda.getConfirmationNbr(),
-                    "Stored old payment amount: " + oldPaymentAmount
+                        "FILE_VALIDATION",
+                        responseInputFilePrefix,
+                        "Response Total Records: " + responseTotalRecords
                 ));
             }
-
-            // Processing based on account status
-            if ("A".equals(sda.getAcctStatus()) || "P".equals(sda.getAcctStatus())) {
-                log.info(LoggingUtil.logJobMessage(
-                    "PAYMENT_PROCESS",
-                    sda.getConfirmationNbr(),
-                    "Processing Account Status: " + sda.getAcctStatus()
-                ));
-
-                if (sda.getIalsBalance().compareTo(BigDecimal.ZERO) > 0) {
-                    sda.setPaymentAmount(sda.getIalsBalance());
-                    log.info(LoggingUtil.logJobMessage(
-                        "PAYMENT_PROCESS",
-                        sda.getConfirmationNbr(),
-                        "Payment Amount updated to IALS_BALANCE: " + sda.getIalsBalance()
-                    ));
-                }
-
-                BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
-                sda.setTotalAmt(newTotalAmount);
-                log.info(LoggingUtil.logJobMessage(
-                    "PAYMENT_PROCESS",
-                    sda.getConfirmationNbr(),
-                    "Updated Total Amount: " + newTotalAmount
-                ));
-            }
-
-            if ("C".equals(sda.getAcctStatus())) {
-                log.info(LoggingUtil.logJobMessage(
-                    "PAYMENT_PROCESS",
-                    sda.getConfirmationNbr(),
-                    "Processing Account Status: C"
-                ));
-
-                if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) == 0) {
-                    BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
-                    sda.setTotalAmt(newTotalAmount);
-                    log.info(LoggingUtil.logJobMessage(
-                        "PAYMENT_PROCESS",
-                        sda.getConfirmationNbr(),
-                        "Updated Total Amount for Status 'C': " + newTotalAmount
-                    ));
-                } else {
-                    sda.setPaymentAmount(BigDecimal.ZERO);
-                    log.info(LoggingUtil.logJobMessage(
-                        "PAYMENT_PROCESS",
-                        sda.getConfirmationNbr(),
-                        "Payment Amount set to zero for Status 'C'"
-                    ));
-                }
-            }
-
-            sda.setUpdDtBy(SdaResponseBatchConstants.UPDT_BY_SDARETN);
-            log.info(LoggingUtil.logJobMessage(
-                "PAYMENT_PROCESS",
-                sda.getConfirmationNbr(),
-                "Final processed PaymentInfoDTO: " + sda
-            ));
-
-            return sda;
         } catch (Exception e) {
             log.error(LoggingUtil.logJobMessage(
-                "PAYMENT_PROCESS",
-                sda.getConfirmationNbr(),
-                "Error processing PaymentInfoDTO: " + e.getMessage()
+                    "FILE_VALIDATION",
+                    responseInputFilePrefix,
+                    "Failed to read response file: " + e.getMessage()
             ));
-            throw new PaymentProcessingException(JobErrorEnum.PAYMENT_PROCESS_FAILED, e);
+            throw new FileValidationException(JobErrorEnum.FILE_READ_FAILED, e);
         }
-    }
 
-    public List<PaymentInfoDTO> fetchDataFromMainTables(PaymentInfoDTO sda) {
         try {
-            log.info(LoggingUtil.logJobMessage(
-                "PAYMENT_FETCH",
-                sda.getConfirmationNbr(),
-                "Fetching data from main tables"
-            ));
-
-            RowMapper<PaymentInfoDTO> rowMapper = (rs, rowNum) -> {
-                PaymentInfoDTO sdaProcessedData = new PaymentInfoDTO();
-                sdaProcessedData.setTotalAmt(rs.getBigDecimal("TOT_AM"));
-                sdaProcessedData.setPaidAmt(rs.getBigDecimal("PD_AM"));
-                return sdaProcessedData;
-            };
-
-            Object[] params = new Object[]{sda.getConfirmationNbr()};
-            List<PaymentInfoDTO> list = jdbcTemplate.query(SQLFactory.SELECT_SCHEDULE_M2M, rowMapper, params);
+            requestFilePath = FileUtils.findTodaysFile(
+                    requestDirectoryPath, 
+                    requestInputFilePrefix, 
+                    SdaResponseBatchConstants.INPUT_FILE_EXTENSION
+            );
 
             log.info(LoggingUtil.logJobMessage(
-                "PAYMENT_FETCH",
-                sda.getConfirmationNbr(),
-                "Fetched [" + list.size() + "] records from database"
+                    "FILE_VALIDATION",
+                    requestInputFilePrefix,
+                    "Request File Path: " + requestFilePath
             ));
-
-            return list;
-
         } catch (Exception e) {
             log.error(LoggingUtil.logJobMessage(
-                "PAYMENT_FETCH",
-                sda.getConfirmationNbr(),
-                "Error fetching data from main tables: " + e.getMessage()
+                    "FILE_VALIDATION",
+                    requestInputFilePrefix,
+                    "Failed to read request file: " + e.getMessage()
             ));
-            throw new PaymentProcessingException(JobErrorEnum.PAYMENT_FETCH_FAILED, e);
+            throw new FileValidationException(JobErrorEnum.FILE_READ_FAILED, e);
         }
+
+        // Check if both files exist
+        if (responseFilePath == null || requestFilePath == null) {
+            stepContribution.setExitStatus(ExitStatus.FAILED);
+            return RepeatStatus.FINISHED;
+        }
+
+        try {
+            log.info(LoggingUtil.logJobMessage(
+                    "FILE_VALIDATION",
+                    responseInputFilePrefix,
+                    "Locking response file: " + responseFilePath
+            ));
+
+            FileUtils.lockFile(responseDirectoryPath, responseInputFilePrefix, SdaResponseBatchConstants.INPUT_FILE_EXTENSION);
+
+            log.info(LoggingUtil.logJobMessage(
+                    "FILE_VALIDATION",
+                    requestInputFilePrefix,
+                    "Locking request file: " + requestFilePath
+            ));
+
+            FileUtils.lockFile(requestDirectoryPath, requestInputFilePrefix, SdaResponseBatchConstants.INPUT_FILE_EXTENSION);
+        } catch (Exception e) {
+            log.error(LoggingUtil.logJobMessage(
+                    "FILE_VALIDATION",
+                    responseInputFilePrefix,
+                    "Failed to lock files: " + e.getMessage()
+            ));
+            throw new FileValidationException(JobErrorEnum.FILE_LOCK_FAILED, e);
+        }
+
+        log.debug(LoggingUtil.logJobMessage(
+                "FILE_VALIDATION",
+                responseInputFilePrefix,
+                "Trigger files exist, validated successfully"
+        ));
+
+        stepContribution.setExitStatus(ExitStatus.COMPLETED);
+        return RepeatStatus.FINISHED;
     }
 }
-
+FILE_READ_FAILED("1010", "Failed to read the file", "500"),
+FILE_LOCK_FAILED("1011", "Failed to lock the file", "500");
 @Getter
-public class PaymentProcessingException extends RuntimeException {
+public class FileValidationException extends RuntimeException {
 
     private final JobErrorEnum jobErrorEnum;
 
-    public PaymentProcessingException(JobErrorEnum jobErrorEnum, Throwable err) {
+    public FileValidationException(JobErrorEnum jobErrorEnum, Throwable err) {
         super(err);
         this.jobErrorEnum = jobErrorEnum;
     }
 
-    public PaymentProcessingException(JobErrorEnum jobErrorEnum) {
+    public FileValidationException(JobErrorEnum jobErrorEnum) {
         this.jobErrorEnum = jobErrorEnum;
     }
 }
