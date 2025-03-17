@@ -95,3 +95,24 @@ public RepeatStatus execute(StepContribution stepContribution, ChunkContext chun
 
     return RepeatStatus.FINISHED;
 }
+
+package com.bofa.sst.batch.exception;
+
+import com.bofa.sst.batch.util.JobErrorEnum;
+import lombok.Getter;
+
+@Getter
+public class FileProcessingException extends RuntimeException {
+
+    private final JobErrorEnum jobErrorEnum;
+
+    public FileProcessingException(JobErrorEnum jobErrorEnum, Throwable err) {
+        super(err);
+        this.jobErrorEnum = jobErrorEnum;
+    }
+
+    public FileProcessingException(JobErrorEnum jobErrorEnum) {
+        this.jobErrorEnum = jobErrorEnum;
+    }
+}
+
