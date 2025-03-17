@@ -1,4 +1,15 @@
-public static String logJobMessage(String jobExecutionId, String message) {
-    return JOB_EXECUTION_ID + ":" + (jobExecutionId == null ? DEFAULT_IDENTIFIER : jobExecutionId)
-            + BatchCommonConstants.ARROW + message;
+@ExceptionHandler(SdaRequestDatabaseException.class)
+public ResponseEntity<JobError> handleDatabaseException(SdaRequestDatabaseException exception) {
+    log.error(LoggingUtil.logJobMessage(
+            exception.getJobErrorEnum().getErrorCode(), 
+            exception.getMessage()
+    ));
+
+    JobError jobError = new JobError(
+            exception.getJobErrorEnum().getErrorCode(),
+            exception.getJobErrorEnum().getErrorDescription(),
+            exception.getJobErrorEnum().getStatusCode() // Keep it as String
+    );
+
+    return new ResponseEntity<>(jobError, HttpStatus.BAD_REQUEST);
 }
