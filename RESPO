@@ -1,118 +1,77 @@
-@ExceptionHandler(FileProcessingException.class)
-public ResponseEntity<JobError> handleFileProcessingException(FileProcessingException exception) {
-    log.error(LoggingUtil.logJobMessage(
-            exception.getJobErrorEnum().getErrorCode(), 
-            exception.getMessage()
-    ));
+@Service
+@RequiredArgsConstructor
+public class BatchJobExecutionService {
 
-    JobError jobError = new JobError(
-            exception.getJobErrorEnum().getErrorCode(),
-            exception.getJobErrorEnum().getErrorDescription(),
-            exception.getJobErrorEnum().getStatusCode()
-    );
+    private static final Logger logger = LoggerFactory.getLogger(BatchJobExecutionService.class);
 
-    return new ResponseEntity<>(jobError, HttpStatus.INTERNAL_SERVER_ERROR);
-}
+    @Autowired
+    private JobLauncher jobLauncher;
 
+    private final Job job;
+    private final BatchUtil batchUtil;
 
-@Override
-public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
-    log.info(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Started"));
+    public BatchLauncherResponse startJob(BatchLauncherRequest batchLauncherRequest) {
+        BatchLauncherResponse jobResponse = new BatchLauncherResponse();
 
-    ExecutionContext context = stepContribution.getStepExecution().getJobExecution().getExecutionContext();
+        String jobName = batchLauncherRequest.getJobName();
+        logger.debug("Executing Job for jobName: {}", jobName);
 
-    try {
-        String outputFlatFilePath = context.getString(BatchConstants.DIRECTORY_PATH);
-        String fileExtension = context.getString(BatchConstants.EXTENSION);
-
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat(BatchConstants.DATE_FORMAT);
-        String currDate = simpleDateFormat.format(Calendar.getInstance().getTime());
-
-        File outputFile = new File(outputFlatFilePath + "SDA_REQUEST_" + currDate + fileExtension);
-
-        try (FileWriter writer = new FileWriter(outputFile)) {
-            writer.write(new String(addHeaderRecord().getBytes(BatchConstants.EBCDIC_ENCODING)));
-
-            int totalRecords = 0;
-
-            File[] tempFiles = new File(outputFlatFilePath).listFiles((dir, name) ->
-                    name.contains(BatchConstants.SDA_INTERIM_FILE_PREFIX) &&
-                            name.endsWith(BatchConstants.FILE_EXTENSION));
-
-            if (tempFiles != null) {
-                Arrays.sort(tempFiles, Comparator.comparing(File::getName));
-
-                for (File tempFile : tempFiles) {
-                    try {
-                        List<String> lines = Files.readAllLines(tempFile.toPath());
-
-                        for (String line : lines) {
-                            StringBuffer sb = new StringBuffer();
-
-                            try {
-                                sb.append(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(0, 2)));
-                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(2, 11)));
-                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(11, 84))));
-                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(84, 99)));
-                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(99, 109))));
-                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(109, 124)));
-                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(124, 168))));
-
-                            } catch (Exception e) {
-                                log.error(LoggingUtil.logJobMessage("Failed to process line", e.getMessage()));
-                                throw new FileProcessingException(JobErrorEnum.FILE_PROCESSING_FAILED, e);
-                            }
-
-                            line = sb.toString();
-                            writer.write(line + "\n");
-                            totalRecords++;
-                        }
-                    } catch (IOException e) {
-                        log.error(LoggingUtil.logJobMessage("Failed to read file", e.getMessage()));
-                        throw new FileProcessingException(JobErrorEnum.FILE_READ_FAILED, e);
-                    }
-
-                    if (!tempFile.delete()) {
-                        log.warn(LoggingUtil.logJobMessage("Failed to delete file", tempFile.getName()));
-                        throw new FileProcessingException(JobErrorEnum.FILE_DELETION_FAILED);
-                    }
-                }
-            }
-
-            writer.write(new String(addTrailerRecord(totalRecords).getBytes(BatchConstants.EBCDIC_ENCODING)));
-
-        } catch (IOException e) {
-            log.error(LoggingUtil.logJobMessage("Failed to write to file", e.getMessage()));
-            throw new FileProcessingException(JobErrorEnum.FILE_WRITE_FAILED, e);
+        // Validation for job status and enabled state
+        if (!batchUtil.isJobEnabled(jobName)) {
+            jobResponse.setJobName(jobName);
+            jobResponse.setJobLaunchStatus(BatchCommonConstants.FAILURE_STATUS);
+            jobResponse.setJobStausMessage("Job launch failed due to missing required parameters");
+            jobResponse.setJobExecutionId(null);
+            return jobResponse;
         }
 
-        log.info(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Completed"));
+        if (batchUtil.isJobRunning(jobName)) {
+            jobResponse.setJobName(jobName);
+            jobResponse.setJobLaunchStatus(BatchCommonConstants.FAILURE_STATUS);
+            jobResponse.setJobStausMessage("Job launch failed, it's already running");
+            jobResponse.setJobExecutionId(null);
+            return jobResponse;
+        }
 
-    } catch (Exception e) {
-        log.error(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Failed", e.getMessage()));
-        throw new FileProcessingException(JobErrorEnum.UNEXPECTED_ERROR, e);
+        try {
+            JobParameters jobParameters = new JobParametersBuilder()
+                    .addLong("startAt", System.currentTimeMillis())
+                    .toJobParameters();
+
+            JobExecution jobExecution = jobLauncher.run(job, jobParameters);
+
+            jobResponse.setJobName(jobExecution.getJobInstance().getJobName());
+            jobResponse.setJobLaunchStatus(BatchCommonConstants.SST_BATCH_JOB_SUCCESS_STATUS);
+            jobResponse.setJobStausMessage("Job Launched Successfully");
+            jobResponse.setJobExecutionId(jobExecution.getId().toString());
+
+            logger.info("Job Launched successfully with jobId: {} - jobName: {}", 
+                        jobExecution.getId().toString(), jobName);
+
+            return jobResponse;
+
+        } catch (JobExecutionAlreadyRunningException |
+                 JobRestartException |
+                 JobInstanceAlreadyCompleteException |
+                 JobParametersInvalidException exception) {
+
+            // Multi-catch block for known job exceptions
+            setJobErrorResponse(jobResponse, exception, BatchCommonConstants.FAILURE_STATUS);
+            return jobResponse;
+
+        } catch (Exception exception) {
+            // Catch all remaining unexpected exceptions
+            setJobErrorResponse(jobResponse, exception, BatchCommonConstants.GENERAL_EXCEPTION_OCCURRED);
+            return jobResponse;
+        }
     }
 
-    return RepeatStatus.FINISHED;
+    // Centralized method for setting error response
+    private BatchLauncherResponse setJobErrorResponse(BatchLauncherResponse jobErrorResponse, Exception exception, String errorStatus) {
+        String errorMessage = exception.getMessage();
+        jobErrorResponse.setJobLaunchStatus(errorStatus);
+        jobErrorResponse.setJobStausMessage(errorMessage);
+        logger.error("Job Execution Failed - {}", errorMessage, exception);
+        return jobErrorResponse;
+    }
 }
-
-package com.bofa.sst.batch.exception;
-
-import com.bofa.sst.batch.util.JobErrorEnum;
-import lombok.Getter;
-
-@Getter
-public class FileProcessingException extends RuntimeException {
-
-    private final JobErrorEnum jobErrorEnum;
-
-    public FileProcessingException(JobErrorEnum jobErrorEnum, Throwable err) {
-        super(err);
-        this.jobErrorEnum = jobErrorEnum;
-    }
-
-    public FileProcessingException(JobErrorEnum jobErrorEnum) {
-        this.jobErrorEnum = jobErrorEnum;
-    }
-}
-
