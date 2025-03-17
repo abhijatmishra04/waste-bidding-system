@@ -1,156 +1,187 @@
-package com.bofa.sst.batch.core;
+@ExceptionHandler(PaymentProcessingException.class)
+public ResponseEntity<JobError> handlePaymentProcessingException(PaymentProcessingException exception) {
+    log.error(LoggingUtil.logJobMessage(
+            exception.getJobErrorEnum().getErrorCode(),
+            exception.getMessage()
+    ));
 
-import java.io.BufferedInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import javax.annotation.PostConstruct;
+    JobError jobError = new JobError(
+            exception.getJobErrorEnum().getErrorCode(),
+            exception.getJobErrorEnum().getErrorDescription(),
+            exception.getJobErrorEnum().getStatusCode()
+    );
 
-import org.springframework.batch.item.ItemStreamReader;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.stereotype.Component;
-import org.springframework.beans.factory.annotation.Autowired;
+    return new ResponseEntity<>(jobError, HttpStatus.INTERNAL_SERVER_ERROR);
+}
 
-import com.bofa.sst.batch.util.LoggingUtil;
-import com.bofa.sst.batch.constants.SdaResponseBatchConstants;
-import com.bofa.sst.batch.dto.PaymentInfoDTO;
+PAYMENT_FETCH_FAILED("1008", "Failed to fetch payment details", "500"),
+PAYMENT_PROCESS_FAILED("1009", "Failed to process payment info", "500");
+
 
 @Component
 @Log4j2
-public class SdaResponseCompFileItemReader implements ItemStreamReader<PaymentInfoDTO> {
-
-    private BufferedInputStream bis = null;
-    private Integer counter = 0;
-    private Integer numberOfRecordToRead = 0;
-
-    public String directoryPath;
+public class PaymentInfoProcessor implements ItemProcessor<PaymentInfoDTO, PaymentInfoDTO> {
 
     @Autowired
-    public OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
-
-    @PostConstruct
-    public void init() {
-        try {
-            directoryPath = dynamicConfigPropRepository.findPropertyValueByPropertyName("sda.file.directory.path");
-            log.info(LoggingUtil.logMessage("INIT", "SdaResponseCompFileItemReader", "Directory path set to: " + directoryPath));
-        } catch (Exception e) {
-            log.error(LoggingUtil.logMessage("INIT", "SdaResponseCompFileItemReader", "Failed to initialize directory path: " + e.getMessage()));
-            throw new RuntimeException("Failed to initialize directory path", e);
-        }
-    }
+    private JdbcTemplate jdbcTemplate;
 
     @Override
-    public void close() {
+    public PaymentInfoDTO process(PaymentInfoDTO sda) throws Exception {
         try {
-            counter = 0;
-            numberOfRecordToRead = 0;
-            if (bis != null) {
-                bis.close();
+            log.info(LoggingUtil.logJobMessage(
+                "PAYMENT_PROCESS",
+                sda.getConfirmationNbr(),
+                "Processing PaymentInfoDTO: " + sda
+            ));
+
+            if ("H".equals(sda.getDetailRecordId()) || "T".equals(sda.getDetailRecordId())) {
+                log.info(LoggingUtil.logJobMessage(
+                    "PAYMENT_PROCESS",
+                    sda.getConfirmationNbr(),
+                    "Skipping Header or Trailer Record: " + sda.getDetailRecordId()
+                ));
+                return null;
             }
-            log.info(LoggingUtil.logMessage("CLOSE", "SdaResponseCompFileItemReader", "File reader closed successfully."));
-        } catch (IOException e) {
-            log.error(LoggingUtil.logMessage("CLOSE", "SdaResponseCompFileItemReader", "Failed to close file reader: " + e.getMessage()));
-            throw new RuntimeException("Failed to close file reader", e);
+
+            List<PaymentInfoDTO> paymentInfoDTOs = fetchDataFromMainTables(sda);
+            log.info(LoggingUtil.logJobMessage(
+                "PAYMENT_PROCESS",
+                sda.getConfirmationNbr(),
+                "Fetched [" + paymentInfoDTOs.size() + "] records from main table"
+            ));
+
+            for (PaymentInfoDTO dataFromTable : paymentInfoDTOs) {
+                sda.setPaidAmt(dataFromTable.getPaidAmt());
+                sda.setTotalAmt(dataFromTable.getTotalAmt());
+            }
+
+            if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal oldPaymentAmount = sda.getPaymentAmount();
+                sda.setOldPaymentAmount(oldPaymentAmount);
+                log.info(LoggingUtil.logJobMessage(
+                    "PAYMENT_PROCESS",
+                    sda.getConfirmationNbr(),
+                    "Stored old payment amount: " + oldPaymentAmount
+                ));
+            }
+
+            // Processing based on account status
+            if ("A".equals(sda.getAcctStatus()) || "P".equals(sda.getAcctStatus())) {
+                log.info(LoggingUtil.logJobMessage(
+                    "PAYMENT_PROCESS",
+                    sda.getConfirmationNbr(),
+                    "Processing Account Status: " + sda.getAcctStatus()
+                ));
+
+                if (sda.getIalsBalance().compareTo(BigDecimal.ZERO) > 0) {
+                    sda.setPaymentAmount(sda.getIalsBalance());
+                    log.info(LoggingUtil.logJobMessage(
+                        "PAYMENT_PROCESS",
+                        sda.getConfirmationNbr(),
+                        "Payment Amount updated to IALS_BALANCE: " + sda.getIalsBalance()
+                    ));
+                }
+
+                BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
+                sda.setTotalAmt(newTotalAmount);
+                log.info(LoggingUtil.logJobMessage(
+                    "PAYMENT_PROCESS",
+                    sda.getConfirmationNbr(),
+                    "Updated Total Amount: " + newTotalAmount
+                ));
+            }
+
+            if ("C".equals(sda.getAcctStatus())) {
+                log.info(LoggingUtil.logJobMessage(
+                    "PAYMENT_PROCESS",
+                    sda.getConfirmationNbr(),
+                    "Processing Account Status: C"
+                ));
+
+                if (sda.getPaymentAmount().compareTo(BigDecimal.ZERO) == 0) {
+                    BigDecimal newTotalAmount = sda.getPaidAmt().add(sda.getPaymentAmount());
+                    sda.setTotalAmt(newTotalAmount);
+                    log.info(LoggingUtil.logJobMessage(
+                        "PAYMENT_PROCESS",
+                        sda.getConfirmationNbr(),
+                        "Updated Total Amount for Status 'C': " + newTotalAmount
+                    ));
+                } else {
+                    sda.setPaymentAmount(BigDecimal.ZERO);
+                    log.info(LoggingUtil.logJobMessage(
+                        "PAYMENT_PROCESS",
+                        sda.getConfirmationNbr(),
+                        "Payment Amount set to zero for Status 'C'"
+                    ));
+                }
+            }
+
+            sda.setUpdDtBy(SdaResponseBatchConstants.UPDT_BY_SDARETN);
+            log.info(LoggingUtil.logJobMessage(
+                "PAYMENT_PROCESS",
+                sda.getConfirmationNbr(),
+                "Final processed PaymentInfoDTO: " + sda
+            ));
+
+            return sda;
+        } catch (Exception e) {
+            log.error(LoggingUtil.logJobMessage(
+                "PAYMENT_PROCESS",
+                sda.getConfirmationNbr(),
+                "Error processing PaymentInfoDTO: " + e.getMessage()
+            ));
+            throw new PaymentProcessingException(JobErrorEnum.PAYMENT_PROCESS_FAILED, e);
         }
     }
 
-    @Override
-    public void open(ExecutionContext ex) {
+    public List<PaymentInfoDTO> fetchDataFromMainTables(PaymentInfoDTO sda) {
         try {
-            Integer fromLine = ex.getInt("fromLine");
-            Integer toLine = ex.getInt("toLine");
-            counter = 0;
-            numberOfRecordToRead = toLine - fromLine + 1;
+            log.info(LoggingUtil.logJobMessage(
+                "PAYMENT_FETCH",
+                sda.getConfirmationNbr(),
+                "Fetching data from main tables"
+            ));
 
-            String inputFilePath = FileUtils.findTodayFiles(directoryPath,
-                SdaResponseBatchConstants.RESPONSE_FILE_PREFIX,
-                SdaResponseBatchConstants.LOCK_FILE_EXTENSION);
+            RowMapper<PaymentInfoDTO> rowMapper = (rs, rowNum) -> {
+                PaymentInfoDTO sdaProcessedData = new PaymentInfoDTO();
+                sdaProcessedData.setTotalAmt(rs.getBigDecimal("TOT_AM"));
+                sdaProcessedData.setPaidAmt(rs.getBigDecimal("PD_AM"));
+                return sdaProcessedData;
+            };
 
-            bis = new BufferedInputStream(new FileInputStream(new File(inputFilePath)));
-            bis.skip((fromLine - 1) * 152);
+            Object[] params = new Object[]{sda.getConfirmationNbr()};
+            List<PaymentInfoDTO> list = jdbcTemplate.query(SQLFactory.SELECT_SCHEDULE_M2M, rowMapper, params);
 
-            log.info(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "File opened successfully: " + inputFilePath));
-        } catch (IOException e) {
-            log.error(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "Failed to open file: " + e.getMessage()));
-            throw new RuntimeException("Failed to open file", e);
+            log.info(LoggingUtil.logJobMessage(
+                "PAYMENT_FETCH",
+                sda.getConfirmationNbr(),
+                "Fetched [" + list.size() + "] records from database"
+            ));
+
+            return list;
+
         } catch (Exception e) {
-            log.error(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "Unexpected error: " + e.getMessage()));
-            throw new RuntimeException("Unexpected error while opening file", e);
+            log.error(LoggingUtil.logJobMessage(
+                "PAYMENT_FETCH",
+                sda.getConfirmationNbr(),
+                "Error fetching data from main tables: " + e.getMessage()
+            ));
+            throw new PaymentProcessingException(JobErrorEnum.PAYMENT_FETCH_FAILED, e);
         }
     }
+}
 
-    @Override
-    public PaymentInfoDTO read() throws Exception {
-        if (counter.equals(numberOfRecordToRead)) {
-            log.info(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "All records read successfully."));
-            return null;
-        }
+@Getter
+public class PaymentProcessingException extends RuntimeException {
 
-        byte[] readByte = new byte[152];
-        if (bis.read(readByte) == -1) {
-            return null;
-        }
+    private final JobErrorEnum jobErrorEnum;
 
-        counter++;
-
-        try {
-            PaymentInfoDTO dto = createCommaDelimitedRecord(readByte);
-            log.info(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "Record read successfully."));
-            return dto;
-        } catch (Exception e) {
-            log.error(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "Error processing record: " + e.getMessage()));
-            throw new RuntimeException("Error processing record", e);
-        }
+    public PaymentProcessingException(JobErrorEnum jobErrorEnum, Throwable err) {
+        super(err);
+        this.jobErrorEnum = jobErrorEnum;
     }
 
-    public PaymentInfoDTO createCommaDelimitedRecord(byte[] reader) throws UnsupportedEncodingException {
-        PaymentInfoDTO dto = new PaymentInfoDTO();
-
-        try {
-            String detailRecordId = CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 0));
-
-            log.info(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Processing record ID: " + detailRecordId));
-
-            if (detailRecordId.equals("H")) {
-                dto.setDetailRecordId(detailRecordId);
-                return dto;
-            }
-
-            if (detailRecordId.equals("T")) {
-                dto.setDetailRecordId(detailRecordId);
-                return dto;
-            }
-
-            if (detailRecordId.equals("D")) {
-                String systemIdentifier = CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 1)).trim();
-                dto.setSystemIdentifier(systemIdentifier);
-
-                String sstKey = CompCharaterUtil.packedToString(parseField(reader, 5, 2));
-                dto.setSstKey(new BigDecimal(sstKey));
-
-                dto.setPaymentAmount(new BigDecimal(CompCharaterUtil.packedToString(parseField(reader, 8, 80))).divide(new BigDecimal(100.00), 2, RoundingMode.HALF_UP));
-                dto.setNextTranDate(CompCharaterUtil.ebcdicToAscii(parseField(reader, 8, 88)).trim());
-                dto.setChangeIndicator(CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 97)).trim());
-
-                log.info(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Record processed successfully."));
-                return dto;
-            }
-        } catch (Exception e) {
-            log.error(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Failed to process record: " + e.getMessage()));
-            throw new RuntimeException("Failed to process record", e);
-        }
-
-        return null;
-    }
-
-    public byte[] parseField(byte[] reader, int len, int offset) {
-        try {
-            byte[] bytes = new byte[len];
-            System.arraycopy(reader, offset, bytes, 0, len);
-            return bytes;
-        } catch (Exception e) {
-            log.error(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Failed to parse field: " + e.getMessage()));
-            throw new RuntimeException("Failed to parse field", e);
-        }
+    public PaymentProcessingException(JobErrorEnum jobErrorEnum) {
+        this.jobErrorEnum = jobErrorEnum;
     }
 }
