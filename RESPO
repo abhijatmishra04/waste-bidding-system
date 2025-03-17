@@ -1,77 +1,41 @@
-@Service
-@RequiredArgsConstructor
-public class BatchJobExecutionService {
+try {
+    JobParameters jobParameters = new JobParametersBuilder()
+            .addLong("startAt", System.currentTimeMillis())
+            .toJobParameters();
 
-    private static final Logger logger = LoggerFactory.getLogger(BatchJobExecutionService.class);
+    JobExecution jobExecution = jobLauncher.run(job, jobParameters);
 
-    @Autowired
-    private JobLauncher jobLauncher;
+    jobResponse.setJobName(jobExecution.getJobInstance().getJobName());
+    jobResponse.setJobLaunchStatus(BatchCommonConstants.SST_BATCH_JOB_SUCCESS_STATUS);
+    jobResponse.setJobStausMessage("Job Launched Successfully");
+    jobResponse.setJobExecutionId(jobExecution.getId().toString());
 
-    private final Job job;
-    private final BatchUtil batchUtil;
+    logger.info("Job Launched successfully with jobId: {} - jobName: {}", 
+                jobExecution.getId().toString(), jobName);
 
-    public BatchLauncherResponse startJob(BatchLauncherRequest batchLauncherRequest) {
-        BatchLauncherResponse jobResponse = new BatchLauncherResponse();
+    return jobResponse;
 
-        String jobName = batchLauncherRequest.getJobName();
-        logger.debug("Executing Job for jobName: {}", jobName);
+} catch (JobExecutionAlreadyRunningException |
+         JobRestartException |
+         JobInstanceAlreadyCompleteException |
+         JobParametersInvalidException exception) {
 
-        // Validation for job status and enabled state
-        if (!batchUtil.isJobEnabled(jobName)) {
-            jobResponse.setJobName(jobName);
-            jobResponse.setJobLaunchStatus(BatchCommonConstants.FAILURE_STATUS);
-            jobResponse.setJobStausMessage("Job launch failed due to missing required parameters");
-            jobResponse.setJobExecutionId(null);
-            return jobResponse;
-        }
+    // ✅ Single place to handle known exceptions
+    logger.error("Job execution failed: {}", exception.getMessage(), exception);
 
-        if (batchUtil.isJobRunning(jobName)) {
-            jobResponse.setJobName(jobName);
-            jobResponse.setJobLaunchStatus(BatchCommonConstants.FAILURE_STATUS);
-            jobResponse.setJobStausMessage("Job launch failed, it's already running");
-            jobResponse.setJobExecutionId(null);
-            return jobResponse;
-        }
-
-        try {
-            JobParameters jobParameters = new JobParametersBuilder()
-                    .addLong("startAt", System.currentTimeMillis())
-                    .toJobParameters();
-
-            JobExecution jobExecution = jobLauncher.run(job, jobParameters);
-
-            jobResponse.setJobName(jobExecution.getJobInstance().getJobName());
-            jobResponse.setJobLaunchStatus(BatchCommonConstants.SST_BATCH_JOB_SUCCESS_STATUS);
-            jobResponse.setJobStausMessage("Job Launched Successfully");
-            jobResponse.setJobExecutionId(jobExecution.getId().toString());
-
-            logger.info("Job Launched successfully with jobId: {} - jobName: {}", 
-                        jobExecution.getId().toString(), jobName);
-
-            return jobResponse;
-
-        } catch (JobExecutionAlreadyRunningException |
-                 JobRestartException |
-                 JobInstanceAlreadyCompleteException |
-                 JobParametersInvalidException exception) {
-
-            // Multi-catch block for known job exceptions
-            setJobErrorResponse(jobResponse, exception, BatchCommonConstants.FAILURE_STATUS);
-            return jobResponse;
-
-        } catch (Exception exception) {
-            // Catch all remaining unexpected exceptions
-            setJobErrorResponse(jobResponse, exception, BatchCommonConstants.GENERAL_EXCEPTION_OCCURRED);
-            return jobResponse;
-        }
+    // ✅ Set appropriate status based on exception type
+    if (exception instanceof JobExecutionAlreadyRunningException) {
+        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_EXEC_ALREADY_RUNNING);
+    } else if (exception instanceof JobRestartException) {
+        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_RESTART_EXCEPTION);
+    } else if (exception instanceof JobInstanceAlreadyCompleteException) {
+        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_INSTANCE_COMPLETED_EXCEPTION);
+    } else if (exception instanceof JobParametersInvalidException) {
+        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.INVALID_JOB_PARAM);
     }
-
-    // Centralized method for setting error response
-    private BatchLauncherResponse setJobErrorResponse(BatchLauncherResponse jobErrorResponse, Exception exception, String errorStatus) {
-        String errorMessage = exception.getMessage();
-        jobErrorResponse.setJobLaunchStatus(errorStatus);
-        jobErrorResponse.setJobStausMessage(errorMessage);
-        logger.error("Job Execution Failed - {}", errorMessage, exception);
-        return jobErrorResponse;
-    }
+    
+} catch (Exception exception) {
+    // ✅ Catch any unknown or generic exceptions separately
+    logger.error("Unknown error occurred: {}", exception.getMessage(), exception);
+    return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.GENERAL_EXCEPTION_OCCURRED);
 }
