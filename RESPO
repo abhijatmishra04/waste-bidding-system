@@ -1,5 +1,5 @@
-@ExceptionHandler(SdaRequestDatabaseException.class)
-public ResponseEntity<JobError> handleDatabaseException(SdaRequestDatabaseException exception) {
+@ExceptionHandler(FileProcessingException.class)
+public ResponseEntity<JobError> handleFileProcessingException(FileProcessingException exception) {
     log.error(LoggingUtil.logJobMessage(
             exception.getJobErrorEnum().getErrorCode(), 
             exception.getMessage()
@@ -13,47 +13,85 @@ public ResponseEntity<JobError> handleDatabaseException(SdaRequestDatabaseExcept
 
     return new ResponseEntity<>(jobError, HttpStatus.INTERNAL_SERVER_ERROR);
 }
-DATABASE_WRITER_FAILED("1007", "Error while initializing file writer", "500");
-@Override
-@Bean
-@StepScope
-public FlatFileItemWriter<SdaInputDto> flatFileItemWriter() {
 
-    log.info(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Started"));
+
+@Override
+public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
+    log.info(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Started"));
+
+    ExecutionContext context = stepContribution.getStepExecution().getJobExecution().getExecutionContext();
 
     try {
-        String threadParam = Thread.currentThread().getId() + "-" + Thread.currentThread().getName() + "-"
-                + new Random().nextInt();
+        String outputFlatFilePath = context.getString(BatchConstants.DIRECTORY_PATH);
+        String fileExtension = context.getString(BatchConstants.EXTENSION);
 
-        FlatFileItemWriter<SdaInputDto> itemWriter = new FlatFileItemWriter<>();
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat(BatchConstants.DATE_FORMAT);
+        String currDate = simpleDateFormat.format(Calendar.getInstance().getTime());
 
-        itemWriter.setName("SDA_Request_Writer");
-        itemWriter.setResource(new FileSystemResource(
-                outputFlatFilePath + BatchConstants.SDA_INTERIM_FILE_PREFIX + threadParam));
+        File outputFile = new File(outputFlatFilePath + "SDA_REQUEST_" + currDate + fileExtension);
 
-        FormatterLineAggregator<SdaInputDto> formatterAggregator = new FormatterLineAggregator<>();
-        BeanWrapperFieldExtractor<SdaInputDto> extractor = new BeanWrapperFieldExtractor<>();
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            writer.write(new String(addHeaderRecord().getBytes(BatchConstants.EBCDIC_ENCODING)));
 
-        extractor.setNames(SdaInputDto.outputFields());
+            int totalRecords = 0;
 
-        formatterAggregator.setFieldExtractor(extractor);
+            File[] tempFiles = new File(outputFlatFilePath).listFiles((dir, name) ->
+                    name.contains(BatchConstants.SDA_INTERIM_FILE_PREFIX) &&
+                            name.endsWith(BatchConstants.FILE_EXTENSION));
 
-        // Format setting might fail if format is invalid or null
-        try {
-            formatterAggregator.setFormat(aggregatorFormat());
-        } catch (Exception e) {
-            log.error(LoggingUtil.logJobMessage("Error while setting format in flatFileItemWriter", e.getMessage()));
-            throw new SdaRequestDatabaseException(JobErrorEnum.DATA_ACCESS_EXCEPTION, e);
+            if (tempFiles != null) {
+                Arrays.sort(tempFiles, Comparator.comparing(File::getName));
+
+                for (File tempFile : tempFiles) {
+                    try {
+                        List<String> lines = Files.readAllLines(tempFile.toPath());
+
+                        for (String line : lines) {
+                            StringBuffer sb = new StringBuffer();
+
+                            try {
+                                sb.append(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(0, 2)));
+                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(2, 11)));
+                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(11, 84))));
+                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(84, 99)));
+                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(99, 109))));
+                                sb.append(TrXMiscUtilities.stringToPackedSigned(line.substring(109, 124)));
+                                sb.append(new String(TrXMiscUtilities.stringFromAsciiToEbcdic(line.substring(124, 168))));
+
+                            } catch (Exception e) {
+                                log.error(LoggingUtil.logJobMessage("Failed to process line", e.getMessage()));
+                                throw new FileProcessingException(JobErrorEnum.FILE_PROCESSING_FAILED, e);
+                            }
+
+                            line = sb.toString();
+                            writer.write(line + "\n");
+                            totalRecords++;
+                        }
+                    } catch (IOException e) {
+                        log.error(LoggingUtil.logJobMessage("Failed to read file", e.getMessage()));
+                        throw new FileProcessingException(JobErrorEnum.FILE_READ_FAILED, e);
+                    }
+
+                    if (!tempFile.delete()) {
+                        log.warn(LoggingUtil.logJobMessage("Failed to delete file", tempFile.getName()));
+                        throw new FileProcessingException(JobErrorEnum.FILE_DELETION_FAILED);
+                    }
+                }
+            }
+
+            writer.write(new String(addTrailerRecord(totalRecords).getBytes(BatchConstants.EBCDIC_ENCODING)));
+
+        } catch (IOException e) {
+            log.error(LoggingUtil.logJobMessage("Failed to write to file", e.getMessage()));
+            throw new FileProcessingException(JobErrorEnum.FILE_WRITE_FAILED, e);
         }
 
-        itemWriter.setLineAggregator(formatterAggregator);
-
-        log.info(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Completed"));
-
-        return itemWriter;
+        log.info(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Completed"));
 
     } catch (Exception e) {
-        log.error(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Failed", e.getMessage()));
-        throw new SdaRequestDatabaseException(JobErrorEnum.DATABASE_WRITER_FAILED, e);
+        log.error(LoggingUtil.logJobMessage("FileAggregatorTasklet ::: execute() ::: Failed", e.getMessage()));
+        throw new FileProcessingException(JobErrorEnum.UNEXPECTED_ERROR, e);
     }
+
+    return RepeatStatus.FINISHED;
 }
