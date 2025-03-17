@@ -1,5 +1,5 @@
-@ExceptionHandler(FileValidationException.class)
-public ResponseEntity<JobError> handleFileValidationException(FileValidationException exception) {
+@ExceptionHandler(DataWriteException.class)
+public ResponseEntity<JobError> handleDataWriteException(DataWriteException exception) {
     log.error(LoggingUtil.logJobMessage(
             exception.getJobErrorEnum().getErrorCode(),
             exception.getMessage()
@@ -16,139 +16,154 @@ public ResponseEntity<JobError> handleFileValidationException(FileValidationExce
 
 @StepScope
 @Component
-public class SdaResponseFileValidationTasklet implements Tasklet {
+@Log4j2
+public class SdaResponseItemWriter implements ItemWriter<PaymentInfoDTO> {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private SdaResponsePlanAuditService auditService;
 
     @Override
-    public RepeatStatus execute(StepContribution stepContribution, ChunkContext chunkContext) throws Exception {
-        ExecutionContext executionContext = stepContribution.getStepExecution().getJobExecution().getExecutionContext();
-
-        String responseDirectoryPath = executionContext.getString(SdaResponseBatchConstants.RESPONSE_DIRECTORY_PATH);
-        String responseInputFilePrefix = executionContext.getString(SdaResponseBatchConstants.RESPONSE_INPUT_FILE_PREFIX);
-        String requestDirectoryPath = executionContext.getString(SdaResponseBatchConstants.REQUEST_DIRECTORY_PATH);
-        String requestInputFilePrefix = executionContext.getString(SdaResponseBatchConstants.REQUEST_INPUT_FILE_PREFIX);
-
-        log.debug(LoggingUtil.logJobMessage(
-                "FILE_VALIDATION",
-                responseInputFilePrefix,
-                "Response Directory Path: " + responseDirectoryPath + ", Response Prefix: " + responseInputFilePrefix
-        ));
-
-        log.debug(LoggingUtil.logJobMessage(
-                "FILE_VALIDATION",
-                requestInputFilePrefix,
-                "Request Directory Path: " + requestDirectoryPath + ", Request Prefix: " + requestInputFilePrefix
-        ));
-
-        String responseFilePath = "";
-        String requestFilePath = "";
-
+    public void write(List<? extends PaymentInfoDTO> items) throws Exception {
         try {
-            responseFilePath = FileUtils.findTodaysFile(
-                    responseDirectoryPath, 
-                    responseInputFilePrefix, 
-                    SdaResponseBatchConstants.INPUT_FILE_EXTENSION
-            );
-
             log.info(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    responseInputFilePrefix,
-                    "Response File Path: " + responseFilePath
+                "DATA_WRITE",
+                "PAYMENT_PROCESS",
+                "Starting data write operation"
             ));
 
-            try (BufferedInputStream bisResponse = new BufferedInputStream(new FileInputStream(new File(responseFilePath)))) {
-                Long responseTotalRecords = (long) (bisResponse.readAllBytes().length);
-                executionContext.put(SdaResponseBatchConstants.RESPONSE_COUNT, responseTotalRecords);
+            for (PaymentInfoDTO paymentInfoDTO : items) {
+                try {
+                    log.info(LoggingUtil.logJobMessage(
+                        "DATA_WRITE",
+                        paymentInfoDTO.getConfirmationNbr(),
+                        "Writing data: " + paymentInfoDTO
+                    ));
 
-                log.info(LoggingUtil.logJobMessage(
-                        "FILE_VALIDATION",
-                        responseInputFilePrefix,
-                        "Response Total Records: " + responseTotalRecords
-                ));
+                    Object[] params = new Object[]{
+                        paymentInfoDTO.getPaymentAmount(),
+                        paymentInfoDTO.getPaymentAmount(),
+                        paymentInfoDTO.getTotalAmt(),
+                        paymentInfoDTO.getPaymentAmount(),
+                        paymentInfoDTO.getUpdDtBy(),
+                        paymentInfoDTO.getConfirmationNbr()
+                    };
+
+                    int count = jdbcTemplate.update(SQLFactory.UPDATE_SCHEDULE_M2M_1, params);
+
+                    log.info(LoggingUtil.logJobMessage(
+                        "DATA_WRITE",
+                        paymentInfoDTO.getConfirmationNbr(),
+                        "Update query executed. Rows affected: " + count
+                    ));
+
+                    // Process audit logs
+                    List<ScheduleM2mLogDto> logDtoList = auditService.process(paymentInfoDTO);
+                    for (ScheduleM2mLogDto logDto : logDtoList) {
+                        insertIntoScheduleM2mLog(logDto);
+                    }
+
+                } catch (Exception e) {
+                    log.error(LoggingUtil.logJobMessage(
+                        "DATA_WRITE",
+                        paymentInfoDTO.getConfirmationNbr(),
+                        "Failed to update payment data: " + e.getMessage()
+                    ));
+                    throw new DataWriteException(JobErrorEnum.DATA_WRITE_FAILED, e);
+                }
             }
-        } catch (Exception e) {
-            log.error(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    responseInputFilePrefix,
-                    "Failed to read response file: " + e.getMessage()
-            ));
-            throw new FileValidationException(JobErrorEnum.FILE_READ_FAILED, e);
-        }
-
-        try {
-            requestFilePath = FileUtils.findTodaysFile(
-                    requestDirectoryPath, 
-                    requestInputFilePrefix, 
-                    SdaResponseBatchConstants.INPUT_FILE_EXTENSION
-            );
 
             log.info(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    requestInputFilePrefix,
-                    "Request File Path: " + requestFilePath
+                "DATA_WRITE",
+                "PAYMENT_PROCESS",
+                "Data write operation completed successfully"
             ));
+
         } catch (Exception e) {
             log.error(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    requestInputFilePrefix,
-                    "Failed to read request file: " + e.getMessage()
+                "DATA_WRITE",
+                "PAYMENT_PROCESS",
+                "Failed to complete data write operation: " + e.getMessage()
             ));
-            throw new FileValidationException(JobErrorEnum.FILE_READ_FAILED, e);
+            throw new DataWriteException(JobErrorEnum.DATA_WRITE_FAILED, e);
         }
+    }
 
-        // Check if both files exist
-        if (responseFilePath == null || requestFilePath == null) {
-            stepContribution.setExitStatus(ExitStatus.FAILED);
-            return RepeatStatus.FINISHED;
-        }
-
+    private void insertIntoScheduleM2mLog(ScheduleM2mLogDto logDto) {
         try {
             log.info(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    responseInputFilePrefix,
-                    "Locking response file: " + responseFilePath
+                "DATA_WRITE",
+                logDto.getConfirmNo(),
+                "Inserting data into schedule_m2m_log"
             ));
 
-            FileUtils.lockFile(responseDirectoryPath, responseInputFilePrefix, SdaResponseBatchConstants.INPUT_FILE_EXTENSION);
+            Object[] params = new Object[]{
+                logDto.getSchdId(), logDto.getConfirmNo(), logDto.getTransferReferenceId(),
+                logDto.getDrAccId(), logDto.getDrAccType(), logDto.getDrTranType(),
+                logDto.getCustId(), logDto.getCrAccId(), logDto.getCrAccType(),
+                logDto.getCrk(), logDto.getGuidFlag(), logDto.getGuid(), logDto.getSchdFrqCd(),
+                logDto.getProcessCode(), logDto.getDyOfWk(), logDto.getNumOfOccur(),
+                logDto.getTotAmFlag(), logDto.getTotAm(), logDto.getPmtAmFlag(),
+                logDto.getPmtAm(), logDto.getFromAccount(), logDto.getCodeFlag(),
+                logDto.getCode(), logDto.getRoutingNumber(), logDto.getRoutingType(),
+                logDto.getSchdStatFlag(), logDto.getSchdStat(), logDto.getChnCd(),
+                logDto.getFirstAm(), logDto.getFirstAmTypeFlag(), logDto.getFirstAmType(),
+                logDto.getFirstAdditionalPrincipalFlag(), logDto.getMinorRecurAm(),
+                logDto.getRecurAmTypeFlag(), logDto.getRecurAmType(), logDto.getAdditionalAmFlag(),
+                logDto.getAdditionalAm(), logDto.getDateFlag(), logDto.getDaysBeforeDueDateFlag(),
+                logDto.getDaysBeforeDueDate(), logDto.getAdditionalPrincipalFlag(),
+                logDto.getAdditionalPrincipal(), logDto.getEscrowFlag(), logDto.getTransferMode(),
+                logDto.getTransferPriorityFlag(), logDto.getSenderAccountId(), logDto.getSenderAddressFlag(),
+                logDto.getSenderAddrLine1(), logDto.getSenderCity(), logDto.getSenderCountry(),
+                logDto.getSenderAddrLine2(), logDto.getSenderState(), logDto.getOriginatorAddrLine1(),
+                logDto.getOriginatorAddrLine2(), logDto.getOriginatorCity(), logDto.getOriginatorState(),
+                logDto.getOriginatorZipCode(), logDto.getDisclosureId(), logDto.getCallerTraceId(),
+                logDto.getSubChn(), logDto.getSubChnCd(), logDto.getToAccountFlag(),
+                logDto.getToAccount(), logDto.getReturnCode(), logDto.getWarningCode(),
+                logDto.getGraceDaysFlag(), logDto.getGraceDays(), logDto.getAcknowledgementId(),
+                logDto.getChangeBy(), logDto.getXferType(), logDto.getAuthorizationId(),
+                logDto.getAuthId(), logDto.getRespid(), logDto.getBalanceUpdateFlag(),
+                logDto.getClosingDate(), logDto.getCallingApp(), logDto.getFeeType(),
+                logDto.getFeeWaivedFlag(), logDto.getFrequencyFlag(), logDto.getIpAddress()
+            };
+
+            jdbcTemplate.update(SQLFactory.INSERT_SCHEDULE_M2M_LOG, params);
 
             log.info(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    requestInputFilePrefix,
-                    "Locking request file: " + requestFilePath
+                "DATA_WRITE",
+                logDto.getConfirmNo(),
+                "Inserted data into schedule_m2m_log successfully"
             ));
 
-            FileUtils.lockFile(requestDirectoryPath, requestInputFilePrefix, SdaResponseBatchConstants.INPUT_FILE_EXTENSION);
         } catch (Exception e) {
             log.error(LoggingUtil.logJobMessage(
-                    "FILE_VALIDATION",
-                    responseInputFilePrefix,
-                    "Failed to lock files: " + e.getMessage()
+                "DATA_WRITE",
+                logDto.getConfirmNo(),
+                "Failed to insert data into schedule_m2m_log: " + e.getMessage()
             ));
-            throw new FileValidationException(JobErrorEnum.FILE_LOCK_FAILED, e);
+            throw new DataWriteException(JobErrorEnum.AUDIT_LOG_WRITE_FAILED, e);
         }
-
-        log.debug(LoggingUtil.logJobMessage(
-                "FILE_VALIDATION",
-                responseInputFilePrefix,
-                "Trigger files exist, validated successfully"
-        ));
-
-        stepContribution.setExitStatus(ExitStatus.COMPLETED);
-        return RepeatStatus.FINISHED;
     }
 }
-FILE_READ_FAILED("1010", "Failed to read the file", "500"),
-FILE_LOCK_FAILED("1011", "Failed to lock the file", "500");
+
+
+DATA_WRITE_FAILED("1012", "Failed to write data to the database", "500"),
+AUDIT_LOG_WRITE_FAILED("1013", "Failed to write to the audit log", "500");
+
+
 @Getter
-public class FileValidationException extends RuntimeException {
+public class DataWriteException extends RuntimeException {
 
     private final JobErrorEnum jobErrorEnum;
 
-    public FileValidationException(JobErrorEnum jobErrorEnum, Throwable err) {
+    public DataWriteException(JobErrorEnum jobErrorEnum, Throwable err) {
         super(err);
         this.jobErrorEnum = jobErrorEnum;
     }
 
-    public FileValidationException(JobErrorEnum jobErrorEnum) {
+    public DataWriteException(JobErrorEnum jobErrorEnum) {
         this.jobErrorEnum = jobErrorEnum;
     }
 }
