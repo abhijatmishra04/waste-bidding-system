@@ -23,3 +23,24 @@ public enum JobErrorEnum {
     private final String errorDescription;
     private final String statusCode;
 }
+
+
+@Bean
+public RowMapper<SdaInputDto> rowMapper() {
+    return (rs, i) -> {
+        log.info(LoggingUtil.logJobMessage(jobExecutionId, "RowMapper Started"));
+
+        SdaInputDto input = new SdaInputDto();
+        input.setSstKey(rs.getString("sst_key"));
+        input.setConfirmationNumber(rs.getString("cnfrm_no"));
+        input.setPaymentAmount(rs.getBigDecimal("pmt_am"));
+        input.setNextTransactionDate(rs.getString("nxt_tran_dt"));
+        input.setAccountNumber(rs.getString("acc_no"));
+        input.setEntityCode(rs.getString("ent_cd"));
+        input.setProductCode(rs.getString("prod_cd"));
+        input.setSubProductCode(rs.getString("sub_prod_cd"));
+
+        log.info(LoggingUtil.logJobMessage(jobExecutionId, "RowMapper Completed"));
+        return input;
+    };
+}
