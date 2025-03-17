@@ -1,46 +1,59 @@
-package com.bofa.sst.batch.util;
+@ExceptionHandler(SdaRequestDatabaseException.class)
+public ResponseEntity<JobError> handleDatabaseException(SdaRequestDatabaseException exception) {
+    log.error(LoggingUtil.logJobMessage(
+            exception.getJobErrorEnum().getErrorCode(), 
+            exception.getMessage()
+    ));
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+    JobError jobError = new JobError(
+            exception.getJobErrorEnum().getErrorCode(),
+            exception.getJobErrorEnum().getErrorDescription(),
+            exception.getJobErrorEnum().getStatusCode()
+    );
 
-/**
- * This enum is used to store the error messages
- * @author Chandrasekar
- */
-@Getter
-@AllArgsConstructor
-public enum JobErrorEnum {
-
-    VALIDATION_FAILED("1000", "Validation is failed", "400"), // Occurs when input validation fails
-    UNEXPECTED_ERROR("1001", "Unexpected Error has occurred", "400"), // Used for unknown/unexpected errors
-    FILE_NOT_FOUND("1002", "File not found", "404"), // Used when file is missing
-    JOBTYPE_ERROR("1003", "Job Type is not valid", "400"), // Occurs when an invalid job type is passed
-    PARSE_EXCEPTION("1004", "Parse exception occurred", "400"), // Used for parsing errors
-    DATA_ACCESS_EXCEPTION("1005", "Datasource must not be null", "500"), // Data source misconfiguration
-    SQL_EXCEPTION("1006", "SQL Statement error occurred", "500"); // SQL statement failure
-
-    private final String errorCode;
-    private final String errorDescription;
-    private final String statusCode;
+    return new ResponseEntity<>(jobError, HttpStatus.INTERNAL_SERVER_ERROR);
 }
-
-
+DATABASE_WRITER_FAILED("1007", "Error while initializing file writer", "500");
+@Override
 @Bean
-public RowMapper<SdaInputDto> rowMapper() {
-    return (rs, i) -> {
-        log.info(LoggingUtil.logJobMessage(jobExecutionId, "RowMapper Started"));
+@StepScope
+public FlatFileItemWriter<SdaInputDto> flatFileItemWriter() {
 
-        SdaInputDto input = new SdaInputDto();
-        input.setSstKey(rs.getString("sst_key"));
-        input.setConfirmationNumber(rs.getString("cnfrm_no"));
-        input.setPaymentAmount(rs.getBigDecimal("pmt_am"));
-        input.setNextTransactionDate(rs.getString("nxt_tran_dt"));
-        input.setAccountNumber(rs.getString("acc_no"));
-        input.setEntityCode(rs.getString("ent_cd"));
-        input.setProductCode(rs.getString("prod_cd"));
-        input.setSubProductCode(rs.getString("sub_prod_cd"));
+    log.info(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Started"));
 
-        log.info(LoggingUtil.logJobMessage(jobExecutionId, "RowMapper Completed"));
-        return input;
-    };
+    try {
+        String threadParam = Thread.currentThread().getId() + "-" + Thread.currentThread().getName() + "-"
+                + new Random().nextInt();
+
+        FlatFileItemWriter<SdaInputDto> itemWriter = new FlatFileItemWriter<>();
+
+        itemWriter.setName("SDA_Request_Writer");
+        itemWriter.setResource(new FileSystemResource(
+                outputFlatFilePath + BatchConstants.SDA_INTERIM_FILE_PREFIX + threadParam));
+
+        FormatterLineAggregator<SdaInputDto> formatterAggregator = new FormatterLineAggregator<>();
+        BeanWrapperFieldExtractor<SdaInputDto> extractor = new BeanWrapperFieldExtractor<>();
+
+        extractor.setNames(SdaInputDto.outputFields());
+
+        formatterAggregator.setFieldExtractor(extractor);
+
+        // Format setting might fail if format is invalid or null
+        try {
+            formatterAggregator.setFormat(aggregatorFormat());
+        } catch (Exception e) {
+            log.error(LoggingUtil.logJobMessage("Error while setting format in flatFileItemWriter", e.getMessage()));
+            throw new SdaRequestDatabaseException(JobErrorEnum.DATA_ACCESS_EXCEPTION, e);
+        }
+
+        itemWriter.setLineAggregator(formatterAggregator);
+
+        log.info(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Completed"));
+
+        return itemWriter;
+
+    } catch (Exception e) {
+        log.error(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Failed", e.getMessage()));
+        throw new SdaRequestDatabaseException(JobErrorEnum.DATABASE_WRITER_FAILED, e);
+    }
 }
