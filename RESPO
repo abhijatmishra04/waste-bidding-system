@@ -1,41 +1,156 @@
-try {
-    JobParameters jobParameters = new JobParametersBuilder()
-            .addLong("startAt", System.currentTimeMillis())
-            .toJobParameters();
+package com.bofa.sst.batch.core;
 
-    JobExecution jobExecution = jobLauncher.run(job, jobParameters);
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import javax.annotation.PostConstruct;
 
-    jobResponse.setJobName(jobExecution.getJobInstance().getJobName());
-    jobResponse.setJobLaunchStatus(BatchCommonConstants.SST_BATCH_JOB_SUCCESS_STATUS);
-    jobResponse.setJobStausMessage("Job Launched Successfully");
-    jobResponse.setJobExecutionId(jobExecution.getId().toString());
+import org.springframework.batch.item.ItemStreamReader;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
-    logger.info("Job Launched successfully with jobId: {} - jobName: {}", 
-                jobExecution.getId().toString(), jobName);
+import com.bofa.sst.batch.util.LoggingUtil;
+import com.bofa.sst.batch.constants.SdaResponseBatchConstants;
+import com.bofa.sst.batch.dto.PaymentInfoDTO;
 
-    return jobResponse;
+@Component
+@Log4j2
+public class SdaResponseCompFileItemReader implements ItemStreamReader<PaymentInfoDTO> {
 
-} catch (JobExecutionAlreadyRunningException |
-         JobRestartException |
-         JobInstanceAlreadyCompleteException |
-         JobParametersInvalidException exception) {
+    private BufferedInputStream bis = null;
+    private Integer counter = 0;
+    private Integer numberOfRecordToRead = 0;
 
-    // ✅ Single place to handle known exceptions
-    logger.error("Job execution failed: {}", exception.getMessage(), exception);
+    public String directoryPath;
 
-    // ✅ Set appropriate status based on exception type
-    if (exception instanceof JobExecutionAlreadyRunningException) {
-        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_EXEC_ALREADY_RUNNING);
-    } else if (exception instanceof JobRestartException) {
-        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_RESTART_EXCEPTION);
-    } else if (exception instanceof JobInstanceAlreadyCompleteException) {
-        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.JOB_INSTANCE_COMPLETED_EXCEPTION);
-    } else if (exception instanceof JobParametersInvalidException) {
-        return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.INVALID_JOB_PARAM);
+    @Autowired
+    public OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @PostConstruct
+    public void init() {
+        try {
+            directoryPath = dynamicConfigPropRepository.findPropertyValueByPropertyName("sda.file.directory.path");
+            log.info(LoggingUtil.logMessage("INIT", "SdaResponseCompFileItemReader", "Directory path set to: " + directoryPath));
+        } catch (Exception e) {
+            log.error(LoggingUtil.logMessage("INIT", "SdaResponseCompFileItemReader", "Failed to initialize directory path: " + e.getMessage()));
+            throw new RuntimeException("Failed to initialize directory path", e);
+        }
     }
-    
-} catch (Exception exception) {
-    // ✅ Catch any unknown or generic exceptions separately
-    logger.error("Unknown error occurred: {}", exception.getMessage(), exception);
-    return setJobErrorResponse(jobResponse, exception, BatchCommonConstants.GENERAL_EXCEPTION_OCCURRED);
+
+    @Override
+    public void close() {
+        try {
+            counter = 0;
+            numberOfRecordToRead = 0;
+            if (bis != null) {
+                bis.close();
+            }
+            log.info(LoggingUtil.logMessage("CLOSE", "SdaResponseCompFileItemReader", "File reader closed successfully."));
+        } catch (IOException e) {
+            log.error(LoggingUtil.logMessage("CLOSE", "SdaResponseCompFileItemReader", "Failed to close file reader: " + e.getMessage()));
+            throw new RuntimeException("Failed to close file reader", e);
+        }
+    }
+
+    @Override
+    public void open(ExecutionContext ex) {
+        try {
+            Integer fromLine = ex.getInt("fromLine");
+            Integer toLine = ex.getInt("toLine");
+            counter = 0;
+            numberOfRecordToRead = toLine - fromLine + 1;
+
+            String inputFilePath = FileUtils.findTodayFiles(directoryPath,
+                SdaResponseBatchConstants.RESPONSE_FILE_PREFIX,
+                SdaResponseBatchConstants.LOCK_FILE_EXTENSION);
+
+            bis = new BufferedInputStream(new FileInputStream(new File(inputFilePath)));
+            bis.skip((fromLine - 1) * 152);
+
+            log.info(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "File opened successfully: " + inputFilePath));
+        } catch (IOException e) {
+            log.error(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "Failed to open file: " + e.getMessage()));
+            throw new RuntimeException("Failed to open file", e);
+        } catch (Exception e) {
+            log.error(LoggingUtil.logMessage("OPEN", "SdaResponseCompFileItemReader", "Unexpected error: " + e.getMessage()));
+            throw new RuntimeException("Unexpected error while opening file", e);
+        }
+    }
+
+    @Override
+    public PaymentInfoDTO read() throws Exception {
+        if (counter.equals(numberOfRecordToRead)) {
+            log.info(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "All records read successfully."));
+            return null;
+        }
+
+        byte[] readByte = new byte[152];
+        if (bis.read(readByte) == -1) {
+            return null;
+        }
+
+        counter++;
+
+        try {
+            PaymentInfoDTO dto = createCommaDelimitedRecord(readByte);
+            log.info(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "Record read successfully."));
+            return dto;
+        } catch (Exception e) {
+            log.error(LoggingUtil.logMessage("READ", "SdaResponseCompFileItemReader", "Error processing record: " + e.getMessage()));
+            throw new RuntimeException("Error processing record", e);
+        }
+    }
+
+    public PaymentInfoDTO createCommaDelimitedRecord(byte[] reader) throws UnsupportedEncodingException {
+        PaymentInfoDTO dto = new PaymentInfoDTO();
+
+        try {
+            String detailRecordId = CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 0));
+
+            log.info(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Processing record ID: " + detailRecordId));
+
+            if (detailRecordId.equals("H")) {
+                dto.setDetailRecordId(detailRecordId);
+                return dto;
+            }
+
+            if (detailRecordId.equals("T")) {
+                dto.setDetailRecordId(detailRecordId);
+                return dto;
+            }
+
+            if (detailRecordId.equals("D")) {
+                String systemIdentifier = CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 1)).trim();
+                dto.setSystemIdentifier(systemIdentifier);
+
+                String sstKey = CompCharaterUtil.packedToString(parseField(reader, 5, 2));
+                dto.setSstKey(new BigDecimal(sstKey));
+
+                dto.setPaymentAmount(new BigDecimal(CompCharaterUtil.packedToString(parseField(reader, 8, 80))).divide(new BigDecimal(100.00), 2, RoundingMode.HALF_UP));
+                dto.setNextTranDate(CompCharaterUtil.ebcdicToAscii(parseField(reader, 8, 88)).trim());
+                dto.setChangeIndicator(CompCharaterUtil.ebcdicToAscii(parseField(reader, 1, 97)).trim());
+
+                log.info(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Record processed successfully."));
+                return dto;
+            }
+        } catch (Exception e) {
+            log.error(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Failed to process record: " + e.getMessage()));
+            throw new RuntimeException("Failed to process record", e);
+        }
+
+        return null;
+    }
+
+    public byte[] parseField(byte[] reader, int len, int offset) {
+        try {
+            byte[] bytes = new byte[len];
+            System.arraycopy(reader, offset, bytes, 0, len);
+            return bytes;
+        } catch (Exception e) {
+            log.error(LoggingUtil.logMessage("PROCESS", "SdaResponseCompFileItemReader", "Failed to parse field: " + e.getMessage()));
+            throw new RuntimeException("Failed to parse field", e);
+        }
+    }
 }
