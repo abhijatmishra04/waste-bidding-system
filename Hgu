@@ -1,0 +1,56 @@
+@Log4j2
+public class CollectionLettersDateUtils {
+
+    private static final String DATE_FORMAT = "yyyyMMdd";
+    private static final String INPUT_DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
+    private static final String OUTPUT_DATE_FORMAT = "yyyyMMdd";
+
+    public static Date parseDate(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) {
+            log.info(LoggingUtil.logJobMessage(
+                "DATE_PARSING",
+                "INVALID_INPUT",
+                "Invalid date string provided: " + dateStr
+            ));
+            return null;
+        }
+
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat(DATE_FORMAT);
+        try {
+            return simpleDateFormat.parse(dateStr);
+        } catch (ParseException e) {
+            log.error(LoggingUtil.logJobMessage(
+                "DATE_PARSING",
+                "PARSE_ERROR",
+                "Error parsing date: " + dateStr + " | Error: " + e.getMessage()
+            ));
+            return null;
+        }
+    }
+
+    public static String parseDateAndFormat(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) {
+            log.info(LoggingUtil.logJobMessage(
+                "DATE_FORMATTING",
+                "INVALID_INPUT",
+                "Invalid date string provided: " + dateStr
+            ));
+            return null;
+        }
+
+        SimpleDateFormat inputFormat = new SimpleDateFormat(INPUT_DATE_FORMAT);
+        SimpleDateFormat outputFormat = new SimpleDateFormat(OUTPUT_DATE_FORMAT);
+
+        try {
+            Date date = inputFormat.parse(dateStr);
+            return outputFormat.format(date);
+        } catch (ParseException e) {
+            log.error(LoggingUtil.logJobMessage(
+                "DATE_FORMATTING",
+                "FORMAT_ERROR",
+                "Error formatting date: " + dateStr + " | Error: " + e.getMessage()
+            ));
+            return null;
+        }
+    }
+}
