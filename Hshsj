@@ -1,0 +1,113 @@
+private final DataSource dataSource;
+
+@Override
+@Bean
+@StepScope
+public JdbcPagingItemReader<CollectionLettersPaymentInfoDTO> getRequestNN14JdbcPagingItemReader(
+        @Value("#{stepExecutionContext['fromLine']}") Long fromLine,
+        @Value("#{stepExecutionContext['toLine']}") Long toLine) {
+
+    log.info(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "INITIALIZATION",
+            "NN14 reader Data initialized"
+    ));
+
+    JdbcPagingItemReader<CollectionLettersPaymentInfoDTO> reader = new JdbcPagingItemReader<>();
+
+    try {
+        reader.setDataSource(dataSource);
+        reader.setFetchSize(2);
+        reader.setRowMapper(new RowRequestNN14Mapper());
+        reader.setPageSize(1);
+
+        SqlPagingQueryProviderFactoryBean provider = new SqlPagingQueryProviderFactoryBean();
+        provider.setSelectClause("*");
+        provider.setDatabaseType("ORACLE");
+        provider.setDataSource(dataSource);
+        provider.setFromClause(
+                CollectionLettersSQLFactory.FROM_CLAUSE_SCHEDULE_M2M_AND_ACCOUNT_M2M_AND_ACCOUNT_BOA_FOR_NN14
+        );
+        provider.setWhereClause("WHERE sequence_num BETWEEN " + fromLine + " AND " + toLine);
+
+        Map<String, Order> orderById = new HashMap<>();
+        orderById.put("sequence_num", Order.ASCENDING);
+        provider.setSortKeys(orderById);
+
+        reader.setQueryProvider(provider.getObject());
+
+        log.info(LoggingUtil.logJobMessage(
+                "DB_READER",
+                "INITIALIZATION",
+                "NN14 reader initialized successfully"
+        ));
+
+    } catch (Exception e) {
+        log.error(LoggingUtil.logJobMessage(
+                "DB_READER",
+                "INIT_FAILED",
+                "Failed to initialize NN14 reader | Error: " + e.getMessage()
+        ));
+        throw new CollectionLettersDatabaseException(JobErrorEnum.DATABASE_INITIALIZATION_FAILED, e);
+    }
+
+    return reader;
+}
+
+
+CollectionLettersPaymentInfoDTO payment = new CollectionLettersPaymentInfoDTO();
+
+try {
+    payment.setNxtTranDt(CollectionLettersDateUtils.parseDateAndFormat(rs.getString("NXT_TRAN_DT")));
+} catch (Exception e) {
+    log.warn(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "PARSE_ERROR",
+            "Error parsing NXT_TRAN_DT | Error: " + e.getMessage()
+    ));
+}
+
+try {
+    payment.setLastTranDt(CollectionLettersDateUtils.parseDateAndFormat(rs.getString("LST_TRAN_DT")));
+} catch (Exception e) {
+    log.warn(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "PARSE_ERROR",
+            "Error parsing LST_TRAN_DT | Error: " + e.getMessage()
+    ));
+}
+
+try {
+    payment.setClosedDate(CollectionLettersDateUtils.parseDate(rs.getString("CLS_DT")));
+} catch (Exception e) {
+    log.warn(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "PARSE_ERROR",
+            "Error parsing CLS_DT | Error: " + e.getMessage()
+    ));
+}
+
+try {
+    payment.setFrstTranDt(CollectionLettersDateUtils.parseDateAndFormat(rs.getString("FRST_TRAN_DT")));
+} catch (Exception e) {
+    log.warn(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "PARSE_ERROR",
+            "Error parsing FRST_TRAN_DT | Error: " + e.getMessage()
+    ));
+}
+
+try {
+    payment.setDueDate(CollectionLettersDateUtils.parseDate(rs.getString("DUE_DT")));
+} catch (Exception e) {
+    log.warn(LoggingUtil.logJobMessage(
+            "DB_READER",
+            "PARSE_ERROR",
+            "Error parsing DUE_DT | Error: " + e.getMessage()
+    ));
+}
+
+payment.setSchdId(rs.getString("SCHD_ID"));
+payment.setSchdStat(rs.getString("SCHD_STAT"));
+payment.setCallerTraceId(rs.getString("CALL_TRACE_ID"));
+payment.setFromAccountNumber(rs.getString("FROM_ACCOUNT_NUMBER"));
