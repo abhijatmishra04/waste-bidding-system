@@ -1,0 +1,113 @@
+@Configuration
+public class CollectionLettersNN8StagingBatchItemWriterImpl implements CollectionLettersNN8StagingIBatchItemWriter {
+
+    public final DataSource dataSource;
+
+    public String[] fieldNames;
+
+    public Map<Integer, Integer> fieldRanges;
+
+    public String outputFlatFilePath;
+    public String aggregatorFormat;
+    public String flatfileWriterName;
+
+    @Autowired
+    public OraOdsDynamicConfigPropertiesRepository dynamicConfigPropRepository;
+
+    @Override
+    @Bean(name = "NN8StagingItemWriter")
+    @StepScope
+    public FlatFileItemWriter<CollectionLettersPaymentInfoDTO> flatFileItemWriter(
+            @Value("#{stepExecutionContext['totalLines']}") Long totalLines) {
+
+        log.info(LoggingUtil.logJobMessage(
+                "FILE_WRITER",
+                "INITIALIZATION",
+                "NN8BatchItemWriterImpl initialized. Thread ID: " +
+                        Thread.currentThread().getId() +
+                        ", Thread Name: " + Thread.currentThread().getName()
+        ));
+
+        String threadParam = Thread.currentThread().getId() + "-" +
+                Thread.currentThread().getName() + "-" +
+                new Random().nextInt();
+
+        try {
+            this.outputFlatFilePath = dynamicConfigPropRepository
+                    .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_OUTPUT);
+
+            this.aggregatorFormat = dynamicConfigPropRepository
+                    .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_AGGREGATOR_FORMAT);
+
+            this.flatfileWriterName = dynamicConfigPropRepository
+                    .findPropertyValueByPropertyName(CollectionLettersBatchConstants.PROPERTY_COLLECTIONLETTERS_FLATFILE_WRITER_NAME);
+
+            log.info(LoggingUtil.logJobMessage(
+                    "FILE_WRITER",
+                    "CONFIG_FETCH",
+                    "Configuration values fetched successfully"
+            ));
+        } catch (Exception e) {
+            log.error(LoggingUtil.logJobMessage(
+                    "FILE_WRITER",
+                    "CONFIG_FETCH_FAILED",
+                    "Failed to fetch config values | Error: " + e.getMessage()
+            ));
+            throw new RuntimeException("Failed to fetch configuration values", e);
+        }
+
+        Long recordCount = totalLines;
+
+        FlatFileItemWriter<CollectionLettersPaymentInfoDTO> itemWriter = new FlatFileItemWriter<>();
+
+        try {
+            Date date = new Date();
+            SimpleDateFormat sdf = new SimpleDateFormat(CollectionLettersBatchConstants.COLLECTION_OUTPUT_FILE_HEADER_DATE_FORMAT);
+            String currentDate = sdf.format(date);
+
+            String header = CollectionLettersBatchConstants.SST_REC_ID_HDR + currentDate +
+                    CollectionLettersBatchConstants.SPACES_177;
+
+            log.info(LoggingUtil.logJobMessage(
+                    "FILE_WRITER",
+                    "HEADER_SET",
+                    "Header set: " + header
+            ));
+
+            itemWriter.setName(flatfileWriterName);
+            itemWriter.setResource(
+                    new FileSystemResource(outputFlatFilePath + "/" + threadParam + "NN8Letter.txt"));
+
+            FormatterLineAggregator<CollectionLettersPaymentInfoDTO> formatterAggregator = new FormatterLineAggregator<>();
+            BeanWrapperFieldExtractor<CollectionLettersPaymentInfoDTO> extractor = new BeanWrapperFieldExtractor<>();
+            extractor.setNames(CollectionLettersPaymentInfoDTO.outputFields());
+
+            formatterAggregator.setFieldExtractor(extractor);
+            formatterAggregator.setFormat(aggregatorFormat);
+
+            itemWriter.setLineAggregator(formatterAggregator);
+
+            log.info(LoggingUtil.logJobMessage(
+                    "FILE_WRITER",
+                    "ITEM_WRITER_SET",
+                    "Item writer configured successfully"
+            ));
+
+        } catch (Exception e) {
+            log.error(LoggingUtil.logJobMessage(
+                    "FILE_WRITER",
+                    "ITEM_WRITER_SET_FAILED",
+                    "Failed to configure item writer | Error: " + e.getMessage()
+            ));
+            throw new RuntimeException("Failed to configure item writer", e);
+        }
+
+        log.info(LoggingUtil.logJobMessage(
+                "FILE_WRITER",
+                "CREATION_COMPLETE",
+                "FlatFileItemWriter object created successfully"
+        ));
+
+        return itemWriter;
+    }
+}
