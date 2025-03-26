@@ -1,20 +1,24 @@
-@Bean
-public Step partitionedStep(
-        @Qualifier("jdbcScheduleAndAccountReader") ItemReader<SdpRequestAccount> jdbcScheduleAndAccountReader,
-        @Qualifier("jdbcStagingItemWrite") ItemWriter<SdpRequestAccount> jdbcStagingItemWrite) {
+@Autowired
+private SdpJdbcScheduleAndAccountReader jdbcScheduleReader;
 
-    return stepBuilderFactory.get("partitionedStep")
-            .partitioner("partitionedStep", sdpdbschedulePartitioner) // Attach Partitioner Here
-            .step(getAccountDataStep(jdbcStagingItemWrite, jdbcScheduleAndAccountReader))
-            .taskExecutor(taskExecutor()) // Optional: For parallel execution
+@Bean
+public Step getAccountDataStep(@Qualifier("jdbcStagingItemWrite") ItemWriter<SdpRequestAccount> jdbcStagingItemWrite) {
+    return stepBuilderFactory.get("getAccountData")
+            .<SdpRequestAccount, SdpRequestAccount>chunk(10)
+            .reader(jdbcScheduleReader.jdbcScheduleAndAccountReader(null, null))
+            .processor(databaseItemProcessor)
+            .writer(jdbcStagingItemWrite)
+            .faultTolerant()
+            .skipPolicy((arg0, arg1) -> true)
+            .listener(databaseStepSkipListener)
             .build();
 }
 
-@Bean("SDPCriteriaExtraction")
-public Job sdpCriteriaExtraction(ItemWriter<SdpRequestAccount> jdbcItemWrite,
-        @Qualifier("jdbcScheduleAndAccountReader") ItemReader<SdpRequestAccount> jdbcScheduleAndAccountReader) {
-    
-    return jobBuilderFactory.get("sdpCriteriaExtraction")
-            .start(partitionedStep(jdbcScheduleAndAccountReader, jdbcItemWrite)) // Use Partitioned Step Here
+@Bean
+public Step partitionedStep(@Qualifier("jdbcStagingItemWrite") ItemWriter<SdpRequestAccount> writer) {
+    return stepBuilderFactory.get(PROCESS_PARTITION)
+            .partitioner("partitionedStep", sdpdbSchedulePartitioner)
+            .step(getAccountDataStep(writer))
+            .taskExecutor(taskExecutor())
             .build();
 }
