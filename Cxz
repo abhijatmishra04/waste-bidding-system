@@ -1,24 +1,36 @@
-@Autowired
-private SdpJdbcScheduleAndAccountReader jdbcScheduleReader;
+public JdbcPagingItemReader<SdaInputDto> getJdbcPagingItemReader(
+        @Value("#{stepExecutionContext['fromLine']}") Integer fromLine,
+        @Value("#{stepExecutionContext['toLine']}") Integer toLine) throws Exception {
 
-@Bean
-public Step getAccountDataStep(@Qualifier("jdbcStagingItemWrite") ItemWriter<SdpRequestAccount> jdbcStagingItemWrite) {
-    return stepBuilderFactory.get("getAccountData")
-            .<SdpRequestAccount, SdpRequestAccount>chunk(10)
-            .reader(jdbcScheduleReader.jdbcScheduleAndAccountReader(null, null))
-            .processor(databaseItemProcessor)
-            .writer(jdbcStagingItemWrite)
-            .faultTolerant()
-            .skipPolicy((arg0, arg1) -> true)
-            .listener(databaseStepSkipListener)
-            .build();
-}
+    log.info("JdbcPagingItemReader :: start");
 
-@Bean
-public Step partitionedStep(@Qualifier("jdbcStagingItemWrite") ItemWriter<SdpRequestAccount> writer) {
-    return stepBuilderFactory.get(PROCESS_PARTITION)
-            .partitioner("partitionedStep", sdpdbSchedulePartitioner)
-            .step(getAccountDataStep(writer))
-            .taskExecutor(taskExecutor())
-            .build();
+    JdbcPagingItemReader<SdaInputDto> reader = new JdbcPagingItemReader<>();
+    try {
+        reader.setDataSource(dataSource);
+        reader.setFetchSize(fetchSize);
+        reader.setRowMapper(rowMapper());
+        reader.setPageSize(pageSize);
+
+        log.info("OraclePagingQueryProvider started");
+
+        OraclePagingQueryProvider provider = new OraclePagingQueryProvider();
+        provider.setSelectClause(SQLFactory.SELECT_CLAUSE);
+        provider.setFromClause(SQLFactory.FROM_SCHEDULE_M2M_AND_ACCOUNT_M2M);
+        provider.setWhereClause(SQLFactory.WHERE_CLAUSE_SEQUENC_NUM + fromLine + SQLFactory.AND_PHRASE + toLine);
+
+        Map<String, Order> orderById = new HashMap<>();
+        orderById.put(SQLFactory.ORDER_BY_SEQUENCE_NUM, Order.ASCENDING);
+        provider.setSortKeys(orderById);
+        reader.setQueryProvider(provider);
+
+        log.info(LoggingUtil.logJobMessage("SDA REQUEST ITEM READER", "reader completed"));
+    } catch (Exception e) {
+        log.error(LoggingUtil.logJobMessage("SDA REQUEST ITEM READER", "Error initializing reader: " + e.getMessage()), e);
+
+        // Custom local handling logic (e.g., return null or a fallback reader)
+        // If reader is critical, you can stop execution:
+        throw new RuntimeException("Local exception: Failed to initialize OraclePagingQueryProvider", e);
+    }
+
+    return reader;
 }
