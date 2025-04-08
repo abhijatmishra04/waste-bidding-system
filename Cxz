@@ -1,36 +1,43 @@
-public JdbcPagingItemReader<SdaInputDto> getJdbcPagingItemReader(
-        @Value("#{stepExecutionContext['fromLine']}") Integer fromLine,
-        @Value("#{stepExecutionContext['toLine']}") Integer toLine) throws Exception {
+@Override
+@Bean
+@StepScope
+public FlatFileItemWriter<SdaInputDto> flatFileItemWriter() {
+    log.info("SdaItemWriterImpl ::: flatFileItemWriter() ::: Thread Id: {}, Thread name: {}",
+        Thread.currentThread().getId(), Thread.currentThread().getName());
 
-    log.info("JdbcPagingItemReader :: start");
-
-    JdbcPagingItemReader<SdaInputDto> reader = new JdbcPagingItemReader<>();
     try {
-        reader.setDataSource(dataSource);
-        reader.setFetchSize(fetchSize);
-        reader.setRowMapper(rowMapper());
-        reader.setPageSize(pageSize);
+        String threadParam = Thread.currentThread().getId() + "_" +
+                             Thread.currentThread().getName() + "_" +
+                             new Random().nextInt();
 
-        log.info("OraclePagingQueryProvider started");
+        FlatFileItemWriter<SdaInputDto> itemWriter = new FlatFileItemWriter<>();
 
-        OraclePagingQueryProvider provider = new OraclePagingQueryProvider();
-        provider.setSelectClause(SQLFactory.SELECT_CLAUSE);
-        provider.setFromClause(SQLFactory.FROM_SCHEDULE_M2M_AND_ACCOUNT_M2M);
-        provider.setWhereClause(SQLFactory.WHERE_CLAUSE_SEQUENC_NUM + fromLine + SQLFactory.AND_PHRASE + toLine);
+        itemWriter.setName("SDA_Request_Writer");
+        itemWriter.setResource(new FileSystemResource(outputFlatFilePath + BatchConstants.SDA_INTERIM_FILE + threadParam));
 
-        Map<String, Order> orderById = new HashMap<>();
-        orderById.put(SQLFactory.ORDER_BY_SEQUENCE_NUM, Order.ASCENDING);
-        provider.setSortKeys(orderById);
-        reader.setQueryProvider(provider);
+        FormatterLineAggregator<SdaInputDto> formatterAggregator = new FormatterLineAggregator<>();
 
-        log.info(LoggingUtil.logJobMessage("SDA REQUEST ITEM READER", "reader completed"));
+        BeanWrapperFieldExtractor<SdaInputDto> extractor = new BeanWrapperFieldExtractor<>();
+        extractor.setNames(SdaInputDto.outputFields());
+
+        formatterAggregator.setFieldExtractor(extractor);
+        formatterAggregator.setFormat(aggregatorFormat);
+
+        itemWriter.setLineAggregator(formatterAggregator);
+
+        log.info("SdaItemWriterImpl ::: flatFileItemWriter() ::: Exit");
+
+        return itemWriter;
+
     } catch (Exception e) {
-        log.error(LoggingUtil.logJobMessage("SDA REQUEST ITEM READER", "Error initializing reader: " + e.getMessage()), e);
+        log.error(LoggingUtil.logJobMessage("SdaItemWriterImpl ::: flatFileItemWriter() ::: Failed", e.getMessage()), e);
 
-        // Custom local handling logic (e.g., return null or a fallback reader)
-        // If reader is critical, you can stop execution:
-        throw new RuntimeException("Local exception: Failed to initialize OraclePagingQueryProvider", e);
+        // Handle the error gracefully — either:
+        // 1. Rethrow with a RuntimeException if failure should stop the job:
+        throw new RuntimeException("Local exception: Failed to initialize FlatFileItemWriter", e);
+
+        // OR
+        // 2. Return null or a no-op writer if you want to continue without writing:
+        // return new FlatFileItemWriter<>(); // (Only if valid in your use case)
     }
-
-    return reader;
 }
