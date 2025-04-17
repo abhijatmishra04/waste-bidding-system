@@ -17,3 +17,23 @@ WHERE acc.acc_no = '000000192106'
   AND acc.prod_cd = 'PER'
   AND schd.schd_stat = 'S01'
   AND schd.xfer_ref_id IS NULL;
+
+
+INSERT INTO SST_OWNER.schedule_m2m (
+    schd_id, cr_acc_id, dr_acc_id, schd_stat, xfer_ref_id, prod_cd, ent_cd
+) VALUES (
+    'SCHD001', 'M2M001', 'BOA001', 'S01', NULL, 'PER', '5201'
+);
+
+INSERT INTO SST_OWNER.account_m2m (
+    acc_m2m_id, acc_no, ent_cd, prod_cd, sub_prod_cd, rcpnt_id
+) VALUES (
+    'M2M001', '000000192106', '5201', 'PER', '001', 101
+);
+
+
+INSERT INTO SST_OWNER.account_boa (
+    acc_boa_id, acc_no, ent_cd, prod_cd, sub_prod_cd, rcpnt_id
+) VALUES (
+    'BOA001', '000000192106', '5201', 'PER', '001', 102
+);
