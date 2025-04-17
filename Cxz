@@ -1,39 +1,86 @@
--- For M2M match
-SELECT schd.schd_id
-FROM SST_OWNER.account_m2m acc
-JOIN SST_OWNER.schedule_m2m schd ON acc.acc_m2m_id = schd.cr_acc_id
-WHERE acc.acc_no = '000000192106'
-  AND acc.ent_cd = '5201'
-  AND acc.prod_cd = 'PER'
-  AND schd.schd_stat = 'S01'
-  AND schd.xfer_ref_id IS NULL;
-
--- For BOA match
-SELECT schd.schd_id
-FROM SST_OWNER.account_boa acc
-JOIN SST_OWNER.schedule_m2m schd ON acc.acc_boa_id = schd.dr_acc_id
-WHERE acc.acc_no = '000000192106'
-  AND acc.ent_cd = '5201'
-  AND acc.prod_cd = 'PER'
-  AND schd.schd_stat = 'S01'
-  AND schd.xfer_ref_id IS NULL;
-
-
 INSERT INTO SST_OWNER.schedule_m2m (
-    schd_id, cr_acc_id, dr_acc_id, schd_stat, xfer_ref_id, prod_cd, ent_cd
+    schd_id, cnfrm_no, xfer_ref_id, schd_stat, schd_stat_msg, cust_id,
+    prcs_cd, xfer_typ, schd_frq_cd, dy_of_wk, dy_of_mo,
+    frst_tran_dt, nxt_tran_dt, prv_tran_dt, lst_tran_dt, finl_tran_dt,
+    pmt_am, rman_am, tot_am, pd_am, finl_am,
+    num_of_occur, tot_occur, rman_occur, dr_acc_id, dr_acc_typ,
+    dr_tran_typ, cr_acc_id, cr_acc_typ, cr_tran_typ, trac_id,
+    chn_cd, sub_chn, init_ts, memo, rcur_am_typ,
+    min_or_rcur_am, min_stmt_crt_am, add_am, due_dt, dy_bfr_due_dt,
+    adj_am, creat_by, creat_ts, updt_by, updt_ts,
+    pmt_typ_cd, is_rcpnt_rgstr, nxt_strt_on_dt, nxt_avbl_dt, skip_fl,
+    no_of_skips, cls_dt, acs_id, tran_id_int, cost_ctr,
+    cmpnt, call_app, frst_am_typ, frst_am, frst_add_ppl,
+    add_ppl, add_esc, avbl_dt, no_off_dy_ach, tm_stat,
+    pmt_id, xfer_mthd_typ, xfer_mode, xfer_prty, pmt_alc_cd,
+    dscs_id, call_trac_id, trmnl_id, lat_chrg_am, ncol_lat_chrg_am,
+    adv_pmt_no, fe_typ, fe_am, fe_wav_fl, fe_wav_desc,
+    payplan_fl, warg_cd, grac_dy, ln_lat_chrg_am, tot_am_due,
+    bl_updt_fl, adj_add_am, prev_min_stat, frst_tm_fl, sessn_id,
+    tran_tm, tran_zon, schd_ts, cas_fl, stm_dt,
+    orig_svc_prod, stat_rsn_cd, stat_rsn_val, ord_pln_ind
 ) VALUES (
-    'SCHD001', 'M2M001', 'BOA001', 'S01', NULL, 'PER', '5201'
+    'SCHD001', 'CONF1234', NULL, 'S01', 'Active Schedule', 'CUST001',
+    'P01', 'TFR', 'MN', 'MON', 15,
+    TO_DATE('2025-01-10', 'YYYY-MM-DD'), TO_DATE('2025-02-10', 'YYYY-MM-DD'), NULL, NULL, NULL,
+    1000.00, 200.00, 1200.00, 100.00, 1300.00,
+    10, 12, 2, 'BOA001', 'CUR',
+    'D1', 'M2M001', 'SAV', 'C1', 'TRCID123',
+    'C01', 'SUB1', SYSTIMESTAMP, 'Monthly EMI', 'FIXED',
+    1000.00, 500.00, 200.00, TO_DATE('2025-03-10', 'YYYY-MM-DD'), 3,
+    50.00, 'admin', SYSTIMESTAMP, NULL, NULL,
+    'PTC1', 'Y', TO_DATE('2025-01-15', 'YYYY-MM-DD'), TO_DATE('2025-01-15', 'YYYY-MM-DD'), 'N',
+    0, NULL, 'ACS001', 123456, 'CC01',
+    'CMP1', 'APP01', 'FA', 1000.00, 100.00,
+    50.00, 25.00, TO_DATE('2025-01-20', 'YYYY-MM-DD'), 'N', 'Active',
+    'PMT001', 'NEFT', 'STANDARD', 'HIGH', 'PALC01',
+    'DISC001', 'CTID001', 'TRMN001', 20.00, 50.00,
+    1, 'TYPE1', 50.00, 'Y', 'Waived for now',
+    'Y', 'WC01', '30', TO_DATE('2025-01-25', 'YYYY-MM-DD'), 1500.00,
+    'Y', 25.00, 15.00, 'F', 'SID001',
+    '1200', 'IST', SYSTIMESTAMP, 'N', TO_DATE('2025-01-05', 'YYYY-MM-DD'),
+    'SRV001', 'R001', 'Resolved', 'ORDY'
 );
 
-INSERT INTO SST_OWNER.account_m2m (
-    acc_m2m_id, acc_no, ent_cd, prod_cd, sub_prod_cd, rcpnt_id
-) VALUES (
-    'M2M001', '000000192106', '5201', 'PER', '001', 101
-);
 
 
 INSERT INTO SST_OWNER.account_boa (
-    acc_boa_id, acc_no, ent_cd, prod_cd, sub_prod_cd, rcpnt_id
+    acc_boa_id, acc_no, prod_cd, sub_prod_cd, alpha_ent_cd, ent_cd, stat,
+    strt_dt, end_dt, frst_nm, lst_nm, bus_nm, acc_lob, acc_rte_typ, acc_rte_no,
+    snd_typ, snd_addr, snd_cty, snd_st, snd_zip_cd, snd_zip_cntry, creat_by,
+    creat_ts, updt_by, updt_ts, acc_typ, snd_addr_line2, off_us_fl, phn_no,
+    snd_acc_id, sub_sys_id, thrd_pty_ind, sys_id, tran_typ, exp_dt_frm,
+    alrt_alw_fl, rcpnt_id, fi_cd, nick_nm, pty_typ, acct_titl, acct_typ_de,
+    eml_alrt_ind, eml_id, descriptr, orig_addr_line1, orig_addr_line2,
+    orig_cty, orig_st, orig_zip_cd, orig_cntry, rcvr_fl
 ) VALUES (
-    'BOA001', '000000192106', '5201', 'PER', '001', 102
+    'BOA001', '000000192106', 'PER', '001', 'ENT5201', '5201', 'A',
+    TO_DATE('2020-01-01', 'YYYY-MM-DD'), NULL, 'Suresh', 'Verma', 'Verma Corp', '001', 'RTE001', 'ACC123456',
+    'TYP1', 'Address Line', 'Kanpur', 'UP', '208001', 'IN', 'admin',
+    SYSTIMESTAMP, NULL, NULL, 'CUR', 'Addr Line 2', 'N', '9123456789',
+    888, 'SYS2', 'N', 'SYSID02', 'TT1', TO_DATE('2023-01-01', 'YYYY-MM-DD'),
+    'Y', 202, 'FI01', 'Suru', 'B', 'Mr Suresh Verma', 'CUR',
+    'Y', 'suresh@boa.com', 'BOA account record', 'OAddr1', NULL,
+    'Kanpur', 'UP', '208001', 'IN', 'N'
+);
+
+
+INSERT INTO SST_OWNER.account_m2m (
+    acc_m2m_id, acc_no, ent_cd, prod_cd, sub_prod_cd, rcpnt_id, acc_stat,
+    frst_nm, lst_nm, bus_nm, acc_typ, snd_addr_line1, snd_addr_line2,
+    snd_cty, snd_st, snd_zip_cd, snd_zip_cntry, sub_sys_id, off_us_fl,
+    acc_desc, rte_no, rte_typ, tran_typ, mme_tran_typ, snd_acc_id,
+    exp_dt_frm, phn_no, third_pty_indct, creat_by, creat_ts, updt_by, updt_ts,
+    rcvr_fl, chk_no, sys_id, alrt_alw_fl, fi_cd, nick_nm, pty_typ,
+    acct_titl, acct_typ_de, eml_alrt_ind, eml_id, orig_addr_line1, orig_addr_line2,
+    orig_cty, orig_st, orig_zip_cd, orig_cntry
+) VALUES (
+    'M2M001', '000000192106', '5201', 'PER', '001', 101, 'A',
+    'Ramesh', 'Kumar', NULL, 'SAV', 'Addr Line 1', NULL,
+    'Kanpur', 'UP', '208001', 'IN', 'SYS1', 'N',
+    'Primary Account', 'RT001', 'RT_TYP1', 'TR01', 'MME1', 555,
+    TO_DATE('2025-01-01', 'YYYY-MM-DD'), '9876543210', 'N', 'admin', SYSTIMESTAMP, NULL, NULL,
+    'Y', 'CHK123', 'SYS01', 'Y', 'FI01', 'Nikku', 'I',
+    'Mr Ramesh Kumar', 'SAV', 'Y', 'ram@example.com', 'Orig Addr Line 1', NULL,
+    'Kanpur', 'UP', '208001', 'IN'
 );
