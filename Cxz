@@ -1,1 +1,47 @@
-logger.info("Confirmation Number (converted): {}", confirmationNbr);
+String productCode = new String(parseField(reader, 0, 3), "UTF-8").trim();
+String entity = CompCharactUtil.padEndToString(parseField(reader, 3, 2), "UTF-8").trim();
+String accountNumber;
+
+switch (productCode) {
+    case "CLS":
+    case "ILI":
+        accountNumber = new String(parseField(reader, 11, 13), "UTF-8").trim();
+        break;
+    case "PER":
+    case "SBA":
+    case "BUS":
+        accountNumber = new String(parseField(reader, 12, 12), "UTF-8").trim();
+        break;
+    case "CDS":
+    case "RAA":
+    case "ALB":
+    case "ALS":
+    case "ALI":
+    case "IHL":
+    case "DCL":
+        accountNumber = new String(parseField(reader, 10, 14), "UTF-8").trim();
+        break;
+    case "RAP":
+        accountNumber = new String(parseField(reader, 9, 15), "UTF-8").trim();
+        break;
+    case "DCA":
+    case "CCA":
+        accountNumber = new String(parseField(reader, 8, 16), "UTF-8").trim();
+        break;
+    case "INV":
+    case "ILA":
+        accountNumber = new String(parseField(reader, 15, 9), "UTF-8").trim();
+        break;
+    case "IDS":
+    case "MLA":
+    case "IML":
+    case "SDA":
+    case "DDA":
+        accountNumber = new String(parseField(reader, 14, 10), "UTF-8").trim();
+        break;
+    case "AID":
+        accountNumber = new String(parseField(reader, 9, 12), "UTF-8").trim();
+        break;
+    default:
+        accountNumber = new String(parseField(reader, 7, 23), "UTF-8").trim(); // fallback
+}
