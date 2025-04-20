@@ -1,1 +1,39 @@
-
+INSERT INTO TRANSFER_INSTRUCTION_M2M (
+SCHD_LOG_ID, SCHD_ID, CNFRM_NO, XFER_REF_ID, DR_ACC_ID, DR_ACC_TYP, DR_TRAN_TYP,
+CR_ACC_ID, CR_ACC_TYP, CR_TRAN_TYP, CUST_ID, SCHD_STAT, SCHD_STAT_MSG, CHG_INDCT,
+CHG_TS, CHG_BY, PMT_TYP_CD, SCHD_FRQ_CD, PRCS_CD, DY_OF_WK, NUM_OF_OCCUR,
+FRST_TRAN_DT, LST_TRAN_DT, NXT_TRAN_DT, FINL_TRAN_DT, TOT_AM, PMT_AM, FINL_AM,
+FR_ACC, TO_ACC, FI_CD, RTE_NO, RTE_TYP, CHN_CD, SUB_CHN, INIT_TS, ACS_ID,
+FRST_AM_TYP, FRST_AM, FRST_ADD_PPL, MIN_OR_RCUR, RCUR_AM_TYP, ADD_AM, DUE_DT,
+DY_BFR_DUE_DT, ADD_PPL, ADD_ESC, XFER_MODE, XFER_PRTY, SND_ACC_ID,
+SND_ADDR_LINE1, SND_ADDR_LINE2, SND_CTY, SND_ST, SND_ZIP_CD, SND_CNTRY,
+ORIG_ADDR_LINE1, ORIG_ADDR_LINE2, ORIG_CTY, ORIG_ST, ORIG_ZIP_CD, ORIG_CNTRY,
+DSCLS_ID, ACK_ID, CALL_TRAC_ID, RTRN_CD, WARG_CD, GRAC_DY, LN_LAT_CHRG_AM,
+TOT_AM_DUE, XFER_TYP, ADJ_ADD_AM, ADJ_AM, ADV_PMT_NO, AUTH_ID, AUTH_RSP_ID,
+AVBL_DT, BL_UPDT_FL, CALL_APP, CLS_DT, CMPNT, COST_CTR, SCHD_DESC, SCHD_DESC_CD,
+DY_OF_MO, FE_AM, FE_TYP, FE_WAV_DESC, IP_ADDR, IS_FE_WAV_FL, IS_RCPNT_RGSTR,
+LAT_CHRG_AM, MEMO, MIN_STMT_CRT_TS, NXT_AVBL_DT, NXT_STRT_ON_DT, NO_OFF_DY_ACH,
+NO_OF_SKIPS, OLD_DR_ACC_ID, ORG_TRAN_DT, PMT_ALC_CD, PMT_ID, PAYPLAN_FL, PD_AM,
+PREV_MIN_STAT_AM, PRV_TRAN_DT, RCVR_FL, RMAN_AM, RMAN_OCCUR, SESSN_ID, SKIP_FL,
+TRMNL_ID, TM_STAT, TOT_OCCUR, TRAC_ID, TRAN_ID, TRANS_ID, TRAN_ID_INT,
+XFER_MTHD_TYP, TRIGR_TM, TS_CNFRM_NO, NCOL_LAT_CHRG_AM, USR_AGT, FRST_TM_FL,
+TRAN_TM, TRAN_ZON, ORD_TS, CHG_RSN
+)
+VALUES (
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
+SYSTIMESTAMP, 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 123,
+SYSDATE, SYSDATE, SYSDATE, SYSDATE, 123, 123, 123, 'sample_text', 'sample_text', 'sample_text',
+'sample_text', 'sample_text', 'sample_text', 'sample_text', SYSTIMESTAMP, 'sample_text', 'sample_text',
+123, 123, 123, 'sample_text', 123, SYSDATE, 123, 123, 'sample_text', 'sample_text', 123,
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', SYSDATE,
+123, 'sample_text', 123, 123, 123, 'sample_text', 'sample_text', SYSDATE, 'sample_text', 'sample_text',
+SYSDATE, 'sample_text', 'sample_text', 'sample_text', 'sample_text', 123, 123, 'sample_text',
+'sample_text', 'sample_text', 'sample_text', 'sample_text', 123, 'sample_text', 123, SYSDATE,
+SYSDATE, 'sample_text', 123, 'sample_text', SYSDATE, 'sample_text', 'sample_text', 'sample_text',
+123, 123, SYSDATE, 'sample_text', 123, 123, 'sample_text', 'sample_text', 'sample_text',
+'sample_text', 123, 'sample_text', 'sample_text', 'sample_text', 123, 'sample_text',
+SYSTIMESTAMP, 'sample_text'
+);
