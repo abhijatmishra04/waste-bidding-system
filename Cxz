@@ -25,7 +25,7 @@ VALUES (
 SYSTIMESTAMP, 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 123,
 SYSDATE, SYSDATE, SYSDATE, SYSDATE, 123, 123, 123, 'sample_text', 'sample_text', 'sample_text',
 'sample_text', 'sample_text', 'sample_text', 'sample_text', SYSTIMESTAMP, 'sample_text', 'sample_text',
-123, 123, 123, 'sample_text', 123, SYSDATE, 123, 123, 'sample_text', 'sample_text', 123,
+123, 123, 123, 'sample_text', 123, SYSDATE, 123, 123, 123, 'sample_text', 'sample_text', 123,
 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text',
 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', 'sample_text', SYSDATE,
