@@ -1,157 +1,105 @@
-INSERT INTO TRANSFER_INSTRUCTION_M2M (
-    SCHD_LOG_ID,
-    SCHD_ID,
-    CNFRM_NO,
-    XFER_REF_ID,
-    DR_ACC_ID,
-    DR_ACC_TYP,
-    DR_TRAN_TYP,
-    CR_ACC_ID,
-    CR_ACC_TYP,
-    CR_TRAN_TYP,
-    CUST_ID,
-    SCHD_STAT,
-    SCHD_STAT_MSG,
-    CHG_INDCT,
-    CHG_TS,
-    CHG_THRD_ID,
-    TRNS_ATTEMPTS,
-    TRNS_PRCSS,
-    CNCL_INDCT,
-    CNCL_TS,
-    CNCL_USR_ID,
-    CNCL_RSN,
-    SRC_SCHD_ID,
-    SRC_USR_ID,
-    SRC_TS,
-    XFER_EXEQ_M2M_ID,
-    XFER_INSTR_M2M_ID,
-    DST_TRAN_ID,
-    DR_ACC_OPN_TYP,
-    CR_ACC_OPN_TYP,
-    PAYMENT_REF,
-    REQ_CHNL,
-    RESP_CHNL,
-    FI_ID,
-    BTCH_ID,
-    DUE_DT,
-    DUE_TM,
-    DUE_ZON,
-    PRCS_DT,
-    ORIG_SVC_PROD,
-    ALT_ACC_NO,
-    ALT_ENT_CD,
-    ALT_PROD_CD,
-    ALT_ACC_TYP,
-    ALT_ACC_OPN_TYP,
-    AUTH_NTWK_NM,
-    NETWORK_ID,
-    SPONSOR_BNK_IFSC,
-    SPONSOR_BNK_MICR,
-    ULTDST_USR_NAME,
-    ULTDST_INSTR_RT,
-    ULTDST_MID,
-    ULTDST_TID,
-    BK2BK_TRNS_AM,
-    BK2BK_FEE_AM,
-    BK2BK_CHRG_AM,
-    XLATQR_TC_AM,
-    XLATQR_TC_CUR,
-    XLATQR_CHRG_AM,
-    BNK_TO_BNK_TC_AM,
-    BNK_TO_BNK_TC_CUR,
-    BNK_TO_BNK_CHRG_AM,
-    TOT_OCCUR,
-    TRAC_ID,
-    TRAN_ID,
-    TRANS_ID,
-    TRAN_ID_INT,
-    XFER_MTHD_TYP,
-    TRIGR_TM,
-    TS_CNFRM_NO,
-    NCOL_LAT_CHRG_AM,
-    USR_AGT,
-    FRST_TM_FL,
-    TRAN_TM,
-    TRAN_ZON,
-    ORD_TS,
-    CHG_RSN
-) VALUES (
-    'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    'b1c2d3e4-f5a6-7890-bcde-fa2345678901',
-    'CNF1234567',
-    'REF000123456',
-    'd1e2f3a4-b5c6-7890-cdef-ab3456789012',
-    'SAV',
-    'DBIT',
-    'c1d2e3f4-a5b6-7890-def0-bc4567890123',
-    'SAV',
-    'CRDT',
-    'e1f2a3b4-c5d6-7890-ef01-cd5678901234',
-    'PENDING',
-    'Scheduled, awaiting execution',
-    'N',
-    TO_DATE('2025-04-20','YYYY-MM-DD'),
-    'f1a2b3c4-d5e6-7890-0def-de6789012345',
-    0,
-    'AUTO',
-    'N',
-    NULL,
-    NULL,
-    NULL,
-    'g1a2b3c4-d5e6-7890-1def-ef7890123456',
-    'h1a2b3c4-d5e6-7890-2def-fa8901234567',
-    TO_DATE('2025-04-19','YYYY-MM-DD'),
-    1234567890,
-    123456789,
-    'i1a2b3c4-d5e6-7890-3def-ab9012345678',
-    'ONLINE',
-    'BRANCH',
-    'PAYREF0001',
-    'MOBILE',
-    'SWIFT',
-    'BANK1234',
-    'BATCH0001',
-    TO_DATE('2025-04-21','YYYY-MM-DD'),
-    '15:30:00',
-    '+05:30',
-    TO_DATE('2025-04-20','YYYY-MM-DD'),
-    'PAYMENT',
-    'ALTACC12345',
-    'ENT123',
-    'PRD456',
-    'SAV',
-    'BRANCH',
-    'SWIFTNET',
-    'NET12345',
-    'SBIN0001234',
-    '400002123',
-    'John Doe',
-    'STD',
-    'MID12345',
-    'TID67890',
-    10000.50,
-    15.75,
-    20.00,
-    70.25,
-    'USD',
-    10.00,
-    85.30,
-    'INR',
-    25.00,
-    1,
-    'TRC1234567890',
-    'TRID1234567890123456789',
-    'TRANS123456',
-    123456789,
-    'IMPS',
-    TO_DATE('2025-04-20','YYYY-MM-DD'),
-    'TS12345678',
-    5,
-    'ChatGPT/1.2025.098 (iOS 18.3.2; iPhone13,3; build 14414233190)',
-    'Y',
-    '14:05:00',
-    '+05:30',
-    TO_TIMESTAMP_TZ('2025-04-20 14:05:00 +05:30','YYYY-MM-DD HH24:MI:SS TZH:TZM'),
-    'Initial insert'
-);
+package com.bofa.sst.batch.core.impl;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.*;               // for Set, HashSet, List, etc.
+
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import lombok.extern.log4j.Log4j2;
+
+@Component
+@Log4j2
+public class CustaggProcessor 
+    implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private Map<String, String> entityMap;
+
+    // ─────────────── NEW: de-duplication set ─────────────── 
+    /** Keeps track of prod|ent|acct that we've already processed in this step */
+    private Set<String> seenRecordKeys;
+    // ────────────────────────────────────────────────────────
+
+    /** Load entityMap and init dedup set once per step (i.e. per partition) */
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        entityMap = (Map<String, String>) 
+            stepExecution
+              .getJobExecution()
+              .getExecutionContext()
+              .get("entityMap");
+
+        if (entityMap == null || entityMap.isEmpty()) {
+            log.error("CustaggProcessor: Entity map is not available");
+            throw new IllegalStateException("Entity map not initialized");
+        }
+        log.info("CustaggProcessor: Retrieved entity map with {} entries.", entityMap.size());
+
+        // ─────────────── NEW: initialize de-duplication set ───────────────
+        seenRecordKeys = new HashSet<>();
+        // ───────────────────────────────────────────────────────────────────
+    }
+
+    @Override
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO item) throws Exception {
+        String entityFromFile  = item.getEntity().trim();
+        String accountNumber   = item.getAccountNumber();
+        String productCode     = item.getProductCode().trim();
+
+        // ─────────────── NEW: build dedup key & check ───────────────
+        String dedupKey = productCode + "|" + entityFromFile + "|" + accountNumber;
+        if (!seenRecordKeys.add(dedupKey)) {
+            log.debug("Duplicate detected, skipping record: {}", dedupKey);
+            return null;
+        }
+        // ───────────────────────────────────────────────────────────────
+
+        log.info("CustaggProcessor: Processing record – Entity: {}, Account: {}, Product: {}",
+                  entityFromFile, accountNumber, productCode);
+
+        // existing entityMap lookup
+        String mappedEntity = entityMap.get(entityFromFile);
+        if (mappedEntity == null) {
+            log.warn("CustaggProcessor: No mapping for entity {} – skipping", entityFromFile);
+            return null;
+        }
+
+        // build the enriched DTO
+        CustaggProcessedRecordsDTO enrichedRecord = new CustaggProcessedRecordsDTO();
+        enrichedRecord.setProductCode(productCode);
+        enrichedRecord.setNumEntity(entityFromFile);
+        enrichedRecord.setMappedEntity(mappedEntity);
+        enrichedRecord.setAccountNumber(accountNumber);
+
+        // fetch schedule IDs
+        List<String> scheduleIds =
+            fetchScheduleIds(accountNumber, entityFromFile, productCode);
+        enrichedRecord.setScheduleIds(scheduleIds);
+
+        // fetch & update transfer execution IDs
+        List<String> transferExecutionIds =
+            fetchAndUpdateTransferExecutionIds(scheduleIds);
+        enrichedRecord.setTransferExecutionIds(transferExecutionIds);
+
+        // fetch & update transfer instruction IDs
+        if (!scheduleIds.isEmpty()) {
+            fetchAndUpdateTransferInstructionIds(scheduleIds);
+            enrichedRecord.setTransferInstructionIds(scheduleIds);  
+            // (or however you collect them)
+        }
+
+        log.info("CustaggProcessor: Enriched record: {}", enrichedRecord);
+        return enrichedRecord;
+    }
+
+    // ... your existing fetchScheduleIds, fetchAndUpdateTransferExecutionIds, etc.
+}
