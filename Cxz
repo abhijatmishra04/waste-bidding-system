@@ -1,1 +1,42 @@
 
+Implemented Conditions in UdapRequestPaymentInfoProcessor.java
+
+1. Switch Case: REM_STMT_BAL
+	•	If the Payment Amount is null, the request is skipped.
+	•	Otherwise:
+	•	Set payment type as SST_REM_STMT_BAL_ONETIME
+	•	Set original payment amount from getPmtAm()
+	•	Set amount type as AMT_TYPE_RSB
+
+⸻
+
+2. Switch Case: ISB
+	•	If the Process Code or MinStmtCtrRegAmt is null, the request is skipped.
+	•	If Process Code is P00:
+	•	Set payment type as SST_ONETIME_ISB
+	•	Set system type as SST_AUTOPAY_ISB
+	•	Set original payment amount from getMinStmtCtrRegAmt()
+	•	Set amount type as AMT_TYPE_ISB
+
+⸻
+
+3. Switch Case: REM_ISB
+	•	If Payment Amount is null, the request is skipped.
+	•	Otherwise:
+	•	Set payment type as SST_REM_ISB
+	•	Set original payment amount from getPmtAm()
+	•	Set amount type as AMT_TYPE_RIS
+
+
+
+
+
+⸻
+
+4. Additional Conditions After Switch Case
+	•	If Transfer Reference ID or Process Code is null, skip the request.
+	•	If Process Code = P03 and RmanOccur = 0, set original payment amount using getFinlAm().
+	•	If Process Code != P03 or RemainOccurrences != 1, set original payment amount using getPmtAm().
+
+
+To fetch scheduled credit card payments (likely for batch processing) for the next transaction date.
