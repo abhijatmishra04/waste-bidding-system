@@ -1,48 +1,69 @@
-package com.bofa.sst.batch.listener;
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.batch.core.SkipListener;
-import com.bofa.sst.batch.dto.PoeBinDto;   // adjust this import to whatever package your DTO lives in
+  <Appenders>
+    <!-- ********** 1) Existing Application Appender ********** -->
+    <RollingFile name="appAppender"
+                 fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_poe/batch/application.log"
+                 filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_poe/batch/application-%d{MM-dd-yyyy}-%i.log.gz">
+      <PatternLayout>
+        <Pattern>%d %-5p %t %c{2}:%L - %m%n</Pattern>
+      </PatternLayout>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_poe/batch/">
+          <IfFileName glob="application-*.log.gz"/>
+          <IfAny>
+            <IfLastModified age="7d"/>
+            <IfAccumulatedFileCount exceeds="15"/>
+          </IfAny>
+        </Delete>
+      </DefaultRolloverStrategy>
+    </RollingFile>
 
-/**
- * Whenever the reader, processor, or writer skips an item,
- * log it here so we can see exactly which eight rows disappeared.
- */
-public class PoeBinSkipListener implements SkipListener<PoeBinDto, PoeBinDto> {
+    <!-- ********** 2) NEW: Splunk Appender ********** -->
+    <!--   Add exactly this under <Appenders> -->
+    <RollingFile name="splunkAppender"
+                 fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_poe/batch/splunk.log"
+                 filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_poe/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
+      <PatternLayout>
+        <!-- Only timestamp | message, since Splunk typically parses those -->
+        <Pattern>%d{dd/MMM/yyyy:HH:mm:ss.SSS 'Z'}| %m%n</Pattern>
+      </PatternLayout>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_poe/batch/">
+          <IfFileName glob="splunk-*.log.gz"/>
+          <IfAny>
+            <IfLastModified age="7d"/>
+            <IfAccumulatedFileCount exceeds="15"/>
+          </IfAny>
+        </Delete>
+      </DefaultRolloverStrategy>
+    </RollingFile>
+    <!-- ********** END Splunk Appender ********** -->
+  </Appenders>
 
-    private static final Logger log = LoggerFactory.getLogger(PoeBinSkipListener.class);
 
-    @Override
-    public void onSkipInRead(Throwable t) {
-        // This will fire if the FlatFileItemReader (or tokenizer/mapper) throws a skip‐able exception
-        log.error("***** SKIP IN READ: threw [{} : {}]",
-                  t.getClass().getSimpleName(),
-                  t.getMessage());
-    }
+  <Loggers>
+    <!-- ********** 3) Modify/Add this LOGGER for your package ********** -->
+    <!-- Anything logged under com.bofa.sst.batch will now go to BOTH appAppender AND splunkAppender -->
+    <Logger name="com.bofa.sst.batch" level="debug" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <!-- ********** END Package Logger ********** -->
 
-    @Override
-    public void onSkipInProcess(PoeBinDto item, Throwable t) {
-        // This fires if processor throws an exception (e.g. SQLEx, NPE), OR if processor returned null
-        if (item == null && t == null) {
-            // processor returned null without an exception (i.e. your "duplicate‐check → return null" path)
-            log.error("***** SKIP IN PROCESS: returned NULL in processor (IN‐FILE DUPLICATE).");
-        }
-        else {
-            // processor threw an exception while handling 'item'
-            log.error("***** SKIP IN PROCESS: item [{}] threw [{} : {}]",
-                      item,
-                      (t == null ? "null‐exception" : t.getClass().getSimpleName()),
-                      (t == null ? "no message"     : t.getMessage()));
-        }
-    }
+    <!-- (You can leave your other Logger entries untouched.  Just be sure not to override com.bofa.sst.batch.) -->
 
-    @Override
-    public void onSkipInWrite(PoeBinDto item, Throwable t) {
-        // Fires if writer throws a skip‐able exception (unlikely in your code, but we include it)
-        log.error("***** SKIP IN WRITE: item [{}] threw [{} : {}]",
-                  item,
-                  t.getClass().getSimpleName(),
-                  t.getMessage());
-    }
-}
+    <!-- ********** 4) Root logger stays pointing to appAppender ********** -->
+    <Root level="info">
+      <AppenderRef ref="appAppender"/>
+    </Root>
+  </Loggers>
+
+</Configuration>
