@@ -1,1 +1,48 @@
+package com.bofa.sst.batch.listener;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.SkipListener;
+import com.bofa.sst.batch.dto.PoeBinDto;   // adjust this import to whatever package your DTO lives in
+
+/**
+ * Whenever the reader, processor, or writer skips an item,
+ * log it here so we can see exactly which eight rows disappeared.
+ */
+public class PoeBinSkipListener implements SkipListener<PoeBinDto, PoeBinDto> {
+
+    private static final Logger log = LoggerFactory.getLogger(PoeBinSkipListener.class);
+
+    @Override
+    public void onSkipInRead(Throwable t) {
+        // This will fire if the FlatFileItemReader (or tokenizer/mapper) throws a skip‐able exception
+        log.error("***** SKIP IN READ: threw [{} : {}]",
+                  t.getClass().getSimpleName(),
+                  t.getMessage());
+    }
+
+    @Override
+    public void onSkipInProcess(PoeBinDto item, Throwable t) {
+        // This fires if processor throws an exception (e.g. SQLEx, NPE), OR if processor returned null
+        if (item == null && t == null) {
+            // processor returned null without an exception (i.e. your "duplicate‐check → return null" path)
+            log.error("***** SKIP IN PROCESS: returned NULL in processor (IN‐FILE DUPLICATE).");
+        }
+        else {
+            // processor threw an exception while handling 'item'
+            log.error("***** SKIP IN PROCESS: item [{}] threw [{} : {}]",
+                      item,
+                      (t == null ? "null‐exception" : t.getClass().getSimpleName()),
+                      (t == null ? "no message"     : t.getMessage()));
+        }
+    }
+
+    @Override
+    public void onSkipInWrite(PoeBinDto item, Throwable t) {
+        // Fires if writer throws a skip‐able exception (unlikely in your code, but we include it)
+        log.error("***** SKIP IN WRITE: item [{}] threw [{} : {}]",
+                  item,
+                  t.getClass().getSimpleName(),
+                  t.getMessage());
+    }
+}
