@@ -1,1 +1,113 @@
+package com.bofa.sst.batch.core.impl;
 
+import com.bofa.sst.batch.core.PoeBinDto;
+import com.bofa.sst.batch.core.PoeBinSQLFactory;
+import com.bofa.sst.batch.core.PoeBinConstants;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.sql.Timestamp;
+import java.time.OffsetDateTime;
+import java.util.Calendar;
+import java.util.List;
+import java.text.SimpleDateFormat;
+
+/**
+ * This class is used to update/insert data into the POE_BIN table.
+ */
+@Slf4j
+@Component
+public class PoeBinItemWriterImpl implements org.springframework.batch.item.ItemWriter<PoeBinDto> {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public PoeBinItemWriterImpl(javax.sql.DataSource dataSource) {
+        this.jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    public static final String DATE_FORMAT = "yyyy-MM-ddHH:mm:ss";
+
+    @Override
+    public void write(List<? extends PoeBinDto> items) throws Exception {
+        OffsetDateTime offsetDateTime = OffsetDateTime.now();
+        Timestamp timestamp = Timestamp.from(offsetDateTime.toInstant());
+        Timestamp createTimestamp = timestamp;
+        log.info("In processor Timestamp value is :: {}", createTimestamp);
+
+        for (PoeBinDto poeBinDto : items) {
+            // We build the parameter array (for both INSERT and UPDATE)
+            Object[] insertParams = new Object[] {
+                poeBinDto.getBankIdNo(),
+                poeBinDto.getHostNo(),
+                poeBinDto.getIssuerNo(),
+                poeBinDto.getProdBrndNo(),
+                poeBinDto.getBusLineTpNo(),
+                poeBinDto.getHostPlatformNo(),
+                poeBinDto.getPmtCpnMicrNo(),
+                poeBinDto.getGlDestNo()
+            };
+
+            try {
+                if (poeBinDto.isContains()) {
+                    // === UPDATE PATH ===
+                    log.info("Update Operation going to be performed: {}", poeBinDto.isContains());
+
+                    // The UPDATE_BIN SQL expects (prodBrndNo, bankIdNo) in that order:
+                    int rowsAffected = jdbcTemplate.update(
+                            PoeBinSQLFactory.UPDATE_BIN,
+                            poeBinDto.getProdBrndNo(),
+                            poeBinDto.getBankIdNo()
+                    );
+
+                    if (rowsAffected == 0) {
+                        // No rows actually updated—perhaps record existed but nothing changed?
+                        log.warn("Zero‐row UPDATE for BankId={} (no matching row or no changes). DTO={}",
+                                 poeBinDto.getBankIdNo(),
+                                 poeBinDto);
+                    } else {
+                        // At least one row was updated
+                        PoeBinConstants.updatedCount += rowsAffected;
+                        log.info("UPDATE succeeded for BankId={} → rowsAffected={}", 
+                                 poeBinDto.getBankIdNo(), 
+                                 rowsAffected);
+                    }
+
+                } else {
+                    // === INSERT PATH ===
+                    log.info("BatchWriter ::: INSERT ::: data ::: {}", poeBinDto);
+
+                    int rowsAffected = jdbcTemplate.update(
+                            PoeBinSQLFactory.INSERT_BIN,
+                            insertParams
+                    );
+
+                    if (rowsAffected == 1) {
+                        // One row was inserted
+                        PoeBinConstants.insertedCount++;
+                        log.info("INSERT succeeded for BankId={} → rowsAffected=1", 
+                                 poeBinDto.getBankIdNo());
+                    } else {
+                        // Unexpected number of rows inserted (should typically be 1)
+                        log.warn("Unexpected rowsAffected for INSERT, BankId={} → rowsAffected={}",
+                                 poeBinDto.getBankIdNo(),
+                                 rowsAffected);
+                    }
+                }
+
+            } catch (Exception exception) {
+                // If anything goes wrong during update/insert, log timestamp + error
+                SimpleDateFormat sdf = new SimpleDateFormat(PoeBinConstants.DATE_AND_TIME_FORMAT);
+                String nowStr = sdf.format(Calendar.getInstance().getTime());
+                log.error("PoeBinItemWriter ::: write() ::: Error at {} while updating/inserting record. "
+                        + "BankId={}, DTO={}, Error={}", 
+                        nowStr,
+                        poeBinDto.getBankIdNo(),
+                        poeBinDto,
+                        exception.getMessage(), 
+                        exception);
+                throw exception;  // rethrow so that Spring Batch can skip or fail based on your skip policy
+            }
+        }
+    }
+}
