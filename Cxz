@@ -1,115 +1,152 @@
+package com.bofa.sst.batch.core.impl;
 
-package com.bofa.sst.batch.core;
-
-import com.bofa.sst.batch.common.CustaggBatchConstants;
 import com.bofa.sst.batch.common.CustaggBatchException;
-import com.bofa.sst.batch.common.FieldOffsetTable;
-import com.bofa.sst.batch.dto.CustaggRecordsDTO;
-import com.bofa.sst.batch.util.CompCharaterUtil; // adjust to your util’s actual package
+import com.bofa.sst.batch.constants.CustaggBatchConstants;
+import com.bofa.sst.batch.constants.FieldOffsetTable;
+import com.bofa.sst.batch.util.CompCharacterUtil;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemStream;
 import org.springframework.batch.item.ItemStreamException;
+import org.springframework.batch.item.ItemStreamSupport;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.FileChannel;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-/**
- * High-performance reader for fixed-length “comp” files.
- *
- * • Uses NIO FileChannel + single ByteBuffer per record  
- * • Seeks to (fromLine–1) * RECORD_SIZE at open, reads exactly RECORD_SIZE bytes each read()  
- * • Parses:
- *     – productCode (bytes 0–3)  
- *     – numericEntity (packed BCD via CompCharaterUtil)  
- *     – accountNumber (offset/length lookup via FieldOffsetTable)  
- * • Throws CustaggBatchException on any I/O or partial-record error
- */
 @Log4j2
+@Component
+@StepScope
 public class CustaggCompFileReader
+        extends ItemStreamSupport
         implements ItemReader<CustaggRecordsDTO>, ItemStream {
 
+    @Value("#{jobExecutionContext['directoryPath']}")
+    private String directoryPath;
+
+    @Value("#{jobExecutionContext['filePrefixReferData']}")
+    private String filePrefixReferData;
+
+    @Value("#{stepExecutionContext['fromLine']}")
+    private int startLine;
+
+    @Value("#{stepExecutionContext['toLine']}")
+    private int endLine;
+
     private FileChannel channel;
-    private long cursor, limit;
-    private final ByteBuffer buffer =
-            ByteBuffer.allocate(CustaggBatchConstants.RECORD_SIZE);
+    private ByteBuffer buffer;
+    private long numberOfRecordsToRead;
+    private long currentRecord;
+    private StepExecution stepExecution;
+
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        this.stepExecution = stepExecution;
+    }
 
     @Override
     public void open(ExecutionContext ctx) throws ItemStreamException {
         try {
-            cursor = ctx.getLong("fromLine");
-            limit  = ctx.getLong("toLine");
-            String filePath = ctx.getString("dataFile");
+            // restore counter if restarting
+            if (ctx.containsKey("counter")) {
+                currentRecord = ctx.getLong("counter");
+            } else {
+                currentRecord = 0L;
+            }
 
-            channel = FileChannel.open(
-                Paths.get(filePath),
-                StandardOpenOption.READ
+            // locate today’s refer-data file using your FileUtils
+            String dataFilePath = FileUtils.findTodaysFiles(
+                directoryPath,
+                filePrefixReferData,
+                CustaggBatchConstants.LOCK_FILE_EXTENSION
             );
-            channel.position((cursor - 1) * CustaggBatchConstants.RECORD_SIZE);
 
-            log.info("Reader opened on file={}, processing records {}–{}",
-                     filePath, cursor, limit);
+            Path path = Path.of(dataFilePath);
+            channel = FileChannel.open(path, StandardOpenOption.READ);
+
+            // skip to the correct byte offset
+            long skipBytes = (long)(startLine - 1) * CustaggBatchConstants.RECORD_SIZE;
+            channel.position(skipBytes);
+
+            buffer = ByteBuffer.allocate(CustaggBatchConstants.RECORD_SIZE);
+
+            numberOfRecordsToRead = (endLine - startLine) + 1L;
+            log.info("CustaggCompFileReader opened: fromLine={}, toLine={}, totalRecordsInPartition={}",
+                     startLine, endLine, numberOfRecordsToRead);
+
         } catch (IOException e) {
-            throw new CustaggBatchException("Failed to open comp file reader", e);
+            throw new ItemStreamException("Error opening data file for reading", e);
         }
     }
 
     @Override
     public CustaggRecordsDTO read() throws Exception {
-        if (cursor > limit) {
-            return null;  // this partition is done
+        // end of this partition?
+        if (currentRecord >= numberOfRecordsToRead) {
+            log.info("CustaggCompFileReader: all {} records read for this partition", numberOfRecordsToRead);
+            return null;
         }
 
         buffer.clear();
-        int bytesRead;
-        try {
-            bytesRead = channel.read(buffer);
-        } catch (IOException e) {
-            throw new CustaggBatchException("I/O error at record index " + cursor, e);
-        }
-
-        if (bytesRead == -1) {
-            return null;  // unexpected EOF
-        }
-        if (bytesRead != CustaggBatchConstants.RECORD_SIZE) {
-            throw new CustaggBatchException("Incomplete record @ index " + cursor);
+        int bytesRead = channel.read(buffer);
+        if (bytesRead < CustaggBatchConstants.RECORD_SIZE) {
+            if (bytesRead == -1) {
+                log.warn("CustaggCompFileReader: unexpected EOF at record {}", currentRecord + 1);
+                return null;
+            }
+            throw new CustaggBatchException("Incomplete record read: expected "
+                + CustaggBatchConstants.RECORD_SIZE + " but got " + bytesRead);
         }
 
         buffer.flip();
-        byte[] record = new byte[CustaggBatchConstants.RECORD_SIZE];
-        buffer.get(record);
+        byte[] recordBytes = buffer.array();
 
-        // parse fields
-        String product = new String(record, 0, 3, CustaggBatchConstants.CHARSET).trim();
-        String entity  = CompCharaterUtil.packedToString(record, 2, 2).trim();
-        String accNo   = FieldOffsetTable.extractAccountNumber(product, record);
+        // 1) product code (bytes 0–2)
+        String productCode = new String(recordBytes, 0, 3, StandardCharsets.UTF_8).trim();
 
-        if (log.isTraceEnabled()) {
-            log.trace("Record {} → prod='{}', ent='{}', acc='{}'",
-                      cursor, product, entity, accNo);
-        }
+        // 2) numeric entity (bytes 2–3) → unpacked via your util
+        byte[] entityPacked = new byte[] { recordBytes[2], recordBytes[3] };
+        String entity = CompCharacterUtil.packedToString(entityPacked).trim();
 
-        cursor++;
-        return new CustaggRecordsDTO(product, entity, accNo);
+        // 3) accountNumber via your centralized offset lookup
+        String accountNumber = FieldOffsetTable
+            .extractAccountNumber(productCode, recordBytes);
+
+        CustaggRecordsDTO dto = new CustaggRecordsDTO();
+        dto.setProductCode(productCode);
+        dto.setEntity(entity);
+        dto.setAccountNumber(accountNumber);
+
+        currentRecord++;
+        log.debug("CustaggCompFileReader: read #{} → {}", currentRecord, dto);
+        return dto;
     }
 
     @Override
-    public void update(ExecutionContext executionContext) throws ItemStreamException {
-        // no state to store between checkpoints
+    public void update(ExecutionContext ctx) throws ItemStreamException {
+        // persist progress for restart
+        ctx.putLong("counter", currentRecord);
     }
 
     @Override
     public void close() throws ItemStreamException {
-        if (channel != null) {
-            try {
+        try {
+            if (channel != null && channel.isOpen()) {
                 channel.close();
-            } catch (IOException e) {
-                log.warn("Error closing FileChannel", e);
+                log.info("CustaggCompFileReader: file channel closed");
             }
+        } catch (IOException e) {
+            throw new ItemStreamException("Error closing data file channel", e);
         }
     }
 }
