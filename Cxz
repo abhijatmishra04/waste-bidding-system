@@ -1,1 +1,133 @@
 
+package com.bofa.sst.batch.core;
+
+import com.bofa.sst.batch.common.CustaggBatchException;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.Map;
+
+@Log4j2
+@Component
+@Scope("step")
+public class CustaggFileValidationTasklet implements Tasklet, StepExecutionListener {
+
+    @Value("${custag.input.file.path}")
+    private String directoryPath;
+
+    @Value("#{jobParameters['FilePrefixReferData']}")
+    private String filePrefixReferData;
+
+    @Value("#{jobParameters['FilePrefixReferEnty']}")
+    private String filePrefixReferEnty;
+
+    private StepExecution stepExecution;
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        this.stepExecution = stepExecution;
+    }
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+        try {
+            File dir = new File(directoryPath);
+
+            // 1) locate the refer-data file
+            File dataFile = Files.list(dir.toPath())
+                    .map(p -> p.toFile())
+                    .filter(f -> f.getName().startsWith(filePrefixReferData))
+                    .findFirst()
+                    .orElseThrow(() -> new CustaggBatchException(
+                            "Refer-data file with prefix '" + filePrefixReferData +
+                            "' not found in " + directoryPath));
+
+            // 2) locate the refer-enty file
+            File entyFile = Files.list(dir.toPath())
+                    .map(p -> p.toFile())
+                    .filter(f -> f.getName().startsWith(filePrefixReferEnty))
+                    .findFirst()
+                    .orElseThrow(() -> new CustaggBatchException(
+                            "Refer-enty file with prefix '" + filePrefixReferEnty +
+                            "' not found in " + directoryPath));
+
+            // 3) create lock files
+            createLock(dataFile);
+            createLock(entyFile);
+
+            // 4) read the refer-enty file using fixed-width substrings
+            Map<String, String> entityMap = new HashMap<>();
+            try (BufferedReader reader = Files.newBufferedReader(entyFile.toPath(), StandardCharsets.US_ASCII)) {
+                String line;
+                int lineNumber = 0;
+                while ((line = reader.readLine()) != null) {
+                    lineNumber++;
+                    if (line.length() < 8) {
+                        log.info("EntityFileReader: Skipping line {} – too short: \"{}\"", lineNumber, line);
+                        continue;
+                    }
+
+                    // fixed-width fields: chars 0–3 → alpha, 4–7 → numeric
+                    String alphaEntity = line.substring(0, 4).trim();
+                    String numEntity   = line.substring(4, 8).trim();
+
+                    if (alphaEntity.isEmpty() || numEntity.isEmpty()) {
+                        log.info("EntityFileReader: Skipping line {} – missing values: \"{}\"", lineNumber, line);
+                        continue;
+                    }
+
+                    entityMap.put(numEntity, alphaEntity);
+                    log.info("EntityFileReader: Processed line {} – NumEntity={}, AlphaEntity={}",
+                             lineNumber, numEntity, alphaEntity);
+                }
+            }
+
+            // 5) store into JobExecutionContext for downstream steps
+            ExecutionContext jobCtx = stepExecution.getJobExecution().getExecutionContext();
+            jobCtx.put("entityMap",           entityMap);
+            jobCtx.put("directoryPath",       directoryPath);
+            jobCtx.put("filePrefixReferData", filePrefixReferData);
+            jobCtx.put("filePrefixReferEnty", filePrefixReferEnty);
+
+            log.info("Validation complete: dataFile='{}', entyFile='{}', mappings={}",
+                     dataFile.getName(), entyFile.getName(), entityMap.size());
+
+            return RepeatStatus.FINISHED;
+
+        } catch (IOException e) {
+            throw new CustaggBatchException("I/O error during file validation", e);
+        }
+    }
+
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        return ExitStatus.COMPLETED;
+    }
+
+    private void createLock(File file) {
+        File lock = new File(file.getAbsolutePath() + ".lck");
+        try {
+            if (lock.exists() || lock.createNewFile()) {
+                log.debug("Lock file created: {}", lock.getName());
+            }
+        } catch (IOException e) {
+            throw new CustaggBatchException("Failed to create lock file for " + file.getName(), e);
+        }
+    }
+}
