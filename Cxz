@@ -1,99 +1,158 @@
-package com.bofa.sst.batch.core;
+package com.bofa.sst.batch.core.impl;
 
-import com.bofa.sst.batch.dto.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.dto.CustaggRecordsDTO;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.ExecutionContext;
-import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.core.annotation.AfterStep;
-import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.*;
+import java.util.stream.Collectors;
 
-/**
- * Enriches raw CustaggRecordsDTO with alpha-entity, deduplicates globally
- * across all partitions, and records duplicate-skip metrics.
- */
-@Log4j2
 @Component
-public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+@Log4j2
+public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO>, StepExecutionListener {
 
-    private Map<String, String> entityMap;
-    private ConcurrentMap<String, Boolean> dedupCache;
-    private long dupSkipped = 0;
+    @Autowired
+    private NamedParameterJdbcTemplate jdbcTemplate;
 
-    /**
-     * Initializes the entityMap (from validation tasklet) and
-     * a shared dedupCache in the JobExecutionContext.
-     */
+    private StepExecution stepExecution;
+
     @BeforeStep
-    @SuppressWarnings("unchecked")
     public void beforeStep(StepExecution stepExecution) {
-        ExecutionContext jobCtx = stepExecution.getJobExecution().getExecutionContext();
-
-        // 1) restore the numeric→alpha entity map
-        entityMap = (Map<String, String>) jobCtx.get("entityMap");
-        if (entityMap == null) {
-            throw new IllegalStateException("entityMap missing from JobExecutionContext");
-        }
-
-        // 2) build or restore the job-wide dedup cache
-        dedupCache = (ConcurrentMap<String, Boolean>) jobCtx.get("dedupCache");
-        if (dedupCache == null) {
-            dedupCache = new ConcurrentHashMap<>(1_000_000);
-            jobCtx.put("dedupCache", dedupCache);
-        }
-
-        log.info("Processor initialized: entityMap size={}, dedupCache size={}",
-                 entityMap.size(), dedupCache.size());
+        this.stepExecution = stepExecution;
     }
 
-    /**
-     * For each record:
-     * 1) map numeric→alpha entity (skip if missing),
-     * 2) dedupe on product#numericEntity#accountNumber (skip duplicates),
-     * 3) emit CustaggProcessedRecordsDTO.
-     */
     @Override
-    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO record) {
-        // entity mapping
-        String alpha = entityMap.get(record.getNumericEntity());
-        if (alpha == null) {
-            log.debug("Skipping record: no mapping for numericEntity={}", record.getNumericEntity());
-            return null;
+    public void write(List<? extends CustaggProcessedRecordsDTO> items) {
+        if (items.isEmpty()) {
+            log.info("No records to write");
+            return;
         }
 
-        // global dedup
-        String key = record.getProductCode()
-                   + '#' + record.getNumericEntity()
-                   + '#' + record.getAccountNumber();
-        if (dedupCache.putIfAbsent(key, Boolean.TRUE) != null) {
-            dupSkipped++;
-            log.debug("Duplicate skipped: {}", key);
-            return null;
-        }
+        // 1) Collect all (accountNumber, numEntity, productCode) tuples
+        Set<String> accNos  = items.stream().map(CustaggProcessedRecordsDTO::getAccountNumber).collect(Collectors.toSet());
+        Set<String> ents    = items.stream().map(CustaggProcessedRecordsDTO::getNumEntity).collect(Collectors.toSet());
+        Set<String> prods   = items.stream().map(CustaggProcessedRecordsDTO::getProductCode).collect(Collectors.toSet());
 
-        // emit enriched DTO
-        return new CustaggProcessedRecordsDTO(
-            record.getAccountNumber(),
-            record.getNumericEntity(),
-            alpha,
-            record.getProductCode()
-        );
+        // 2) Fetch ALL schedule_ids in one go (legacy FETCH_SCHEDULE_ID_ACCOUNT_BOA + _ACCOUNT_M2M unioned)
+        String fetchSchdSql =
+                "SELECT schd.sched_id\n" +
+                "  FROM sst_owner.account_boa acc\n" +
+                "  JOIN sst_owner.schedule_m2m schd\n" +
+                "    ON acc.acc_boa_id = schd.dr_acc_id\n" +
+                " WHERE acc.acc_no     IN (:accNos)\n" +
+                "   AND acc.ent_cd     IN (:ents)\n" +
+                "   AND acc.prod_cd    IN (:prods)\n" +
+                "   AND schd.sched_stat = 'S01'\n" +
+                "   AND schd.xfer_ref_id IS NULL\n" +
+                "UNION\n" +
+                "SELECT schd.sched_id\n" +
+                "  FROM sst_owner.account_m2m accm\n" +
+                "  JOIN sst_owner.schedule_m2m schd\n" +
+                "    ON accm.acc_id = schd.dr_acc_id\n" +
+                " WHERE accm.acc_no     IN (:accNos)\n" +
+                "   AND accm.ent_cd     IN (:ents)\n" +
+                "   AND accm.prod_cd    IN (:prods)\n" +
+                "   AND schd.sched_stat = 'S01'\n" +
+                "   AND schd.xfer_ref_id IS NULL";
+
+        MapSqlParameterSource p = new MapSqlParameterSource()
+                .addValue("accNos", accNos)
+                .addValue("ents",   ents)
+                .addValue("prods",  prods);
+
+        List<Long> scheduleIds = jdbcTemplate.queryForList(fetchSchdSql, p, Long.class);
+        log.info("Fetched {} schedule IDs", scheduleIds.size());
+
+        if (!scheduleIds.isEmpty()) {
+            // 3) UPDATE schedule_m2m in bulk (legacy UPDATE_SCHEDULE_M2M)
+            String updateSchdSql =
+                    "UPDATE sst_owner.schedule_m2m\n" +
+                    "   SET cls_dt    = :now\n" +
+                    "     , updt_by   = 'CUSTAGG'\n" +
+                    "     , updt_ts   = :now\n" +
+                    "     , sched_stat= 'S02'\n" +
+                    " WHERE sched_id IN (:scheduleIds)";
+
+            MapSqlParameterSource u1 = new MapSqlParameterSource()
+                    .addValue("now",          Timestamp.from(Instant.now()))
+                    .addValue("scheduleIds",  scheduleIds);
+
+            int updatedSchedules = jdbcTemplate.update(updateSchdSql, u1);
+            log.info("Updated {} schedule_m2m rows", updatedSchedules);
+
+            // 4) Fetch all transfer_execution IDs in one go (legacy FETCH_TRANSFER_EXECUTION_M2M_ID)
+            String fetchExecSql =
+                    "SELECT temm.xfer_exeq_m2m_id\n" +
+                    "  FROM sst_owner.transfer_execution_m2m temm\n" +
+                    "  JOIN sst_owner.transfer_instruction_m2m timm\n" +
+                    "    ON timm.xfer_instr_id = temm.xfer_instr_id\n" +
+                    " WHERE     temm.sched_id IN (:scheduleIds)\n" +
+                    "   AND temm.act_indct <> 'F'";
+            List<Long> execIds = jdbcTemplate.queryForList(fetchExecSql, u1, Long.class);
+            log.info("Fetched {} transfer_execution IDs", execIds.size());
+
+            if (!execIds.isEmpty()) {
+                // 5) Update transfer_execution_m2m in bulk (legacy UPDATE_TRANSFER_EXECUTION_M2M)
+                String updateExecSql =
+                        "UPDATE sst_owner.transfer_execution_m2m\n" +
+                        "   SET act_indct = 'F'\n" +
+                        "     , updt_by   = 'CUSTAGG'\n" +
+                        "     , updt_ts   = :now\n" +
+                        " WHERE xfer_exeq_m2m_id IN (:execIds)";
+                MapSqlParameterSource u2 = new MapSqlParameterSource()
+                        .addValue("now",    Timestamp.from(Instant.now()))
+                        .addValue("execIds", execIds);
+                int n1 = jdbcTemplate.update(updateExecSql, u2);
+                log.info("Updated {} transfer_execution_m2m rows", n1);
+            }
+
+            // 6) Fetch all transfer_instruction IDs in one go (legacy FETCH_TRANSFER_INSTRUCTION_ID)
+            String fetchInstrSql =
+                    "SELECT xfer_instr_id\n" +
+                    "  FROM sst_owner.transfer_instruction_m2m\n" +
+                    " WHERE xfer_instr_id NOT IN (\n" +
+                    "     SELECT xfer_instr_id\n" +
+                    "       FROM sst_owner.transfer_execution_m2m\n" +
+                    "     )\n" +
+                    "   AND sched_stat IN ('H03','H05','H06','H07')\n" +
+                    "   AND sched_id IN (:scheduleIds)\n" +
+                    " ORDER BY sched_id";
+            List<Long> instrIds = jdbcTemplate.queryForList(fetchInstrSql, u1, Long.class);
+            log.info("Fetched {} transfer_instruction IDs", instrIds.size());
+
+            if (!instrIds.isEmpty()) {
+                // 7) Update transfer_instruction_m2m in bulk (legacy UPDATE_TRANSFER_INSTRUCTION_M2M)
+                String updateInstrSql =
+                        "UPDATE sst_owner.transfer_instruction_m2m\n" +
+                        "   SET sched_stat = 'S02'\n" +
+                        "     , updt_by    = 'CUSTAGG'\n" +
+                        "     , updt_ts    = :now\n" +
+                        " WHERE xfer_instr_id IN (:instrIds)";
+                MapSqlParameterSource u3 = new MapSqlParameterSource()
+                        .addValue("now",      Timestamp.from(Instant.now()))
+                        .addValue("instrIds", instrIds);
+                int n2 = jdbcTemplate.update(updateInstrSql, u3);
+                log.info("Updated {} transfer_instruction_m2m rows", n2);
+            }
+        }
     }
 
-    /**
-     * After the step, store dupSkipped so the Job listener can aggregate.
-     */
     @AfterStep
-    public void afterStep(StepExecution stepExecution) {
-        ExecutionContext stepCtx = stepExecution.getExecutionContext();
-        stepCtx.putLong("dupSkipped", dupSkipped);
-        log.info("Step '{}' completed, duplicates skipped={}",
-                 stepExecution.getStepName(), dupSkipped);
+    public void afterStep() {
+        ExecutionContext ctx = stepExecution.getExecutionContext();
+        // if you want to log totals after job:
+        // ctx.put("updatedSchedules", scheduleIds.size());
+        // etc...
     }
 }
