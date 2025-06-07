@@ -189,3 +189,15 @@ public class CustaggCompFileReader
         }
     }
 }
+
+
+ // 10-byte field @ offset 14  (IDS, MLA, IML, SDA, DDA)
+        entry("IDS", new int[][]{{14, 10}}),
+        entry("MLA", new int[][]{{14, 10}}),
+        entry("IML", new int[][]{{14, 10}}),
+        entry("SDA", new int[][]{{14, 10}}),
+        entry("DDA", new int[][]{{14, 10}}),
+
+        // 12-byte field @ offset 9   (AID)
+        entry("AID", new int[][]{{9,  12}})
+
