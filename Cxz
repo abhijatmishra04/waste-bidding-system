@@ -1,152 +1,99 @@
-package com.bofa.sst.batch.core.impl;
+package com.bofa.sst.batch.core;
 
-import com.bofa.sst.batch.common.CustaggBatchException;
-import com.bofa.sst.batch.constants.CustaggBatchConstants;
-import com.bofa.sst.batch.constants.FieldOffsetTable;
-import com.bofa.sst.batch.util.CompCharacterUtil;
+import com.bofa.sst.batch.dto.CustaggProcessedRecordsDTO;
+import com.bofa.sst.batch.dto.CustaggRecordsDTO;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemReader;
-import org.springframework.batch.item.ItemStream;
-import org.springframework.batch.item.ItemStreamException;
-import org.springframework.batch.item.ItemStreamSupport;
 import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.ExecutionContext;
 import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.batch.core.configuration.annotation.StepScope;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.batch.core.annotation.AfterStep;
+import org.springframework.batch.item.ItemProcessor;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.nio.channels.FileChannel;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
+/**
+ * Enriches raw CustaggRecordsDTO with alpha-entity, deduplicates globally
+ * across all partitions, and records duplicate-skip metrics.
+ */
 @Log4j2
 @Component
-@StepScope
-public class CustaggCompFileReader
-        extends ItemStreamSupport
-        implements ItemReader<CustaggRecordsDTO>, ItemStream {
+public class CustaggProcessor implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
 
-    @Value("#{jobExecutionContext['directoryPath']}")
-    private String directoryPath;
+    private Map<String, String> entityMap;
+    private ConcurrentMap<String, Boolean> dedupCache;
+    private long dupSkipped = 0;
 
-    @Value("#{jobExecutionContext['filePrefixReferData']}")
-    private String filePrefixReferData;
-
-    @Value("#{stepExecutionContext['fromLine']}")
-    private int startLine;
-
-    @Value("#{stepExecutionContext['toLine']}")
-    private int endLine;
-
-    private FileChannel channel;
-    private ByteBuffer buffer;
-    private long numberOfRecordsToRead;
-    private long currentRecord;
-    private StepExecution stepExecution;
-
+    /**
+     * Initializes the entityMap (from validation tasklet) and
+     * a shared dedupCache in the JobExecutionContext.
+     */
     @BeforeStep
+    @SuppressWarnings("unchecked")
     public void beforeStep(StepExecution stepExecution) {
-        this.stepExecution = stepExecution;
-    }
+        ExecutionContext jobCtx = stepExecution.getJobExecution().getExecutionContext();
 
-    @Override
-    public void open(ExecutionContext ctx) throws ItemStreamException {
-        try {
-            // restore counter if restarting
-            if (ctx.containsKey("counter")) {
-                currentRecord = ctx.getLong("counter");
-            } else {
-                currentRecord = 0L;
-            }
-
-            // locate today’s refer-data file using your FileUtils
-            String dataFilePath = FileUtils.findTodaysFiles(
-                directoryPath,
-                filePrefixReferData,
-                CustaggBatchConstants.LOCK_FILE_EXTENSION
-            );
-
-            Path path = Path.of(dataFilePath);
-            channel = FileChannel.open(path, StandardOpenOption.READ);
-
-            // skip to the correct byte offset
-            long skipBytes = (long)(startLine - 1) * CustaggBatchConstants.RECORD_SIZE;
-            channel.position(skipBytes);
-
-            buffer = ByteBuffer.allocate(CustaggBatchConstants.RECORD_SIZE);
-
-            numberOfRecordsToRead = (endLine - startLine) + 1L;
-            log.info("CustaggCompFileReader opened: fromLine={}, toLine={}, totalRecordsInPartition={}",
-                     startLine, endLine, numberOfRecordsToRead);
-
-        } catch (IOException e) {
-            throw new ItemStreamException("Error opening data file for reading", e);
+        // 1) restore the numeric→alpha entity map
+        entityMap = (Map<String, String>) jobCtx.get("entityMap");
+        if (entityMap == null) {
+            throw new IllegalStateException("entityMap missing from JobExecutionContext");
         }
+
+        // 2) build or restore the job-wide dedup cache
+        dedupCache = (ConcurrentMap<String, Boolean>) jobCtx.get("dedupCache");
+        if (dedupCache == null) {
+            dedupCache = new ConcurrentHashMap<>(1_000_000);
+            jobCtx.put("dedupCache", dedupCache);
+        }
+
+        log.info("Processor initialized: entityMap size={}, dedupCache size={}",
+                 entityMap.size(), dedupCache.size());
     }
 
+    /**
+     * For each record:
+     * 1) map numeric→alpha entity (skip if missing),
+     * 2) dedupe on product#numericEntity#accountNumber (skip duplicates),
+     * 3) emit CustaggProcessedRecordsDTO.
+     */
     @Override
-    public CustaggRecordsDTO read() throws Exception {
-        // end of this partition?
-        if (currentRecord >= numberOfRecordsToRead) {
-            log.info("CustaggCompFileReader: all {} records read for this partition", numberOfRecordsToRead);
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO record) {
+        // entity mapping
+        String alpha = entityMap.get(record.getNumericEntity());
+        if (alpha == null) {
+            log.debug("Skipping record: no mapping for numericEntity={}", record.getNumericEntity());
             return null;
         }
 
-        buffer.clear();
-        int bytesRead = channel.read(buffer);
-        if (bytesRead < CustaggBatchConstants.RECORD_SIZE) {
-            if (bytesRead == -1) {
-                log.warn("CustaggCompFileReader: unexpected EOF at record {}", currentRecord + 1);
-                return null;
-            }
-            throw new CustaggBatchException("Incomplete record read: expected "
-                + CustaggBatchConstants.RECORD_SIZE + " but got " + bytesRead);
+        // global dedup
+        String key = record.getProductCode()
+                   + '#' + record.getNumericEntity()
+                   + '#' + record.getAccountNumber();
+        if (dedupCache.putIfAbsent(key, Boolean.TRUE) != null) {
+            dupSkipped++;
+            log.debug("Duplicate skipped: {}", key);
+            return null;
         }
 
-        buffer.flip();
-        byte[] recordBytes = buffer.array();
-
-        // 1) product code (bytes 0–2)
-        String productCode = new String(recordBytes, 0, 3, StandardCharsets.UTF_8).trim();
-
-        // 2) numeric entity (bytes 2–3) → unpacked via your util
-        byte[] entityPacked = new byte[] { recordBytes[2], recordBytes[3] };
-        String entity = CompCharacterUtil.packedToString(entityPacked).trim();
-
-        // 3) accountNumber via your centralized offset lookup
-        String accountNumber = FieldOffsetTable
-            .extractAccountNumber(productCode, recordBytes);
-
-        CustaggRecordsDTO dto = new CustaggRecordsDTO();
-        dto.setProductCode(productCode);
-        dto.setEntity(entity);
-        dto.setAccountNumber(accountNumber);
-
-        currentRecord++;
-        log.debug("CustaggCompFileReader: read #{} → {}", currentRecord, dto);
-        return dto;
+        // emit enriched DTO
+        return new CustaggProcessedRecordsDTO(
+            record.getAccountNumber(),
+            record.getNumericEntity(),
+            alpha,
+            record.getProductCode()
+        );
     }
 
-    @Override
-    public void update(ExecutionContext ctx) throws ItemStreamException {
-        // persist progress for restart
-        ctx.putLong("counter", currentRecord);
-    }
-
-    @Override
-    public void close() throws ItemStreamException {
-        try {
-            if (channel != null && channel.isOpen()) {
-                channel.close();
-                log.info("CustaggCompFileReader: file channel closed");
-            }
-        } catch (IOException e) {
-            throw new ItemStreamException("Error closing data file channel", e);
-        }
+    /**
+     * After the step, store dupSkipped so the Job listener can aggregate.
+     */
+    @AfterStep
+    public void afterStep(StepExecution stepExecution) {
+        ExecutionContext stepCtx = stepExecution.getExecutionContext();
+        stepCtx.putLong("dupSkipped", dupSkipped);
+        log.info("Step '{}' completed, duplicates skipped={}",
+                 stepExecution.getStepName(), dupSkipped);
     }
 }
