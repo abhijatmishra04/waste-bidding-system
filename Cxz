@@ -1,72 +1,191 @@
 
 // ──────────────────────────────────────────────────────────────────────────────
-// com/bofa/sst/batch/partition/CustaggFilePartitioner.java
+// com/bofa/sst/batch/common/FieldOffsetTable.java
 // ──────────────────────────────────────────────────────────────────────────────
-package com.bofa.sst.batch.partition;
+package com.bofa.sst.batch.common;
+
+import java.util.Map;
+import static java.util.Map.entry;
+
+/**
+ * Central table of <product-code → {offset,length}> for slicing
+ * the account-number field out of a fixed-length record.
+ * <p>
+ * Entries here mirror the old switch-case exactly.
+ * Add any new product codes here—no other code changes required.
+ */
+public final class FieldOffsetTable {
+
+    /** productCode → { offset (0-based), length } */
+    private static final Map<String,int[]> OFFSETS = Map.ofEntries(
+        // 11-byte field @ offset 11
+        entry("CLS", new int[]{11,13}),
+        entry("IL1", new int[]{11,13}),
+
+        // 12-byte field @ offset 12
+        entry("PER", new int[]{12,12}),
+        entry("SBA", new int[]{12,12}),
+        entry("BUS", new int[]{12,12}),
+
+        // 14-byte field @ offset 10
+        entry("CDS", new int[]{10,14}),
+        entry("RAA", new int[]{10,14}),
+        entry("ALB", new int[]{10,14}),
+        entry("ALS", new int[]{10,14}),
+        entry("ALI", new int[]{10,14}),
+        entry("IHL", new int[]{10,14}),
+        entry("DCL", new int[]{10,14}),
+
+        // 15-byte field @ offset 9
+        entry("RAP", new int[]{ 9,15}),
+
+        // 16-byte field @ offset 8
+        entry("DCA", new int[]{ 8,16}),
+        entry("CCA", new int[]{ 8,16}),
+
+        //  9-byte field @ offset 15
+        entry("INV", new int[]{15, 9}),
+        entry("ILA", new int[]{15, 9})
+
+        /* TODO: add entries for IDS, MLA, IML, etc., using the same pattern. */
+    );
+
+    /** fallback slice when product code is unrecognized (old default) */
+    private static final int[] DEFAULT_SLICE = {30, 15};
+
+    private FieldOffsetTable() { /* no instances */ }
+
+    /**
+     * Returns the {offset,length} slice for a given product code.
+     */
+    public static int[] lookup(String productCode) {
+        return OFFSETS.getOrDefault(productCode, DEFAULT_SLICE);
+    }
+
+    /**
+     * Extracts and trims the account number from the raw record bytes.
+     *
+     * @param productCode three-char code, already trimmed/upper-case
+     * @param record      full RECORD_SIZE-byte array
+     * @return the account-number string
+     */
+    public static String extractAccountNumber(String productCode, byte[] record) {
+        int[] p = lookup(productCode);
+        return new String(record, p[0], p[1], CustaggBatchConstants.CHARSET).trim();
+    }
+}
+
+package com.bofa.sst.batch.core;
 
 import com.bofa.sst.batch.common.CustaggBatchConstants;
 import com.bofa.sst.batch.common.CustaggBatchException;
+import com.bofa.sst.batch.common.FieldOffsetTable;
+import com.bofa.sst.batch.dto.CustaggRecordsDTO;
+import com.bofa.sst.batch.util.CompCharaterUtil; // adjust to your util’s actual package
 import lombok.extern.log4j.Log4j2;
-import org.apache.commons.io.FileUtils;
-import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemStream;
+import org.springframework.batch.item.ItemStreamException;
 
-import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 
+/**
+ * High-performance reader for fixed-length “comp” files.
+ *
+ * • Uses NIO FileChannel + single ByteBuffer per record  
+ * • Seeks to (fromLine–1) * RECORD_SIZE at open, reads exactly RECORD_SIZE bytes each read()  
+ * • Parses:
+ *     – productCode (bytes 0–3)  
+ *     – numericEntity (packed BCD via CompCharaterUtil)  
+ *     – accountNumber (offset/length lookup via FieldOffsetTable)  
+ * • Throws CustaggBatchException on any I/O or partial-record error
+ */
 @Log4j2
-@Component
-public class CustaggFilePartitioner implements Partitioner {
+public class CustaggCompFileReader
+        implements ItemReader<CustaggRecordsDTO>, ItemStream {
 
-    @Value("${custag.input.file.path}")
-    private String directoryPath;
-
-    @Value("#{jobParameters['FilePrefixReferData']}")
-    private String filePrefixReferData;
+    private FileChannel channel;
+    private long cursor, limit;
+    private final ByteBuffer buffer =
+            ByteBuffer.allocate(CustaggBatchConstants.RECORD_SIZE);
 
     @Override
-    public Map<String,ExecutionContext> partition(int gridSize) {
+    public void open(ExecutionContext ctx) throws ItemStreamException {
         try {
-            File dir = new File(directoryPath);
-            File dataFile = FileUtils.listFiles(dir, null, false).stream()
-                .filter(f -> f.getName().startsWith(filePrefixReferData))
-                .findFirst()
-                .orElseThrow(() ->
-                    new CustaggBatchException("Refer-data file not found in " + directoryPath));
+            cursor = ctx.getLong("fromLine");
+            limit  = ctx.getLong("toLine");
+            String filePath = ctx.getString("dataFile");
 
-            long totalRecords = dataFile.length() / CustaggBatchConstants.RECORD_SIZE;
-            long basePerPart  = totalRecords / gridSize;
-            long remainder    = totalRecords % gridSize;
+            channel = FileChannel.open(
+                Paths.get(filePath),
+                StandardOpenOption.READ
+            );
+            channel.position((cursor - 1) * CustaggBatchConstants.RECORD_SIZE);
 
-            Map<String,ExecutionContext> result = new HashMap<>(gridSize);
-            long from = 1L;
+            log.info("Reader opened on file={}, processing records {}–{}",
+                     filePath, cursor, limit);
+        } catch (IOException e) {
+            throw new CustaggBatchException("Failed to open comp file reader", e);
+        }
+    }
 
-            for (int i = 0; i < gridSize; i++) {
-                long partSize = basePerPart + (i < remainder ? 1 : 0);
-                long to       = partSize == 0 ? 0 : from + partSize - 1;
+    @Override
+    public CustaggRecordsDTO read() throws Exception {
+        if (cursor > limit) {
+            return null;  // this partition is done
+        }
 
-                ExecutionContext ctx = new ExecutionContext();
-                ctx.putString("dataFile",      dataFile.getAbsolutePath());
-                ctx.putLong("fromLine",        from);
-                ctx.putLong("toLine",          to);
-                ctx.putLong("numberOfRecords", partSize);
+        buffer.clear();
+        int bytesRead;
+        try {
+            bytesRead = channel.read(buffer);
+        } catch (IOException e) {
+            throw new CustaggBatchException("I/O error at record index " + cursor, e);
+        }
 
-                result.put("partition" + i, ctx);
-                log.debug("Partition {} ⇒ records {}–{} (count={})",
-                          i, from, to, partSize);
+        if (bytesRead == -1) {
+            return null;  // unexpected EOF
+        }
+        if (bytesRead != CustaggBatchConstants.RECORD_SIZE) {
+            throw new CustaggBatchException("Incomplete record @ index " + cursor);
+        }
 
-                from = to + 1;
+        buffer.flip();
+        byte[] record = new byte[CustaggBatchConstants.RECORD_SIZE];
+        buffer.get(record);
+
+        // parse fields
+        String product = new String(record, 0, 3, CustaggBatchConstants.CHARSET).trim();
+        String entity  = CompCharaterUtil.packedToString(record, 2, 2).trim();
+        String accNo   = FieldOffsetTable.extractAccountNumber(product, record);
+
+        if (log.isTraceEnabled()) {
+            log.trace("Record {} → prod='{}', ent='{}', acc='{}'",
+                      cursor, product, entity, accNo);
+        }
+
+        cursor++;
+        return new CustaggRecordsDTO(product, entity, accNo);
+    }
+
+    @Override
+    public void update(ExecutionContext executionContext) throws ItemStreamException {
+        // no state to store between checkpoints
+    }
+
+    @Override
+    public void close() throws ItemStreamException {
+        if (channel != null) {
+            try {
+                channel.close();
+            } catch (IOException e) {
+                log.warn("Error closing FileChannel", e);
             }
-
-            log.info("Partitioning complete: {} total records into {} partitions",
-                     totalRecords, gridSize);
-            return result;
-
-        } catch (Exception e) {
-            throw new CustaggBatchException("Error during file partitioning", e);
         }
     }
 }
