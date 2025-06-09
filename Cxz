@@ -1,15 +1,156 @@
-package com.bofa.sst.batch.constants;
+package com.bofa.sst.batch.dto;
 
-public class PoeBinConstants {
-    // … your existing constants …
+public class PoeBinDto {
 
-    // fixed‐date defaults
-    public static final String DEFAULT_BIN_EFF_TS    = "1900-01-01-00.00.00.000000";
-    public static final String DEFAULT_BIN_EXPR_TS   = "9999-12-31-00.00.00.000000";
+    // ── fields loaded from the flat file ────────────────────────
+    private String  bankIdNo;       // VARCHAR2(10)      COLUMN #1
+    private Integer hostNo;         // NUMBER(5,0)       #3
+    private Integer isuNo;          // NUMBER(5,0)       #4
+    private Integer prodBrndNo;     // NUMBER(5,0)       #5
+    private Long    busLineTpNo;    // NUMBER(10,0)      #6
+    private Long    hostPltfNo;     // NUMBER(10,0)      #7
+    private Long    pmtCpnMicrNo;   // NUMBER(10,0)      #8
+    private Long    glDestNo;       // NUMBER(10,0)      #9
 
-    // blank-filled text fields
-    public static final String DEFAULT_SPACES        = "";
+    // ── helper flag ─────────────────────────────────────────────
+    private boolean contains;       // in‐DB indicator
 
-    // zero-filled numeric fields
-    public static final Integer DEFAULT_ZERO         = 0;
+    // ── constants stamped in processor ──────────────────────────
+    private String  binEffTs;       // TIMESTAMP WITH TZ #10
+    private String  binExprTs;      // TIMESTAMP WITH TZ #11
+    private String  binAprvIn;      // VARCHAR2(1)       #12
+    private Integer prinBnkNoLenCt; // NUMBER(4,0)       #13
+    private Integer acsmedNoLenCt;  // NUMBER(4,0)       #14
+    private String  mbnaOwnershipIn;// VARCHAR2(1)       #15
+    private String  mbnaTechIn;     // VARCHAR2(1)       #16
+    private String  prodBrndRgnCd;  // VARCHAR2(1)       #17
+    private String  prodBrndCtryCd; // VARCHAR2(3)       #18
+    private String  interfaceCntlNo;// VARCHAR2(4)       #19
+    private String  acctBillingTpNo;// VARCHAR2(4)       #20
+    private String  legacyBinIn;    // VARCHAR2(1)       #21
+    private String  accountingNo;   // VARCHAR2(1)       #22
+
+    // … plus getters and setters for all of the above …
 }
+
+package com.bofa.sst.batch.core;
+
+import com.bofa.sst.batch.constants.PoeBinConstants;
+import com.bofa.sst.batch.dto.PoeBinDto;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+@Component
+public class PoeBinProcessor implements ItemProcessor<PoeBinDto,PoeBinDto> {
+
+    @Override
+    public PoeBinDto process(PoeBinDto dto) {
+
+        // … your duplicate‐in‐file check …
+        // … your SELECT_BIN check sets dto.setContains(true/false) …
+
+        // stamp all the constant defaults onto the DTO:
+        dto.setBinEffTs       (PoeBinConstants.DEFAULT_BIN_EFF_TS);
+        dto.setBinExprTs      (PoeBinConstants.DEFAULT_BIN_EXPR_TS);
+        dto.setBinAprvIn      (PoeBinConstants.DEFAULT_SPACES);
+        dto.setPrinBnkNoLenCt (PoeBinConstants.DEFAULT_ZERO);
+        dto.setAcsmedNoLenCt  (PoeBinConstants.DEFAULT_ZERO);
+        dto.setMbnaOwnershipIn(PoeBinConstants.DEFAULT_SPACES);
+        dto.setMbnaTechIn     (PoeBinConstants.DEFAULT_SPACES);
+        dto.setProdBrndRgnCd  (PoeBinConstants.DEFAULT_SPACES);
+        dto.setProdBrndCtryCd (PoeBinConstants.DEFAULT_SPACES);
+        dto.setInterfaceCntlNo(PoeBinConstants.DEFAULT_SPACES);
+        dto.setAcctBillingTpNo(PoeBinConstants.DEFAULT_SPACES);
+        dto.setLegacyBinIn    (PoeBinConstants.DEFAULT_SPACES);
+        dto.setAccountingNo   (PoeBinConstants.DEFAULT_SPACES);
+
+        return dto;
+    }
+}
+
+package com.bofa.sst.batch.core.impl;
+
+import com.bofa.sst.batch.constants.PoeBinSQLFactory;
+import com.bofa.sst.batch.dto.PoeBinDto;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.jdbc.core.JdbcTemplate;
+import javax.sql.DataSource;
+import java.util.List;
+
+public class PoeBinItemWriterImpl implements ItemWriter<PoeBinDto> {
+
+    private final JdbcTemplate jdbc;
+
+    public PoeBinItemWriterImpl(DataSource ds) {
+        this.jdbc = new JdbcTemplate(ds);
+    }
+
+    @Override
+    public void write(List<? extends PoeBinDto> items) {
+        for (PoeBinDto dto : items) {
+            if (dto.isContains()) {
+                // ── UPDATE path: 21 placeholders ─────────────────────────
+                Object[] params = {
+                  // 1–7: real file fields
+                  dto.getHostNo(),           // HOST_NO      #3
+                  dto.getIsuNo(),            // ISU_NO       #4
+                  dto.getProdBrndNo(),       // PROD_BRND_NO #5
+                  dto.getBusLineTpNo(),      // BUS_LIN_TP_NO#6
+                  dto.getHostPltfNo(),       // HOST_PLTF_NO #7
+                  dto.getPmtCpnMicrNo(),     // PMT_CPN_MICR_NO#8
+                  dto.getGlDestNo(),         // GL_DEST_NO   #9
+
+                  // 8–20: stamped constants
+                  dto.getBinEffTs(),         // BIN_EFF_TS       #10
+                  dto.getBinExprTs(),        // BIN_EXPR_TS      #11
+                  dto.getBinAprvIn(),        // BIN_APRV_IN      #12
+                  dto.getPrinBnkNoLenCt(),   // PRIN_BNK_NO_LEN_CT#13
+                  dto.getAcsmedNoLenCt(),    // ACSMED_NO_LEN_CT #14
+                  dto.getMbnaOwnershipIn(),  // MBNA_OWNERSHIP_IN#15
+                  dto.getMbnaTechIn(),       // MBNA_TECH_IN     #16
+                  dto.getProdBrndRgnCd(),    // PROD_BRND_RGN_CD #17
+                  dto.getProdBrndCtryCd(),   // PROD_BRND_CTRY_CD#18
+                  dto.getInterfaceCntlNo(),  // INTERFACE_CNTL_NO#19
+                  dto.getAcctBillingTpNo(),  // ACCT_BILLING_TP_NO#20
+                  dto.getLegacyBinIn(),      // LEGACY_BIN_IN    #21
+                  dto.getAccountingNo(),     // ACCOUNTING_NO    #22
+
+                  // 21: WHERE key
+                  dto.getBankIdNo()          // BNK_ID_NO        #1
+                };
+
+                jdbc.update(PoeBinSQLFactory.UPDATE_BIN, params);
+
+            } else {
+                // ── INSERT path: 21 placeholders ─────────────────────────
+                Object[] params = {
+                  dto.getBankIdNo(),         // #1 BNK_ID_NO
+                  dto.getHostNo(),           // #3 HOST_NO
+                  dto.getIsuNo(),            // #4 ISU_NO
+                  dto.getProdBrndNo(),       // #5 PROD_BRND_NO
+                  dto.getBusLineTpNo(),      // #6 BUS_LIN_TP_NO
+                  dto.getHostPltfNo(),       // #7 HOST_PLTF_NO
+                  dto.getPmtCpnMicrNo(),     // #8 PMT_CPN_MICR_NO
+                  dto.getGlDestNo(),         // #9 GL_DEST_NO
+
+                  dto.getBinEffTs(),         // #10 BIN_EFF_TS
+                  dto.getBinExprTs(),        // #11 BIN_EXPR_TS
+                  dto.getBinAprvIn(),        // #12 BIN_APRV_IN
+                  dto.getPrinBnkNoLenCt(),   // #13 PRIN_BNK_NO_LEN_CT
+                  dto.getAcsmedNoLenCt(),    // #14 ACSMED_NO_LEN_CT
+                  dto.getMbnaOwnershipIn(),  // #15 MBNA_OWNERSHIP_IN
+                  dto.getMbnaTechIn(),       // #16 MBNA_TECH_IN
+                  dto.getProdBrndRgnCd(),    // #17 PROD_BRND_RGN_CD
+                  dto.getProdBrndCtryCd(),   // #18 PROD_BRND_CTRY_CD
+                  dto.getInterfaceCntlNo(),  // #19 INTERFACE_CNTL_NO
+                  dto.getAcctBillingTpNo(),  // #20 ACCT_BILLING_TP_NO
+                  dto.getLegacyBinIn(),      // #21 LEGACY_BIN_IN
+                  dto.getAccountingNo()      // #22 ACCOUNTING_NO
+                };
+
+                jdbc.update(PoeBinSQLFactory.INSERT_BIN, params);
+            }
+        }
+    }
+}
+
