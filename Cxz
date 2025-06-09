@@ -1,158 +1,64 @@
-package com.bofa.sst.batch.core.impl;
+package com.bofa.sst.batch.constants;
 
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.StepExecutionListener;
-import org.springframework.batch.core.annotation.AfterStep;
-import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.stereotype.Component;
+public class PoeBinSQLFactory {
 
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.*;
-import java.util.stream.Collectors;
+    // 1) Does this Bank ID already exist?
+    public static final String SELECT_BIN =
+        "SELECT COUNT(*) FROM SST_OWNER.bin WHERE BNK_ID_NO = ?";
 
-@Component
-@Log4j2
-public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO>, StepExecutionListener {
+    // 2) Full INSERT covering every column from your ALTER script +
+    //    LAST_UPDATE_TS and EXTRACT_DT stamped in the database
+    public static final String INSERT_BIN =
+        "INSERT INTO SST_OWNER.bin ( " +
+        "  BNK_ID_NO,      BIN_EFF_TS,      BIN_EXPR_TS,      BIN_APRV_IN,      " +
+        "  PRIN_BNK_NO_LEN_CT,  ACSMED_NO_LEN_CT,  LAST_UPDATE_TS,  " +
+        "  MBNA_OWNERSHIP_IN,  MBNA_TECH_IN,     HOST_NO,        ISSUER_NO,       " +
+        "  PROD_BRND_NO,    BUS_LINE_TP_NO,  PROD_BRND_RGN_CD,  " +
+        "  PROD_BRND_CTRY_CD,  HOST_PLATFORM_NO,  PMT_CPN_MICR_NO, " +
+        "  INTERFACE_CNTL_NO,  ACCT_BILLING_TP_NO,  GL_DEST_NO,     " +
+        "  LEGACY_BIN_IN,   ACCOUNTING_NO,   EXTRACT_DT " +
+        ") VALUES ( " +
+        "  ?,  ?,  ?,  ?,  " +       // 1–4: BankId, 1900‐date, 9999‐date, spaces
+        "  ?,  ?,  CURRENT TIMESTAMP,  " + // 5–7: zeros ×2, LAST_UPDATE_TS
+        "  ?,  ?,  ?,  ?,  " +       // 8–11: spaces×2, hostNo, issuerNo
+        "  ?,  ?,  ?,  " +           // 12–14: prodBrndNo, busLine, spaces
+        "  ?,  ?,  ?,  " +           // 15–17: spaces, hostPlatform, pmtMicrNo
+        "  ?,  ?,  ?,  " +           // 18–20: zeros×2, glDestNo
+        "  ?,  ?,  CURRENT TIMESTAMP " + // 21–22: spaces×2, EXTRACT_DT
+        ")";
 
-    @Autowired
-    private NamedParameterJdbcTemplate jdbcTemplate;
+    // 3) Full UPDATE covering the same columns (minus the initial BNK_ID_NO bind,
+    //    which goes in the WHERE clause) and stamping LAST_UPDATE_TS/EXTRACT_DT in‐SQL
+    public static final String UPDATE_BIN =
+        "UPDATE SST_OWNER.bin SET " +
+        "  BIN_EFF_TS            = ?, " +  // 1
+        "  BIN_EXPR_TS           = ?, " +  // 2
+        "  BIN_APRV_IN           = ?, " +  // 3
+        "  PRIN_BNK_NO_LEN_CT    = ?, " +  // 4
+        "  ACSMED_NO_LEN_CT      = ?, " +  // 5
+        "  LAST_UPDATE_TS        = CURRENT TIMESTAMP, " +
+        "  MBNA_OWNERSHIP_IN     = ?, " +  // 6
+        "  MBNA_TECH_IN          = ?, " +  // 7
+        "  HOST_NO               = ?, " +  // 8
+        "  ISSUER_NO             = ?, " +  // 9
+        "  PROD_BRND_NO          = ?, " +  // 10
+        "  BUS_LINE_TP_NO        = ?, " +  // 11
+        "  PROD_BRND_RGN_CD      = ?, " +  // 12
+        "  PROD_BRND_CTRY_CD     = ?, " +  // 13
+        "  HOST_PLATFORM_NO      = ?, " +  // 14
+        "  PMT_CPN_MICR_NO       = ?, " +  // 15
+        "  INTERFACE_CNTL_NO     = ?, " +  // 16
+        "  ACCT_BILLING_TP_NO    = ?, " +  // 17
+        "  GL_DEST_NO            = ?, " +  // 18
+        "  LEGACY_BIN_IN         = ?, " +  // 19
+        "  ACCOUNTING_NO         = ?, " +  // 20
+        "  EXTRACT_DT            = CURRENT TIMESTAMP " +
+        "WHERE BNK_ID_NO         = ?";      // 21
 
-    private StepExecution stepExecution;
+    // 4) Simple delete by key
+    public static final String DELETE_BIN =
+        "DELETE FROM SST_OWNER.bin WHERE BNK_ID_NO = ?";
 
-    @BeforeStep
-    public void beforeStep(StepExecution stepExecution) {
-        this.stepExecution = stepExecution;
-    }
-
-    @Override
-    public void write(List<? extends CustaggProcessedRecordsDTO> items) {
-        if (items.isEmpty()) {
-            log.info("No records to write");
-            return;
-        }
-
-        // 1) Collect all (accountNumber, numEntity, productCode) tuples
-        Set<String> accNos  = items.stream().map(CustaggProcessedRecordsDTO::getAccountNumber).collect(Collectors.toSet());
-        Set<String> ents    = items.stream().map(CustaggProcessedRecordsDTO::getNumEntity).collect(Collectors.toSet());
-        Set<String> prods   = items.stream().map(CustaggProcessedRecordsDTO::getProductCode).collect(Collectors.toSet());
-
-        // 2) Fetch ALL schedule_ids in one go (legacy FETCH_SCHEDULE_ID_ACCOUNT_BOA + _ACCOUNT_M2M unioned)
-        String fetchSchdSql =
-                "SELECT schd.sched_id\n" +
-                "  FROM sst_owner.account_boa acc\n" +
-                "  JOIN sst_owner.schedule_m2m schd\n" +
-                "    ON acc.acc_boa_id = schd.dr_acc_id\n" +
-                " WHERE acc.acc_no     IN (:accNos)\n" +
-                "   AND acc.ent_cd     IN (:ents)\n" +
-                "   AND acc.prod_cd    IN (:prods)\n" +
-                "   AND schd.sched_stat = 'S01'\n" +
-                "   AND schd.xfer_ref_id IS NULL\n" +
-                "UNION\n" +
-                "SELECT schd.sched_id\n" +
-                "  FROM sst_owner.account_m2m accm\n" +
-                "  JOIN sst_owner.schedule_m2m schd\n" +
-                "    ON accm.acc_id = schd.dr_acc_id\n" +
-                " WHERE accm.acc_no     IN (:accNos)\n" +
-                "   AND accm.ent_cd     IN (:ents)\n" +
-                "   AND accm.prod_cd    IN (:prods)\n" +
-                "   AND schd.sched_stat = 'S01'\n" +
-                "   AND schd.xfer_ref_id IS NULL";
-
-        MapSqlParameterSource p = new MapSqlParameterSource()
-                .addValue("accNos", accNos)
-                .addValue("ents",   ents)
-                .addValue("prods",  prods);
-
-        List<Long> scheduleIds = jdbcTemplate.queryForList(fetchSchdSql, p, Long.class);
-        log.info("Fetched {} schedule IDs", scheduleIds.size());
-
-        if (!scheduleIds.isEmpty()) {
-            // 3) UPDATE schedule_m2m in bulk (legacy UPDATE_SCHEDULE_M2M)
-            String updateSchdSql =
-                    "UPDATE sst_owner.schedule_m2m\n" +
-                    "   SET cls_dt    = :now\n" +
-                    "     , updt_by   = 'CUSTAGG'\n" +
-                    "     , updt_ts   = :now\n" +
-                    "     , sched_stat= 'S02'\n" +
-                    " WHERE sched_id IN (:scheduleIds)";
-
-            MapSqlParameterSource u1 = new MapSqlParameterSource()
-                    .addValue("now",          Timestamp.from(Instant.now()))
-                    .addValue("scheduleIds",  scheduleIds);
-
-            int updatedSchedules = jdbcTemplate.update(updateSchdSql, u1);
-            log.info("Updated {} schedule_m2m rows", updatedSchedules);
-
-            // 4) Fetch all transfer_execution IDs in one go (legacy FETCH_TRANSFER_EXECUTION_M2M_ID)
-            String fetchExecSql =
-                    "SELECT temm.xfer_exeq_m2m_id\n" +
-                    "  FROM sst_owner.transfer_execution_m2m temm\n" +
-                    "  JOIN sst_owner.transfer_instruction_m2m timm\n" +
-                    "    ON timm.xfer_instr_id = temm.xfer_instr_id\n" +
-                    " WHERE     temm.sched_id IN (:scheduleIds)\n" +
-                    "   AND temm.act_indct <> 'F'";
-            List<Long> execIds = jdbcTemplate.queryForList(fetchExecSql, u1, Long.class);
-            log.info("Fetched {} transfer_execution IDs", execIds.size());
-
-            if (!execIds.isEmpty()) {
-                // 5) Update transfer_execution_m2m in bulk (legacy UPDATE_TRANSFER_EXECUTION_M2M)
-                String updateExecSql =
-                        "UPDATE sst_owner.transfer_execution_m2m\n" +
-                        "   SET act_indct = 'F'\n" +
-                        "     , updt_by   = 'CUSTAGG'\n" +
-                        "     , updt_ts   = :now\n" +
-                        " WHERE xfer_exeq_m2m_id IN (:execIds)";
-                MapSqlParameterSource u2 = new MapSqlParameterSource()
-                        .addValue("now",    Timestamp.from(Instant.now()))
-                        .addValue("execIds", execIds);
-                int n1 = jdbcTemplate.update(updateExecSql, u2);
-                log.info("Updated {} transfer_execution_m2m rows", n1);
-            }
-
-            // 6) Fetch all transfer_instruction IDs in one go (legacy FETCH_TRANSFER_INSTRUCTION_ID)
-            String fetchInstrSql =
-                    "SELECT xfer_instr_id\n" +
-                    "  FROM sst_owner.transfer_instruction_m2m\n" +
-                    " WHERE xfer_instr_id NOT IN (\n" +
-                    "     SELECT xfer_instr_id\n" +
-                    "       FROM sst_owner.transfer_execution_m2m\n" +
-                    "     )\n" +
-                    "   AND sched_stat IN ('H03','H05','H06','H07')\n" +
-                    "   AND sched_id IN (:scheduleIds)\n" +
-                    " ORDER BY sched_id";
-            List<Long> instrIds = jdbcTemplate.queryForList(fetchInstrSql, u1, Long.class);
-            log.info("Fetched {} transfer_instruction IDs", instrIds.size());
-
-            if (!instrIds.isEmpty()) {
-                // 7) Update transfer_instruction_m2m in bulk (legacy UPDATE_TRANSFER_INSTRUCTION_M2M)
-                String updateInstrSql =
-                        "UPDATE sst_owner.transfer_instruction_m2m\n" +
-                        "   SET sched_stat = 'S02'\n" +
-                        "     , updt_by    = 'CUSTAGG'\n" +
-                        "     , updt_ts    = :now\n" +
-                        " WHERE xfer_instr_id IN (:instrIds)";
-                MapSqlParameterSource u3 = new MapSqlParameterSource()
-                        .addValue("now",      Timestamp.from(Instant.now()))
-                        .addValue("instrIds", instrIds);
-                int n2 = jdbcTemplate.update(updateInstrSql, u3);
-                log.info("Updated {} transfer_instruction_m2m rows", n2);
-            }
-        }
-    }
-
-    @AfterStep
-    public void afterStep() {
-        ExecutionContext ctx = stepExecution.getExecutionContext();
-        // if you want to log totals after job:
-        // ctx.put("updatedSchedules", scheduleIds.size());
-        // etc...
-    }
+    // (If you also use SELECT_DELETE_BIN or SELECT_PRODBRNDNO, update them
+    //  similarly to fully qualify the table and match your column names.)
 }
