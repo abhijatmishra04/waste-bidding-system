@@ -1,86 +1,100 @@
-Object[] insertParams = new Object[] {
-    dto.getBankIdNo(),
-    dto.getHostNo(),
-    dto.getIsuNo(),
-    dto.getProdBrndNo(),
-    dto.getBusLineTpNo(),
-    dto.getHostPltfNo(),
-    dto.getPmtCpnMicrNo(),
-    dto.getGlDestNo(),
-    dto.getBinEffTs(),
-    dto.getBinExprTs(),
-    dto.getBinAprvIn(),
-    dto.getPrinBnkNoLenCt(),
-    dto.getAcsmedNoLenCt(),
-    dto.getMbnaOwnershipIn(),
-    dto.getMbnaTechIn(),
-    dto.getProdBrndRgnCd(),
-    dto.getProdBrndCtryCd(),
-    dto.getInterfaceCntlNo(),
-    dto.getAcctBillingTpNo(),
-    dto.getLegacyBinIn(),
-    dto.getAccountingNo()
-};
+@Component
+@Log4j2
+public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO> {
 
-jdbcTemplate.update(
-    PoeBinSQLFactory.INSERT_BIN,
-    insertParams
-);
+    private final NamedParameterJdbcTemplate namedJdbc;
+    private final JdbcTemplate jdbc;
 
-Object[] updateParams = new Object[] {
-    dto.getHostNo(),
-    dto.getIsuNo(),
-    dto.getProdBrndNo(),
-    dto.getBusLineTpNo(),
-    dto.getHostPltfNo(),
-    dto.getPmtCpnMicrNo(),
-    dto.getGlDestNo(),
-    dto.getBinEffTs(),
-    dto.getBinExprTs(),
-    dto.getBinAprvIn(),
-    dto.getPrinBnkNoLenCt(),
-    dto.getAcsmedNoLenCt(),
-    dto.getMbnaOwnershipIn(),
-    dto.getMbnaTechIn(),
-    dto.getProdBrndRgnCd(),
-    dto.getProdBrndCtryCd(),
-    dto.getInterfaceCntlNo(),
-    dto.getAcctBillingTpNo(),
-    dto.getLegacyBinIn(),
-    dto.getAccountingNo(),
-    dto.getBankIdNo()
-};
+    @Autowired
+    public CustaggWriter(NamedParameterJdbcTemplate namedJdbc,
+                         JdbcTemplate jdbc) {
+        this.namedJdbc = namedJdbc;
+        this.jdbc      = jdbc;
+    }
 
-jdbcTemplate.update(
-    PoeBinSQLFactory.UPDATE_BIN,
-    updateParams
-);
+    @Override
+    public void write(List<? extends CustaggProcessedRecordsDTO> items) {
+        if (items == null || items.isEmpty()) {
+            log.info("No records to write, skipping.");
+            return;
+        }
 
+        // 1) build IN-parameters
+        Set<String> accNos   = items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getAccountNumber)
+                                    .collect(Collectors.toSet());
+        Set<String> entCodes = items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getNumEntity)
+                                    .collect(Collectors.toSet());
+        Set<String> prods    = items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getProductCode)
+                                    .collect(Collectors.toSet());
 
-package com.bofa.sst.batch.constants;
+        Map<String,Object> inParams = Map.of(
+            "accNos",   accNos,
+            "entCodes", entCodes,
+            "prods",    prods
+        );
 
-import java.sql.Timestamp;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+        // 2) single UNION fetch
+        log.info("Fetching schedule IDs via UNION query…");
+        List<String> allSchedIds = namedJdbc.queryForList(
+            CustaggSQLFactory.FETCH_SCHEDULE_IDS_UNION,
+            inParams,
+            String.class
+        );
+        log.info("Fetched {} schedule IDs", allSchedIds.size());
+        if (allSchedIds.isEmpty()) return;
 
-public class PoeBinConstants {
-  // … your existing constants …
+        Timestamp now = Timestamp.from(Instant.now());
 
-  /** Default “effective” timestamp (1900-01-01T00:00:00Z) */
-  public static final Timestamp DEFAULT_BIN_EFF_TS =
-      Timestamp.from(OffsetDateTime
-          .of(1900, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)
-          .toInstant());
+        // 3) fetch exec + instr IDs, update in batch as before…
+        Map<String,Object> schedParam = Collections.singletonMap("schedIds", allSchedIds);
 
-  /** Default “expiry” timestamp (9999-12-31T00:00:00Z) */
-  public static final Timestamp DEFAULT_BIN_EXPR_TS =
-      Timestamp.from(OffsetDateTime
-          .of(9999, 12, 31, 0, 0, 0, 0, ZoneOffset.UTC)
-          .toInstant());
+        List<String> execIds  = namedJdbc.queryForList(
+            CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID,
+            schedParam,
+            String.class
+        );
+        List<String> instrIds = namedJdbc.queryForList(
+            CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID,
+            schedParam,
+            String.class
+        );
 
-  /** A single blank space */
-  public static final String DEFAULT_SPACES = " ";
+        // 4) batch updates
+        batchUpdate("schedule_m2m", allSchedIds, now,
+            CustaggSQLFactory.UPDATE_SCHEDULE_M2M, 2, 1);
 
-  /** Numeric zero for any NUMBER-typed column */
-  public static final Integer DEFAULT_ZERO = 0;
+        batchUpdate("transfer_execution_m2m", execIds, now,
+            CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M, 2, 0);
+
+        batchUpdate("transfer_instruction_m2m", instrIds, now,
+            CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M, 2, 0);
+
+        log.info("CustaggWriter complete.");
+    }
+
+    private void batchUpdate(String name,
+                             List<String> ids,
+                             Timestamp ts,
+                             String sql,
+                             int tsIndex,
+                             int idIndex)
+    {
+        if (ids.isEmpty()) {
+            log.info("No {} rows to update", name);
+            return;
+        }
+        List<Object[]> batch = ids.stream()
+            .map(id -> {
+                Object[] row = new Object[ idIndex+1 ];
+                row[tsIndex] = ts;            // either parameter 2 or 1
+                row[idIndex] = id;            // either parameter 3 or 2
+                return row;
+            }).collect(Collectors.toList());
+
+        int[] counts = jdbc.batchUpdate(sql, batch);
+        log.info("Updated {} rows in {}", Arrays.stream(counts).sum(), name);
+    }
 }
