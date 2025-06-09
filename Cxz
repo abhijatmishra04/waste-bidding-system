@@ -1,28 +1,15 @@
-@Override
-public PoeBinDto process(PoeBinDto dto) throws Exception {
-    // … your duplicate check + SELECT_BIN logic …
+package com.bofa.sst.batch.constants;
 
-    // stamp all the constants onto the DTO
-    dto.setBinEffTs      (PoeBinConstants.DEFAULT_BIN_EFF_TS);
-    dto.setBinExprTs     (PoeBinConstants.DEFAULT_BIN_EXPR_TS);
+public class PoeBinConstants {
+    // … your existing constants …
 
-    dto.setBinAprvIn     (PoeBinConstants.DEFAULT_SPACES);
-    dto.setPrinBnkNoLenCt(PoeBinConstants.DEFAULT_ZERO);
-    dto.setAcsmedNoLenCt  (PoeBinConstants.DEFAULT_ZERO);
+    // fixed‐date defaults
+    public static final String DEFAULT_BIN_EFF_TS    = "1900-01-01-00.00.00.000000";
+    public static final String DEFAULT_BIN_EXPR_TS   = "9999-12-31-00.00.00.000000";
 
-    dto.setMbnaOwnershipIn(PoeBinConstants.DEFAULT_SPACES);
-    dto.setMbnaTechIn     (PoeBinConstants.DEFAULT_SPACES);
+    // blank-filled text fields
+    public static final String DEFAULT_SPACES        = "";
 
-    dto.setProdBrndRgnCd  (PoeBinConstants.DEFAULT_SPACES);
-    dto.setProdBrndCtryCd (PoeBinConstants.DEFAULT_SPACES);
-
-    dto.setLegacyBinIn    (PoeBinConstants.DEFAULT_SPACES);
-    dto.setAccountingNo   (PoeBinConstants.DEFAULT_SPACES);
-
-    dto.setInterfaceCntlNo(PoeBinConstants.DEFAULT_ZERO);
-    dto.setAcctBillingTpNo(PoeBinConstants.DEFAULT_ZERO);
-
-    // (hostNo, issuerNo, prodBrndNo, etc. were already set by your FieldSetMapper)
-
-    return dto;
+    // zero-filled numeric fields
+    public static final Integer DEFAULT_ZERO         = 0;
 }
