@@ -1,114 +1,57 @@
-package com.bofa.sst.batch.core.impl;
+Object[] insertParams = new Object[] {
+    dto.getBankIdNo(),
+    dto.getHostNo(),
+    dto.getIsuNo(),
+    dto.getProdBrndNo(),
+    dto.getBusLineTpNo(),
+    dto.getHostPltfNo(),
+    dto.getPmtCpnMicrNo(),
+    dto.getGlDestNo(),
+    dto.getBinEffTs(),
+    dto.getBinExprTs(),
+    dto.getBinAprvIn(),
+    dto.getPrinBnkNoLenCt(),
+    dto.getAcsmedNoLenCt(),
+    dto.getMbnaOwnershipIn(),
+    dto.getMbnaTechIn(),
+    dto.getProdBrndRgnCd(),
+    dto.getProdBrndCtryCd(),
+    dto.getInterfaceCntlNo(),
+    dto.getAcctBillingTpNo(),
+    dto.getLegacyBinIn(),
+    dto.getAccountingNo()
+};
 
-import com.bofa.sst.batch.constants.PoeBinConstants;
-import com.bofa.sst.batch.constants.PoeBinSQLFactory;
-import com.bofa.sst.batch.dto.PoeBinDto;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
+jdbcTemplate.update(
+    PoeBinSQLFactory.INSERT_BIN,
+    insertParams
+);
 
-import javax.sql.DataSource;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.List;
+Object[] updateParams = new Object[] {
+    dto.getHostNo(),
+    dto.getIsuNo(),
+    dto.getProdBrndNo(),
+    dto.getBusLineTpNo(),
+    dto.getHostPltfNo(),
+    dto.getPmtCpnMicrNo(),
+    dto.getGlDestNo(),
+    dto.getBinEffTs(),
+    dto.getBinExprTs(),
+    dto.getBinAprvIn(),
+    dto.getPrinBnkNoLenCt(),
+    dto.getAcsmedNoLenCt(),
+    dto.getMbnaOwnershipIn(),
+    dto.getMbnaTechIn(),
+    dto.getProdBrndRgnCd(),
+    dto.getProdBrndCtryCd(),
+    dto.getInterfaceCntlNo(),
+    dto.getAcctBillingTpNo(),
+    dto.getLegacyBinIn(),
+    dto.getAccountingNo(),
+    dto.getBankIdNo()
+};
 
-@Log4j2
-@Component
-public class PoeBinItemWriterImpl implements ItemWriter<PoeBinDto> {
-
-    private final JdbcTemplate jdbcTemplate;
-
-    public PoeBinItemWriterImpl(DataSource dataSource) {
-        this.jdbcTemplate = new JdbcTemplate(dataSource);
-    }
-
-    @Override
-    public void write(List<? extends PoeBinDto> items) throws Exception {
-        for (PoeBinDto dto : items) {
-            try {
-                if (dto.isContains()) {
-                    // ── UPDATE PATH ─────────────────────────────────
-                    log.info("UPDATE path for BNK_ID_NO={}", dto.getBankIdNo());
-
-                    Object[] updateParams = new Object[] {
-                        dto.getHostNo(), dto.getIsuNo(), dto.getProdBrndNo(),
-                        dto.getBusLineTpNo(), dto.getHostPltfNo(),
-                        dto.getPmtCpnMicrNo(), dto.getGlDestNo(),
-
-                        dto.getBinEffTs(), dto.getBinExprTs(), dto.getBinAprvIn(),
-                        dto.getPrinBnkNoLenCt(), dto.getAcsmedNoLenCt(),
-                        dto.getMbnaOwnershipIn(), dto.getMbnaTechIn(),
-                        dto.getProdBrndRgnCd(), dto.getProdBrndCtryCd(),
-                        dto.getInterfaceCntlNo(), dto.getAcctBillingTpNo(),
-                        dto.getLegacyBinIn(), dto.getAccountingNo(),
-
-                        dto.getBankIdNo()
-                    };
-
-                    int rowsAffected = jdbcTemplate.update(
-                        PoeBinSQLFactory.UPDATE_BIN,
-                        updateParams
-                    );
-
-                    if (rowsAffected == 0) {
-                        log.info("Zero‐row UPDATE for BankId={} (no matching row or no change)", 
-                                 dto.getBankIdNo());
-                    } else {
-                        PoeBinConstants.updatedCount += rowsAffected;
-                        log.info("UPDATE succeeded for BankId={} → rowsAffected={}", 
-                                 dto.getBankIdNo(), rowsAffected);
-                    }
-
-                } else {
-                    // ── INSERT PATH ─────────────────────────────────
-                    log.info("INSERT path for BNK_ID_NO={}", dto.getBankIdNo());
-
-                    Object[] insertParams = new Object[] {
-                        dto.getBankIdNo(),
-                        dto.getHostNo(), dto.getIsuNo(), dto.getProdBrndNo(),
-                        dto.getBusLineTpNo(), dto.getHostPltfNo(),
-                        dto.getPmtCpnMicrNo(), dto.getGlDestNo(),
-
-                        dto.getBinEffTs(), dto.getBinExprTs(), dto.getBinAprvIn(),
-                        dto.getPrinBnkNoLenCt(), dto.getAcsmedNoLenCt(),
-                        dto.getMbnaOwnershipIn(), dto.getMbnaTechIn(),
-                        dto.getProdBrndRgnCd(), dto.getProdBrndCtryCd(),
-                        dto.getInterfaceCntlNo(), dto.getAcctBillingTpNo(),
-                        dto.getLegacyBinIn(), dto.getAccountingNo()
-                    };
-
-                    int rowsAffected = jdbcTemplate.update(
-                        PoeBinSQLFactory.INSERT_BIN,
-                        insertParams
-                    );
-
-                    if (rowsAffected == 1) {
-                        PoeBinConstants.insertedCount++;
-                        log.info("INSERT succeeded for BankId={} → rowsAffected=1", 
-                                 dto.getBankIdNo());
-                    } else {
-                        log.info("Unexpected rowsAffected for INSERT, BankId={} → rowsAffected={}", 
-                                 dto.getBankIdNo(), rowsAffected);
-                    }
-                }
-
-            } catch (Exception e) {
-                // timestamp + detailed error log before failing
-                SimpleDateFormat sdf = new SimpleDateFormat(PoeBinConstants.DATE_AND_TIME_FORMAT);
-                String now = sdf.format(Calendar.getInstance().getTime());
-
-                log.error(
-                  "PoeBinItemWriter ::: write() ::: Error at {} while writing record. "
-                + "BankId={}, DTO={}, Error={}",
-                  now,
-                  dto.getBankIdNo(),
-                  dto,
-                  e.getMessage(),
-                  e
-                );
-                throw e;
-            }
-        }
-    }
-}
+jdbcTemplate.update(
+    PoeBinSQLFactory.UPDATE_BIN,
+    updateParams
+);
