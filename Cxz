@@ -55,3 +55,32 @@ jdbcTemplate.update(
     PoeBinSQLFactory.UPDATE_BIN,
     updateParams
 );
+
+
+package com.bofa.sst.batch.constants;
+
+import java.sql.Timestamp;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+
+public class PoeBinConstants {
+  // … your existing constants …
+
+  /** Default “effective” timestamp (1900-01-01T00:00:00Z) */
+  public static final Timestamp DEFAULT_BIN_EFF_TS =
+      Timestamp.from(OffsetDateTime
+          .of(1900, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC)
+          .toInstant());
+
+  /** Default “expiry” timestamp (9999-12-31T00:00:00Z) */
+  public static final Timestamp DEFAULT_BIN_EXPR_TS =
+      Timestamp.from(OffsetDateTime
+          .of(9999, 12, 31, 0, 0, 0, 0, ZoneOffset.UTC)
+          .toInstant());
+
+  /** A single blank space */
+  public static final String DEFAULT_SPACES = " ";
+
+  /** Numeric zero for any NUMBER-typed column */
+  public static final Integer DEFAULT_ZERO = 0;
+}
