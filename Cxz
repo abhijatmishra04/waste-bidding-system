@@ -1,64 +1,101 @@
-package com.bofa.sst.batch.constants;
+@Override
+public void write(List<? extends PoeBinDto> items) throws Exception {
+    // … existing timestamp extraction …
 
-public class PoeBinSQLFactory {
+    for (PoeBinDto dto : items) {
+        if (dto.isContains()) {
+            // ----- UPDATE PATH -----
+            Object[] updateParams = new Object[] {
+                // 1–6: our constant fields
+                dto.getBinEffTs(),           // DEFAULT_BIN_EFF_TS
+                dto.getBinExprTs(),          // DEFAULT_BIN_EXPR_TS
+                dto.getBinAprvIn(),          // DEFAULT_SPACES
+                dto.getPrinBnkNoLenCt(),     // DEFAULT_ZERO
+                dto.getAcsmedNoLenCt(),      // DEFAULT_ZERO
+                // no placeholder for LAST_UPDATE_TS (CURRENT TIMESTAMP)
+                // 7–8: more constants
+                dto.getMbnaOwnershipIn(),    // DEFAULT_SPACES
+                dto.getMbnaTechIn(),         // DEFAULT_SPACES
 
-    // 1) Does this Bank ID already exist?
-    public static final String SELECT_BIN =
-        "SELECT COUNT(*) FROM SST_OWNER.bin WHERE BNK_ID_NO = ?";
+                // 9–16: the “real” fields you were already binding
+                dto.getHostNo(),
+                dto.getIssuerNo(),
+                dto.getProdBrndNo(),
+                dto.getBusLineTpNo(),
+                dto.getProdBrndRgnCd(),      // DEFAULT_SPACES
+                dto.getProdBrndCtryCd(),     // DEFAULT_SPACES
+                dto.getHostPlatformNo(),
+                dto.getPmtCpnMicrNo(),
 
-    // 2) Full INSERT covering every column from your ALTER script +
-    //    LAST_UPDATE_TS and EXTRACT_DT stamped in the database
-    public static final String INSERT_BIN =
-        "INSERT INTO SST_OWNER.bin ( " +
-        "  BNK_ID_NO,      BIN_EFF_TS,      BIN_EXPR_TS,      BIN_APRV_IN,      " +
-        "  PRIN_BNK_NO_LEN_CT,  ACSMED_NO_LEN_CT,  LAST_UPDATE_TS,  " +
-        "  MBNA_OWNERSHIP_IN,  MBNA_TECH_IN,     HOST_NO,        ISSUER_NO,       " +
-        "  PROD_BRND_NO,    BUS_LINE_TP_NO,  PROD_BRND_RGN_CD,  " +
-        "  PROD_BRND_CTRY_CD,  HOST_PLATFORM_NO,  PMT_CPN_MICR_NO, " +
-        "  INTERFACE_CNTL_NO,  ACCT_BILLING_TP_NO,  GL_DEST_NO,     " +
-        "  LEGACY_BIN_IN,   ACCOUNTING_NO,   EXTRACT_DT " +
-        ") VALUES ( " +
-        "  ?,  ?,  ?,  ?,  " +       // 1–4: BankId, 1900‐date, 9999‐date, spaces
-        "  ?,  ?,  CURRENT TIMESTAMP,  " + // 5–7: zeros ×2, LAST_UPDATE_TS
-        "  ?,  ?,  ?,  ?,  " +       // 8–11: spaces×2, hostNo, issuerNo
-        "  ?,  ?,  ?,  " +           // 12–14: prodBrndNo, busLine, spaces
-        "  ?,  ?,  ?,  " +           // 15–17: spaces, hostPlatform, pmtMicrNo
-        "  ?,  ?,  ?,  " +           // 18–20: zeros×2, glDestNo
-        "  ?,  ?,  CURRENT TIMESTAMP " + // 21–22: spaces×2, EXTRACT_DT
-        ")";
+                // 17–18: more zeros
+                dto.getInterfaceCntlNo(),    // DEFAULT_ZERO
+                dto.getAcctBillingTpNo(),    // DEFAULT_ZERO
 
-    // 3) Full UPDATE covering the same columns (minus the initial BNK_ID_NO bind,
-    //    which goes in the WHERE clause) and stamping LAST_UPDATE_TS/EXTRACT_DT in‐SQL
-    public static final String UPDATE_BIN =
-        "UPDATE SST_OWNER.bin SET " +
-        "  BIN_EFF_TS            = ?, " +  // 1
-        "  BIN_EXPR_TS           = ?, " +  // 2
-        "  BIN_APRV_IN           = ?, " +  // 3
-        "  PRIN_BNK_NO_LEN_CT    = ?, " +  // 4
-        "  ACSMED_NO_LEN_CT      = ?, " +  // 5
-        "  LAST_UPDATE_TS        = CURRENT TIMESTAMP, " +
-        "  MBNA_OWNERSHIP_IN     = ?, " +  // 6
-        "  MBNA_TECH_IN          = ?, " +  // 7
-        "  HOST_NO               = ?, " +  // 8
-        "  ISSUER_NO             = ?, " +  // 9
-        "  PROD_BRND_NO          = ?, " +  // 10
-        "  BUS_LINE_TP_NO        = ?, " +  // 11
-        "  PROD_BRND_RGN_CD      = ?, " +  // 12
-        "  PROD_BRND_CTRY_CD     = ?, " +  // 13
-        "  HOST_PLATFORM_NO      = ?, " +  // 14
-        "  PMT_CPN_MICR_NO       = ?, " +  // 15
-        "  INTERFACE_CNTL_NO     = ?, " +  // 16
-        "  ACCT_BILLING_TP_NO    = ?, " +  // 17
-        "  GL_DEST_NO            = ?, " +  // 18
-        "  LEGACY_BIN_IN         = ?, " +  // 19
-        "  ACCOUNTING_NO         = ?, " +  // 20
-        "  EXTRACT_DT            = CURRENT TIMESTAMP " +
-        "WHERE BNK_ID_NO         = ?";      // 21
+                // 19: real field
+                dto.getGlDestNo(),
 
-    // 4) Simple delete by key
-    public static final String DELETE_BIN =
-        "DELETE FROM SST_OWNER.bin WHERE BNK_ID_NO = ?";
+                // 20–21: more blanks
+                dto.getLegacyBinIn(),        // DEFAULT_SPACES
+                dto.getAccountingNo(),       // DEFAULT_SPACES
 
-    // (If you also use SELECT_DELETE_BIN or SELECT_PRODBRNDNO, update them
-    //  similarly to fully qualify the table and match your column names.)
+                // no placeholder for EXTRACT_DT (CURRENT TIMESTAMP)
+
+                // 22: finally the WHERE key
+                dto.getBankIdNo()
+            };
+
+            jdbcTemplate.update(
+                PoeBinSQLFactory.UPDATE_BIN,
+                updateParams
+            );
+
+        } else {
+            // ----- INSERT PATH -----
+            Object[] insertParams = new Object[] {
+                // 1: your key
+                dto.getBankIdNo(),
+
+                // 2–6: fixed‐date stamps + blanks + zeroes
+                dto.getBinEffTs(),           // DEFAULT_BIN_EFF_TS
+                dto.getBinExprTs(),          // DEFAULT_BIN_EXPR_TS
+                dto.getBinAprvIn(),          // DEFAULT_SPACES
+                dto.getPrinBnkNoLenCt(),     // DEFAULT_ZERO
+                dto.getAcsmedNoLenCt(),      // DEFAULT_ZERO
+
+                // no placeholder for LAST_UPDATE_TS
+
+                // 7–8: blanks
+                dto.getMbnaOwnershipIn(),    // DEFAULT_SPACES
+                dto.getMbnaTechIn(),         // DEFAULT_SPACES
+
+                // 9–16: your real fields
+                dto.getHostNo(),
+                dto.getIssuerNo(),
+                dto.getProdBrndNo(),
+                dto.getBusLineTpNo(),
+                dto.getProdBrndRgnCd(),      // DEFAULT_SPACES
+                dto.getProdBrndCtryCd(),     // DEFAULT_SPACES
+                dto.getHostPlatformNo(),
+                dto.getPmtCpnMicrNo(),
+
+                // 17–18: zeros
+                dto.getInterfaceCntlNo(),    // DEFAULT_ZERO
+                dto.getAcctBillingTpNo(),    // DEFAULT_ZERO
+
+                // 19: real field
+                dto.getGlDestNo(),
+
+                // 20–21: blanks
+                dto.getLegacyBinIn(),        // DEFAULT_SPACES
+                dto.getAccountingNo()        // DEFAULT_SPACES
+
+                // no placeholder for EXTRACT_DT
+            };
+
+            jdbcTemplate.update(
+                PoeBinSQLFactory.INSERT_BIN,
+                insertParams
+            );
+        }
+    }
 }
