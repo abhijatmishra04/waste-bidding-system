@@ -1,34 +1,48 @@
-/* -------- helper: batchUpdate using the "old" int[][] overload ------- */
-private int batchUpdatePaged(String sql,
-                             List<String> ids,
-                             Timestamp ts,
-                             int paramCount /* 3 for schedule, 2 for exec/instr */) {
+@Log4j2
+@Component
+public class CustaggProcessor
+        implements ItemProcessor<CustaggRecordsDTO,CustaggProcessedRecordsDTO> {
 
-    int total = 0;
+    private static final ConcurrentMap<String,Boolean> GLOBAL_DEDUP_CACHE
+            = new ConcurrentHashMap<>(1_000_000);
 
-    for (int from = 0; from < ids.size(); from += 1000) {
-        List<String> slice = ids.subList(from, Math.min(from + 1000, ids.size()));
+    private Map<String,String> entityMap;
+    private long duplicatesSkipped;
 
-        /* Spring 4 / Boot-2's legacy overload → returns int[][] */
-        int[][] rc = jdbc.batchUpdate(
-            sql,
-            slice,
-            slice.size(),
-            (ps, id) -> {
-                ps.setTimestamp(1, ts);        // cls_dt  or updt_ts
-                if (paramCount == 3) {
-                    ps.setTimestamp(2, ts);    // second ts for schedule
-                    ps.setString   (3, id);
-                } else {                       // paramCount == 2 (exec / instr)
-                    ps.setString   (2, id);
-                }
-            });
-
-        /* flatten int[][] → sum */
-        int affected = Arrays.stream(rc)            // Stream<int[]>
-                             .flatMapToInt(Arrays::stream)
-                             .sum();
-        total += affected;
+    @BeforeStep
+    @SuppressWarnings("unchecked")
+    public void init(StepExecution step) {
+        entityMap = (Map<String,String>)
+                step.getJobExecution().getExecutionContext().get("entityMap");
+        if (entityMap == null)
+            throw new IllegalStateException("entityMap missing");
+        log.info("Processor init – entityMap size={}", entityMap.size());
     }
-    return total;
+
+    @Override
+    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO in) {
+
+        String alpha = entityMap.get(in.getNumEntity());
+        if (alpha == null) return null;
+
+        String key = in.getProductCode()
+                   + '#' + in.getNumEntity()
+                   + '#' + in.getAccountNumber();
+
+        if (GLOBAL_DEDUP_CACHE.putIfAbsent(key, Boolean.TRUE) != null) {
+            duplicatesSkipped++;
+            return null;
+        }
+        return new CustaggProcessedRecordsDTO(
+                in.getProductCode(),
+                in.getNumEntity(),
+                alpha,
+                in.getAccountNumber());
+    }
+
+    @AfterStep
+    public void tearDown(StepExecution step) {
+        step.getExecutionContext().putLong("dupSkipped", duplicatesSkipped);
+        log.info("Step {} – duplicates skipped {}", step.getStepName(), duplicatesSkipped);
+    }
 }
