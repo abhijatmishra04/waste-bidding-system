@@ -1,118 +1,30 @@
-package com.bofa.sst.batch.core.tasklet;
-
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.StepExecutionListener;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.repeat.RepeatStatus;
-import org.springframework.context.annotation.StepScope;
-import org.springframework.stereotype.Component;
-
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
-
-/**
- * Validates today’s Refer-Data / Refer-Entry trigger files, locks them,
- * then reads the locked Refer-Entry file into a map&nbsp;&lt;NumEntity, AlphaEntity&gt;.
- */
-@Log4j2
-@Component
-@StepScope
-public class CustaggFileValidationTasklet
-        implements Tasklet, StepExecutionListener {
-
-    private StepExecution stepExecution;
-
-    /*────────────────── Step lifecycle ──────────────────*/
-    @Override public void beforeStep(StepExecution stepExecution) { this.stepExecution = stepExecution; }
-    @Override public ExitStatus afterStep (StepExecution stepExecution) { return ExitStatus.COMPLETED; }
-
-    /*──────────────────── Main work ─────────────────────*/
-    @Override
-    public RepeatStatus execute(StepContribution contribution,
-                                ChunkContext chunkContext) throws Exception {
-
-        ExecutionContext ctx = stepExecution.getJobExecution().getExecutionContext();
-
-        /* 1️⃣  Grab path & prefixes that a previous step already pushed */
-        String directoryPath       = ctx.getString(CustaggBatchConstants.DIRECTORY_PATH, null);
-        String filePrefixReferData = ctx.getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA, null);
-        String filePrefixReferEnty = ctx.getString(CustaggBatchConstants.FILE_PREFIX_REFERENTY, null);
-
-        if (directoryPath == null || filePrefixReferData == null || filePrefixReferEnty == null) {
-            contribution.setExitStatus(ExitStatus.FAILED);
-            throw new IllegalStateException(
-                "Missing keys in ExecutionContext – expected DIRECTORY_PATH / FILE_PREFIX_REFERDATA / FILE_PREFIX_REFERENTY");
-        }
-
-        log.info("FileValidator – dir='{}'  refData='{}'  refEnty='{}'",
-                 directoryPath, filePrefixReferData, filePrefixReferEnty);
-
-        /* 2️⃣  Lock both *.txt* trigger files (FileUtils renames → *.lck) */
-        try {
-            FileUtils.lockFile(directoryPath, filePrefixReferData,
-                               CustaggBatchConstants.INPUT_FILE_EXTENSION);
-            FileUtils.lockFile(directoryPath, filePrefixReferEnty,
-                               CustaggBatchConstants.INPUT_FILE_EXTENSION);
-        } catch (Exception e) {
-            contribution.setExitStatus(ExitStatus.FAILED);
-            throw new Exception("Error while locking trigger files", e);
-        }
-        log.info("Trigger files locked successfully");
-
-        /* 3️⃣  Now locate the **locked** Refer-Entry file (*.lck) */
-        String filePathForReferEntry = FileUtils.findTodaysFiles(
-                directoryPath,
-                filePrefixReferEnty,
-                CustaggBatchConstants.LOCK_FILE_EXTENSION);
-
-        if (filePathForReferEntry == null) {
-            contribution.setExitStatus(ExitStatus.FAILED);
-            throw new java.io.FileNotFoundException(
-                    "Locked Refer-Entry file not found in " + directoryPath);
-        }
-
-        /* 4️⃣  Parse fixed-width file → entityMap<numEntity, alphaEntity> */
-        Map<String,String> entityMap = new HashMap<>();
-
-        try (BufferedReader br = new BufferedReader(
-                new FileReader(filePathForReferEntry, StandardCharsets.US_ASCII))) {
-
-            String line; int lineNumber = 0;
-            while ((line = br.readLine()) != null) {
-                lineNumber++;
-                if (line.length() < 8) {
-                    log.info("EntityFileReader: Skipping line {} – too short: '{}'", lineNumber, line);
-                    continue;
-                }
-
-                String alphaEntity = line.substring(0, 4).trim();
-                String numEntity   = line.substring(4, 8).trim();
-
-                if (numEntity.isEmpty() || alphaEntity.isEmpty()) {
-                    log.info("EntityFileReader: Skipping line {} – missing values: '{}'", lineNumber, line);
-                    continue;
-                }
-                entityMap.put(numEntity, alphaEntity);
-            }
-        }
-
-        /* 5️⃣  Store results back into ExecutionContext for downstream steps */
-        ctx.put("entityMap",           entityMap);
-        ctx.put("filePrefixReferData", filePrefixReferData);
-        ctx.put("filePrefixReferEnty", filePrefixReferEnty);
-
-        log.info("Validation complete – lockedEntyFile='{}'  mappings={}",
-                 new File(filePathForReferEntry).getName(), entityMap.size());
-
-        return RepeatStatus.FINISHED;
-    }
-}
+Seq
+Business Logic / Validation
+Pre-Processing
+1
+Retrieve the input folder path and expected file prefix from job parameters.
+2
+Locate today’s trigger file. If it is missing, stop the job and raise an error.
+3
+Compare the trigger file name against the archive area. If the same file already exists there, treat it as a duplicate and fail the job.
+4
+Attempt to lock the trigger file. If the lock cannot be obtained, halt processing and report the issue.
+Record Preparation
+5
+Skip any rows inside the file that share the same Bank-ID (duplicates within the same run).
+6
+Populate all mandatory fields with standard default values (dates, flags, blanks, zeros, etc.).
+7
+Check the database for each Bank-ID: • If a matching row exists, mark the record for update. • If no match is found, mark it for insert.
+Database Persistence
+8
+Update path → Refresh the existing row with the latest values. If no row is affected, log a “zero-update” informational message.
+9
+Insert path → Create a new record. Confirm exactly one row is inserted; log any anomaly.
+10
+Maintain running totals of rows updated and rows inserted for end-of-batch reporting.
+Wrap-Up
+11
+Write a summary to the job log showing total inserts, total updates, and any errors encountered.
+12
+Mark the batch as successfully completed if no critical errors were raised during the previous steps.
