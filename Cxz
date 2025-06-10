@@ -1,30 +1,21 @@
-Seq
-Business Logic / Validation
-Pre-Processing
-1
-Retrieve the input folder path and expected file prefix from job parameters.
-2
-Locate today’s trigger file. If it is missing, stop the job and raise an error.
-3
-Compare the trigger file name against the archive area. If the same file already exists there, treat it as a duplicate and fail the job.
-4
-Attempt to lock the trigger file. If the lock cannot be obtained, halt processing and report the issue.
-Record Preparation
-5
-Skip any rows inside the file that share the same Bank-ID (duplicates within the same run).
-6
-Populate all mandatory fields with standard default values (dates, flags, blanks, zeros, etc.).
-7
-Check the database for each Bank-ID: • If a matching row exists, mark the record for update. • If no match is found, mark it for insert.
-Database Persistence
-8
-Update path → Refresh the existing row with the latest values. If no row is affected, log a “zero-update” informational message.
-9
-Insert path → Create a new record. Confirm exactly one row is inserted; log any anomaly.
-10
-Maintain running totals of rows updated and rows inserted for end-of-batch reporting.
-Wrap-Up
-11
-Write a summary to the job log showing total inserts, total updates, and any errors encountered.
-12
-Mark the batch as successfully completed if no critical errors were raised during the previous steps.
+1.	Read job parameters
+– Get the working folder path and the file-name prefix from the job context.
+	2.	Create a run-specific audit file
+– Build a unique name such as DeleteBin_<YYYYMMDD_HHMMSS>.txt and open it for writing.
+	3.	Write the audit-file header
+– Add a single header line that carries the current timestamp and a fixed identifier.
+	4.	Identify BINs to purge
+– Query the database for every BIN that exists in the BIN table but is missing from today’s input file.
+	5.	Log each obsolete BIN
+– For every BIN returned by the query, write one detail line into the audit file that lists the key fields (Bank ID, host number, ISU number, product-brand code, etc.).
+– Increment a running counter as each line is written.
+	6.	Write the audit-file footer
+– After the last detail line, add a trailer line in the format T<record-count> to show exactly how many BINs are listed.
+	7.	Delete the obsolete rows
+– Issue a single batched DELETE statement to remove all BINs identified in Step 4 from the database.
+	8.	Record the outcome
+– Store the total number of rows deleted in the job’s execution context for later reporting.
+	9.	Close and flush the audit file
+– Ensure the header, detail lines, and footer are safely written to disk.
+	10.	Finish and report
+– Log a final “Delete operation completed” message and mark the tasklet as successfully completed.
