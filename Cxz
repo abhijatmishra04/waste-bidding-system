@@ -1,172 +1,23 @@
-package com.bofa.sst.batch.core.impl;
+private int batchUpdatePaged(String sql,
+                             List<String> ids,
+                             Timestamp ts) {
 
-import com.bofa.sst.batch.dto.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.exception.CustaggBatchException;
-import com.bofa.sst.batch.sql.CustaggSQLFactory;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.*;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.stereotype.Component;
+    int total = 0;
+    for (int i = 0; i < ids.size(); i += 1000) {
 
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.*;
-import java.util.stream.Collectors;
+        List<String> slice = ids.subList(i,
+                           Math.min(i + 1000, ids.size()));
 
-/**
- * • Single UNION fetch for schedule IDs (constant: FETCH_SCHEDULE_IDS_UNION)<br>
- * • IN-list fetch for execution / instruction IDs (FETCH_TRANSFER_EXECUTION_M2M_ID /
- *   FETCH_TRANSFER_INSTRUCTION_ID)<br>
- * • Three batchUpdate calls (UPDATE_SCHEDULE_M2M / UPDATE_TRANSFER_EXECUTION_M2M /
- *   UPDATE_TRANSFER_INSTRUCTION_M2M) — split into chunks of ≤1000 to satisfy Oracle limit.
- */
-@Log4j2
-@Component
-public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO> {
-
-    private final NamedParameterJdbcTemplate npJdbc;
-    private final JdbcTemplate jdbc;
-
-    private StepExecution step;
-
-    @Autowired
-    public CustaggWriter(NamedParameterJdbcTemplate npJdbc,
-                         JdbcTemplate jdbc) {
-        this.npJdbc = npJdbc;
-        this.jdbc   = jdbc;
-    }
-
-    /* ─────────────────── metrics ─────────────────── */
-    private int schedFetched, execFetched, instrFetched;
-    private int schedUpdated, execUpdated, instrUpdated;
-
-    @BeforeStep
-    public void capture(StepExecution se) { this.step = se; }
-
-    @AfterStep
-    public void pushMetrics() {
-        ExecutionContext ec = step.getExecutionContext();
-        ec.putLong("schedFetched", schedFetched);
-        ec.putLong("execFetched",  execFetched);
-        ec.putLong("instrFetched", instrFetched);
-        ec.putLong("schedUpdated", schedUpdated);
-        ec.putLong("execUpdated",  execUpdated);
-        ec.putLong("instrUpdated", instrUpdated);
-        log.info("CustaggWriter metrics  fetched S/E/I = {}/{}/{}  updated S/E/I = {}/{}/{}",
-                 schedFetched, execFetched, instrFetched,
-                 schedUpdated, execUpdated, instrUpdated);
-    }
-
-    /* ─────────────────── main write ───────────────── */
-    @Override
-    public void write(List<? extends CustaggProcessedRecordsDTO> items) {
-
-        if (items.isEmpty()) return;
-
-        /* 1️⃣ IN-lists */
-        Set<String> accNos   = items.stream()
-                                    .map(CustaggProcessedRecordsDTO::getAccountNumber)
-                                    .collect(Collectors.toSet());
-        Set<String> entCodes = items.stream()
-                                    .map(CustaggProcessedRecordsDTO::getNumEntity)
-                                    .collect(Collectors.toSet());
-        Set<String> prodCodes= items.stream()
-                                    .map(CustaggProcessedRecordsDTO::getProductCode)
-                                    .collect(Collectors.toSet());
-
-        Map<String,Object> param = Map.of(
-            "accNos",   accNos,
-            "entCodes", entCodes,
-            "prodCodes",prodCodes
-        );
-
-        try {
-            /* 2️⃣ fetch schedule IDs via UNION */
-            List<String> schedIds = fetchPaged(
-                    CustaggSQLFactory.FETCH_SCHEDULE_IDS_UNION,
-                    param,
-                    List.of("accNos","entCodes","prodCodes"));
-            schedFetched = schedIds.size();
-            if (schedIds.isEmpty()) return;
-
-            /* 3️⃣ fetch exec / instr IDs */
-            Map<String,Object> schedMap = Map.of("schedIds", schedIds);
-
-            List<String> execIds = fetchPaged(
-                    CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID,
-                    schedMap, List.of("schedIds"));
-            execFetched = execIds.size();
-
-            List<String> instrIds = fetchPaged(
-                    CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID,
-                    schedMap, List.of("schedIds"));
-            instrFetched = instrIds.size();
-
-            /* 4️⃣ batch updates */
-            Timestamp ts = Timestamp.from(Instant.now());
-
-            schedUpdated = batchUpdatePaged(
-                    CustaggSQLFactory.UPDATE_SCHEDULE_M2M,
-                    schedIds, ts);
-
-            execUpdated = batchUpdatePaged(
-                    CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M,
-                    execIds, ts);
-
-            instrUpdated = batchUpdatePaged(
-                    CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M,
-                    instrIds, ts);
-
-        } catch (Exception e) {
-            throw new CustaggBatchException("CustaggWriter failed", e);
+        /* Spring 4.3 batchUpdate wants Object[][]. */
+        Object[][] params = new Object[slice.size()][3];
+        for (int r = 0; r < slice.size(); r++) {
+            params[r][0] = ts;          // cls_dt  or 1st ? param
+            params[r][1] = ts;          // updt_ts or 2nd ? param
+            params[r][2] = slice.get(r); // id      or 3rd ? param
         }
+
+        int[] rc = jdbc.batchUpdate(sql, params);
+        total += Arrays.stream(rc).sum();
     }
-
-    /* ───────────── helper: fetch with 1000-limit paging ───────────── */
-    private List<String> fetchPaged(String sql,
-                                    Map<String,Object> base,
-                                    List<String> keysToSplit) {
-
-        // if IN list under 1000 → single call
-        Collection<?> first = (Collection<?>) base.get(keysToSplit.get(0));
-        if (first.size() <= 990)                    // safe margin
-            return npJdbc.queryForList(sql, base, String.class);
-
-        List<String> result = new ArrayList<>();
-        int total = first.size();
-        List<String> master = new ArrayList<>((Collection<String>) first);
-
-        for (int i = 0; i < total; i += 990) {
-            int end = Math.min(i + 990, total);
-            Map<String,Object> slice = new HashMap<>(base);
-            for (String k : keysToSplit) {
-                // same slice for each key
-                Collection<String> orig = (Collection<String>) base.get(k);
-                slice.put(k, new ArrayList<>(orig).subList(i, end));
-            }
-            result.addAll(npJdbc.queryForList(sql, slice, String.class));
-        }
-        return result;
-    }
-
-    /* ───────────── helper: batchUpdate with 1000-limit paging ─────── */
-    private int batchUpdatePaged(String sql, List<String> ids, Timestamp ts) {
-        int total = 0;
-        for (int i = 0; i < ids.size(); i += 1000) {
-            List<String> slice = ids.subList(i, Math.min(i + 1000, ids.size()));
-            int[] rc = jdbc.batchUpdate(sql, slice, slice.size(),
-                (ps, id) -> {
-                    ps.setTimestamp(1, ts);         // first ?
-                    ps.setTimestamp(2, ts);         // second ?
-                    ps.setString   (3, id);         // id param
-                });
-            total += Arrays.stream(rc).sum();
-        }
-        return total;
-    }
+    return total;
 }
