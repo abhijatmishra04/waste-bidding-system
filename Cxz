@@ -1,120 +1,272 @@
 package com.bofa.sst.batch.core.impl;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
-import org.springframework.batch.core.ExecutionContext;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.annotation.AfterStep;
 import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import com.bofa.sst.batch.constants.CustaggSQLFactory;
 import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.model.CustaggRecordsDTO;
-
-import lombok.extern.log4j.Log4j2;
 
 /**
- * Enrich raw CustaggRecordsDTO with alpha-entity, deduplicate globally on
- * productCode#numericEntity#accountNumber, and emit CustaggProcessedRecordsDTO.
+ * Writer that:
+ *   ① fetches schedule / execution / instruction IDs,
+ *   ② updates them in bulk,
+ *   ③ pushes per-step metrics into the {@link StepExecutionContext},
+ *   with **diagnostic logging** at every decision point.
  */
 @Log4j2
 @Component
-public class CustaggProcessor
-        implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
+public class CustaggWriter implements ItemWriter<CustaggProcessedRecordsDTO> {
 
-    /* ---------- state restored / shared via ExecutionContext ---------- */
-    /** numeric→alpha entity map produced by the validation step. */
-    private Map<String, String> entityMap;
+    /* ------------------------------------------------------------------ */
+    /*  Constructor-injected beans                                        */
+    /* ------------------------------------------------------------------ */
 
-    /** Job-wide cache to guarantee dedup across all partitions. */
-    private ConcurrentMap<String, Boolean> dedupCache;
+    private final NamedParameterJdbcTemplate npJdbc;
+    private final JdbcTemplate               jdbc;
 
-    /** Per-step counter for duplicates skipped. */
-    private long dupSkipped = 0;
+    @Autowired
+    public CustaggWriter(NamedParameterJdbcTemplate npJdbc,
+                         JdbcTemplate jdbc) {
+        this.npJdbc = npJdbc;
+        this.jdbc   = jdbc;
+    }
 
-    /* --------------------------- lifecycle hooks --------------------------- */
+    /* ------------------------------------------------------------------ */
+    /*  Metrics captured per step                                         */
+    /* ------------------------------------------------------------------ */
 
-    @SuppressWarnings("unchecked")
+    private final AtomicInteger schedFetched = new AtomicInteger();
+    private final AtomicInteger execFetched  = new AtomicInteger();
+    private final AtomicInteger instrFetched = new AtomicInteger();
+
+    private final AtomicInteger schedUpdated = new AtomicInteger();
+    private final AtomicInteger execUpdated  = new AtomicInteger();
+    private final AtomicInteger instrUpdated = new AtomicInteger();
+
+    private StepExecution step;   // populated in @BeforeStep
+
+    /* ------------------------------------------------------------------ */
+    /*  Life-cycle hooks                                                  */
+    /* ------------------------------------------------------------------ */
+
     @BeforeStep
-    public void beforeStep(StepExecution stepExecution) {
-        ExecutionContext jobCtx = stepExecution.getJobExecution().getExecutionContext();
-
-        entityMap = (Map<String, String>) jobCtx.get("entityMap");
-        if (entityMap == null) {
-            throw new IllegalStateException("entityMap missing from JobExecutionContext");
-        }
-
-        dedupCache = (ConcurrentMap<String, Boolean>) jobCtx.get("dedupCache");
-        if (dedupCache == null) {
-            dedupCache = new ConcurrentHashMap<>(1_000_000);
-            jobCtx.put("dedupCache", dedupCache);
-        }
-
-        log.info("CustaggProcessor initialised – entityMap size={}, dedupCache size={}",
-                 entityMap.size(), dedupCache.size());
+    public void captureStepExecution(StepExecution se) {
+        this.step = se;
+        log.info("CustaggWriter initialised for step={}  chunkSize={}",
+                 se.getStepName(), se.getCommitCount());
     }
-
-    /* ------------------------------ processing ----------------------------- */
-
-    @Override
-    public CustaggProcessedRecordsDTO process(CustaggRecordsDTO record) {
-        if (record == null) {
-            log.warn("Skipping null record");
-            return null;
-        }
-
-        try {
-            /* ---- 1. entity mapping ---- */
-            String alpha = entityMap.get(record.getEntity());
-            if (alpha == null) {
-                log.debug("Skipping – no alpha mapping for numericEntity={}", record.getEntity());
-                return null;
-            }
-
-            /* ---- 2. global dedup ---- */
-            String key = new StringBuilder()
-                    .append(record.getProductCode()).append('#')
-                    .append(record.getEntity()).append('#')
-                    .append(record.getAccountNumber())
-                    .toString();
-
-            if (dedupCache.putIfAbsent(key, Boolean.TRUE) != null) {
-                dupSkipped++;
-                log.debug("Duplicate skipped – key={}", key);
-                return null;
-            }
-
-            /* ---- 3. emit enriched DTO ---- */
-            CustaggProcessedRecordsDTO dto = new CustaggProcessedRecordsDTO(
-                    record.getAccountNumber(),
-                    record.getEntity(),
-                    alpha,
-                    record.getProductCode()
-            );
-
-            // NEW: log the object that is handed to the writer
-            log.debug("Emitting DTO -> {}", dto);
-
-            return dto;
-
-        } catch (Exception ex) {
-            // Log + propagate so Spring Batch can apply skip/retry policy
-            log.error("Processing failed for record={}, reason={}", record, ex.toString(), ex);
-            throw ex;
-        }
-    }
-
-    /* ------------------------------ tear-down ------------------------------ */
 
     @AfterStep
-    public void afterStep(StepExecution stepExecution) {
-        ExecutionContext stepCtx = stepExecution.getExecutionContext();
-        stepCtx.putLong("dupSkipped", dupSkipped);
+    public void flushMetrics() {
+        pushMetrics(); // final flush
+        log.info("CustaggWriter completed  fetched S/E/I = {}/{}/{}  updated S/E/I = {}/{}/{}",
+                 schedFetched.get(), execFetched.get(), instrFetched.get(),
+                 schedUpdated.get(), execUpdated.get(), instrUpdated.get());
+    }
 
-        log.info("Step '{}' completed – duplicates skipped={}",
-                 stepExecution.getStepName(), dupSkipped);
+    /* ------------------------------------------------------------------ */
+    /*  ItemWriter contract                                               */
+    /* ------------------------------------------------------------------ */
+
+    @Override
+    public void write(List<? extends CustaggProcessedRecordsDTO> items) throws Exception {
+
+        if (items.isEmpty()) {
+            log.debug("Writer chunk received 0 items – returning.");
+            return;
+        }
+
+        /* ----------  distinct IN-list values  ---------- */
+        Set<String> accNos   = items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getAccountNumber)
+                                    .collect(Collectors.toSet());
+
+        Set<String> entCodes = items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getNumEntity)
+                                    .collect(Collectors.toSet());
+
+        Set<String> prodCodes= items.stream()
+                                    .map(CustaggProcessedRecordsDTO::getProductCode)
+                                    .collect(Collectors.toSet());
+
+        log.debug("Writer chunk size={}  distinct accNos={} entCodes={} prodCodes={}",
+                  items.size(), accNos.size(), entCodes.size(), prodCodes.size());
+
+        Map<String,Object> param = Map.of("accNos",   accNos,
+                                          "entCodes", entCodes,
+                                          "prodCodes",prodCodes);
+
+        try {
+            /* ---------- 1. FETCH schedule IDs ---------- */
+            List<String> schedIds = fetchPaged(
+                    CustaggSQLFactory.FETCH_SCHEDULE_IDS_UNION,
+                    param,
+                    List.of("accNos","entCodes","prodCodes"));
+
+            schedFetched.addAndGet(schedIds.size());
+            log.debug("Fetched {} SCHEDULE_IDs → {}", schedIds.size(), truncate(schedIds));
+
+            if (schedIds.isEmpty()) {
+                log.warn("Chunk produced 0 schedIds – nothing to update. Params were {}", param);
+                return;
+            }
+
+            /* ---------- 2. FETCH exec / instr IDs ---------- */
+            Map<String,Object> mapSched = Map.of("schedIds", schedIds);
+
+            List<String> execIds = fetchPaged(
+                    CustaggSQLFactory.FETCH_TRANSFER_EXECUTION_M2M_ID,
+                    mapSched,
+                    List.of("schedIds"));
+
+            List<String> instrIds = fetchPaged(
+                    CustaggSQLFactory.FETCH_TRANSFER_INSTRUCTION_ID,
+                    mapSched,
+                    List.of("schedIds"));
+
+            execFetched.addAndGet(execIds.size());
+            instrFetched.addAndGet(instrIds.size());
+
+            log.debug("Fetched {} EXEC_IDs, {} INSTR_IDs", execIds.size(), instrIds.size());
+
+            /* ---------- 3. UPDATE in bulk ---------- */
+            Timestamp ts = Timestamp.from(Instant.now());
+
+            schedUpdated.addAndGet(
+                    batchUpdatePaged(CustaggSQLFactory.UPDATE_SCHEDULE_M2M,
+                                     schedIds, ts, 3));
+            execUpdated.addAndGet(
+                    batchUpdatePaged(CustaggSQLFactory.UPDATE_TRANSFER_EXECUTION_M2M,
+                                     execIds, ts, 2));
+            instrUpdated.addAndGet(
+                    batchUpdatePaged(CustaggSQLFactory.UPDATE_TRANSFER_INSTRUCTION_M2M,
+                                     instrIds, ts, 2));
+
+            log.debug("Updated schedule/exec/instr  rowsAffected = {}/{}/{}",
+                      schedUpdated.get(), execUpdated.get(), instrUpdated.get());
+
+        } catch (Exception ex) {
+            log.error("CustaggWriter chunk failed – will be retried. Context params={}", param, ex);
+            throw ex;   // let Spring retry or fail the chunk
+        } finally {
+            pushMetrics();  // flush even if the chunk rolls back
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Helper: push counters into StepExecutionContext                   */
+    /* ------------------------------------------------------------------ */
+
+    private void pushMetrics() {
+        if (step == null) return; // should not happen
+
+        var ec = step.getExecutionContext();
+        ec.putLong("schedFetched", schedFetched.get());
+        ec.putLong("execFetched",  execFetched .get());
+        ec.putLong("instrFetched", instrFetched.get());
+        ec.putLong("schedUpdated", schedUpdated.get());
+        ec.putLong("execUpdated",  execUpdated .get());
+        ec.putLong("instrUpdated", instrUpdated.get());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Helper: SELECT with 990-literal paging                            */
+    /* ------------------------------------------------------------------ */
+
+    private List<String> fetchPaged(String sql,
+                                    Map<String,Object> base,
+                                    List<String> keysToSplit) {
+
+        String firstKey = keysToSplit.get(0);
+        Collection<?> first = (Collection<?>) base.get(firstKey);
+
+        if (first == null) {
+            log.error("fetchPaged() called with missing key '{}'. Base map keys = {}", firstKey, base.keySet());
+            return List.of();
+        }
+        if (first.isEmpty()) {
+            log.debug("fetchPaged(): key '{}' has 0 elements – skipping query.", firstKey);
+            return List.of();
+        }
+
+        // ≤ 990 literals → single query
+        if (first.size() <= 990) {
+            log.debug("fetchPaged(): running single query – literals = {}", first.size());
+            return npJdbc.queryForList(sql, base, String.class);
+        }
+
+        /* ----- need to split ----- */
+        log.debug("fetchPaged(): {} literals – paging in slices of 990", first.size());
+
+        List<String> master = new ArrayList<>((Collection<String>) first); // indexed access
+        List<String> result = new ArrayList<>();
+
+        for (int from = 0; from < master.size(); from += 990) {
+            int   to    = Math.min(from + 990, master.size());
+            Map<String,Object> slice = new HashMap<>(base);
+
+            for (String k : keysToSplit) {
+                slice.put(k,
+                          new ArrayList<>(((Collection<String>) base.get(k)).subList(from, to)));
+            }
+            log.trace("fetchPaged(): executing slice {}-{} ({} elems)", from, to - 1, (to - from));
+            result.addAll(npJdbc.queryForList(sql, slice, String.class));
+        }
+        return result;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Helper: batch UPDATE with 1000-row slices                          */
+    /* ------------------------------------------------------------------ */
+
+    private int batchUpdatePaged(String sql,
+                                 List<String> ids,
+                                 Timestamp ts,
+                                 int paramCount /* 2 or 3 */) {
+
+        if (ids.isEmpty()) return 0;
+
+        int total = 0;
+        for (int from = 0; from < ids.size(); from += 1000) {
+            int to = Math.min(from + 1000, ids.size());
+            List<String> slice = ids.subList(from, to);
+
+            int[][] rc = jdbc.batchUpdate(sql, slice, slice.size(), (ps, id) -> {
+                ps.setTimestamp(1, ts);
+                if (paramCount == 3) ps.setTimestamp(2, ts);
+                ps.setString(paramCount, id);      // 2-param→index=2, 3-param→index=3
+            });
+
+            int affected = Arrays.stream(rc)
+                                 .flatMapToInt(Arrays::stream)
+                                 .sum();
+            total += affected;
+            log.trace("batchUpdatePaged(): {} rows affected for slice {}-{}", affected, from, to - 1);
+        }
+        return total;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Helper: pretty-print small lists                                  */
+    /* ------------------------------------------------------------------ */
+
+    private String truncate(Collection<?> c) {
+        if (c == null) return "null";
+        if (c.size() <= 10) return c.toString();
+        return c.stream().limit(10).collect(Collectors.toList()) + " … +"
+                + (c.size() - 10) + " more";
     }
 }
