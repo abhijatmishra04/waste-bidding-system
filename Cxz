@@ -1,120 +1,128 @@
 package com.bofa.sst.batch.core.impl;
 
-import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
-import com.bofa.sst.batch.model.CustaggRecordsDTO;
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.AfterStep;
-import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.batch.core.StepExecutionListener;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.stereotype.Component;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.batch.core.ExecutionContext;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.annotation.AfterStep;
+import org.springframework.batch.core.annotation.BeforeStep;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+import com.bofa.sst.batch.model.CustaggProcessedRecordsDTO;
+import com.bofa.sst.batch.model.CustaggRecordsDTO;
+
+import lombok.extern.log4j.Log4j2;
+
 /**
- * Enriches raw CustaggRecordsDTO with alpha-entity, deduplicates globally
- * across all partitions, records skip metrics, and guards against single-record
- * failures.
+ * Enriches raw {@link CustaggRecordsDTO} with alpha-entity, performs a
+ * *job-wide* deduplication on <code>productCode#numericEntity#accountNumber</code>,
+ * and emits {@link CustaggProcessedRecordsDTO}.
  */
 @Log4j2
 @Component
 public class CustaggProcessor
-    implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO>,
-               StepExecutionListener {
+        implements ItemProcessor<CustaggRecordsDTO, CustaggProcessedRecordsDTO> {
 
-    private static final int DEDUP_CACHE_INITIAL_CAPACITY = 1_000_000;
-
-    /** loaded from validation tasklet */
+    /** Injected by validation tasklet and restored in {@link #beforeStep}. */
     private Map<String, String> entityMap;
 
-    /** shared across partitions to avoid duplicates */
+    /** Job-wide cache to detect duplicates across all partitions. */
     private ConcurrentMap<String, Boolean> dedupCache;
 
-    /** metrics */
-    private long dupSkipped = 0L;
+    /** Per-step counter so we can aggregate later in a JobListener. */
+    private long dupSkipped = 0;
 
-    // ------------------------------------
-    // STEP LISTENER: restore maps once
-    // ------------------------------------
-    @BeforeStep
+    // ------------------------------- lifecycle hooks -------------------------
+
+    /**
+     * Initialise caches before the chunk processing starts.
+     */
     @SuppressWarnings("unchecked")
+    @BeforeStep
     public void beforeStep(StepExecution stepExecution) {
-        ExecutionContext jobCtx = stepExecution
-            .getJobExecution()
-            .getExecutionContext();
+        ExecutionContext jobCtx = stepExecution.getJobExecution().getExecutionContext();
 
-        // 1) restore the numeric→alpha map
         entityMap = (Map<String, String>) jobCtx.get("entityMap");
         if (entityMap == null) {
-            throw new IllegalStateException(
-                "CustaggProcessor.beforeStep: entityMap missing from JobExecutionContext");
+            throw new IllegalStateException("entityMap missing from JobExecutionContext");
         }
 
-        // 2) restore or create the dedupe cache
         dedupCache = (ConcurrentMap<String, Boolean>) jobCtx.get("dedupCache");
         if (dedupCache == null) {
-            dedupCache = new ConcurrentHashMap<>(DEDUP_CACHE_INITIAL_CAPACITY);
+            dedupCache = new ConcurrentHashMap<>(1_000_000);
             jobCtx.put("dedupCache", dedupCache);
         }
 
-        log.info("CustaggProcessor.beforeStep ▶ entityMap size={}, dedupCache size={}",
+        log.info("CustaggProcessor initialised - entityMap size = {}, dedupCache size = {}",
                  entityMap.size(), dedupCache.size());
     }
 
-    @Override
-    public void afterStep(StepExecution stepExecution) {
-        // store the skip count so listeners can aggregate
-        stepExecution.getExecutionContext().putLong("dupSkipped", dupSkipped);
-        log.info("CustaggProcessor.afterStep ▶ step='{}', duplicates skipped={}",
-                 stepExecution.getStepName(), dupSkipped);
-    }
+    // -------------------------------- processing -----------------------------
 
-    // ------------------------------------
-    // ITEM PROCESSOR
-    // ------------------------------------
+    /**
+     * 1. Map numeric → alpha entity (skip if not found).  
+     * 2. Deduplicate on productCode#numericEntity#accountNumber (skip dupes).  
+     * 3. Emit enriched DTO.
+     */
     @Override
     public CustaggProcessedRecordsDTO process(CustaggRecordsDTO record) {
-        log.debug("Processor INPUT ▶ {}", record);
-
-        try {
-            // 1) numeric→alpha
-            String alpha = entityMap.get(record.getEntity());
-            if (alpha == null) {
-                log.debug("  ↳ drop: no mapping for numericEntity={}",
-                          record.getEntity());
-                return null;
-            }
-
-            // 2) global dedupe
-            String key = record.getProductCode()
-                       + '#' + record.getEntity()
-                       + '#' + record.getAccountNumber();
-            if (dedupCache.putIfAbsent(key, Boolean.TRUE) != null) {
-                dupSkipped++;
-                log.debug("  ↳ drop: duplicate skipped for key='{}'", key);
-                return null;
-            }
-
-            // 3) emit enriched DTO
-            CustaggProcessedRecordsDTO out = new CustaggProcessedRecordsDTO(
-                record.getAccountNumber(),
-                record.getEntity(),
-                alpha,
-                record.getProductCode()
-            );
-            log.debug("  ↳ emit: {}", out);
-            return out;
-
-        } catch (Exception e) {
-            // catch-all so one bad record doesn’t kill the step
-            log.error("Processor ERROR ▶ record={}, skipping due to exception",
-                      record, e);
-            // optional: you could increment a separate error counter here
+        // Defensive null-check for the whole record
+        if (record == null) {
+            log.warn("Skipping null record");          // should never happen
             return null;
         }
+
+        try {
+            /* ---------- 1. entity mapping ---------- */
+            String alpha = entityMap.get(record.getEntity());
+            if (alpha == null) {
+                log.debug("Skipping – no alpha mapping for numericEntity={}", record.getEntity());
+                return null;                           // filtered out, not an error
+            }
+
+            /* ---------- 2. global dedup ---------- */
+            String key = new StringBuilder()
+                            .append(record.getProductCode()).append('#')
+                            .append(record.getEntity()).append('#')
+                            .append(record.getAccountNumber())
+                            .toString();
+
+            if (dedupCache.putIfAbsent(key, Boolean.TRUE) != null) {
+                dupSkipped++;
+                log.debug("Duplicate skipped – key={}", key);
+                return null;                           // filtered out, not an error
+            }
+
+            /* ---------- 3. emit enriched DTO ---------- */
+            return new CustaggProcessedRecordsDTO(
+                    record.getAccountNumber(),
+                    record.getEntity(),
+                    alpha,
+                    record.getProductCode()
+            );
+
+        } catch (Exception ex) {
+            // Capture + re-throw so Spring Batch can mark the item as failed
+            log.error("Processing failed for record={}, reason={}", record, ex.toString(), ex);
+            throw ex;                                  // keeps stack-trace intact
+        }
+    }
+
+    // ------------------------------- tear-down --------------------------------
+
+    /**
+     * Persist per-step metrics for job-level aggregation.
+     */
+    @AfterStep
+    public void afterStep(StepExecution stepExecution) {
+        ExecutionContext stepCtx = stepExecution.getExecutionContext();
+        stepCtx.putLong("dupSkipped", dupSkipped);
+
+        log.info("Step '{}' completed – duplicates skipped = {}",
+                 stepExecution.getStepName(), dupSkipped);
     }
 }
