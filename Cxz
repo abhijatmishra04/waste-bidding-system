@@ -1,32 +1,136 @@
-<!-- Appender for Splunk forwarding -->
-<RollingFile name="splunkAppender"
-             fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_custagg/batch/splunk.log"
-             filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_custagg/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
+package com.bofa.sst.batch.core.impl;
 
-    <!--  [12/Jun/2025:13:55:42.173 Z]  actual-log-line -->
-    <PatternLayout>
-        <Pattern>[%%d{dd/MMM/yyyy:HH:mm:ss.SSS' Z'}] %%m%%n</Pattern>
-    </PatternLayout>
+import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-    <Policies>
-        <!-- roll every 300 MB -->
-        <SizeBasedTriggeringPolicy size="300 MB"/>
-    </Policies>
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-    <DefaultRolloverStrategy max="10">
-        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_custagg/batch/">
-            <IfFileName glob="splunk-*.log.gz">
-                <IfAny>
-                    <!-- keep at most 7 days OR 15 files -->
-                    <IfLastModified age="7d"/>
-                    <IfAccumulatedFileCount exceeds="15"/>
-                </IfAny>
-            </IfFileName>
-        </Delete>
-    </DefaultRolloverStrategy>
-</RollingFile>
+import org.junit.*;
+import org.junit.rules.TemporaryFolder;
+import org.mockito.*;
 
-<Logger name="com.bofa.sst.batch" level="debug" additivity="false">
-    <AppenderRef ref="appAppender"/>
-    <AppenderRef ref="splunkAppender"/>   <!-- NEW -->
-</Logger>
+import org.springframework.batch.core.ExecutionContext;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.item.*;
+
+public class CustaggCompFileReaderTest {
+
+    /** temp directory used for synthetic data files */
+    @Rule public TemporaryFolder tmp = new TemporaryFolder();
+
+    @Mock private FileUtils fileUtils;
+    @Mock private FieldOffsetTable fieldOffsetTable;
+    @Mock private CompCharaterUtil compCharUtil;
+
+    private CustaggCompFileReader reader;
+    private StepExecution              stepExecution;
+    private ExecutionContext           jobCtx;
+    private ExecutionContext           stepCtx;
+
+    /** fixed-length record layout used in tests */
+    private static final int RECORD_SIZE = 29;   // ← main-frame guy’s number
+    private static final String PRODUCT = "PER";
+    private static final String NUMERIC = "5201";
+    private static final String ACCOUNT = "000000460316";
+
+    @Before
+    public void setUp() throws Exception {
+        MockitoAnnotations.initMocks(this);
+
+        // ----- create synthetic refer-data file ---------------------------
+        Path dataFile = tmp.newFile("referData.lock").toPath();
+        Files.write(dataFile, buildRecord(ACCOUNT).getBytes(StandardCharsets.UTF_8));
+
+        // FileUtils mock returns that path
+        when(fileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
+                     .thenReturn(dataFile.toString());
+
+        // lookup utilities
+        when(compCharUtil.packedToString(any(byte[].class))).thenReturn(NUMERIC);
+        when(fieldOffsetTable.extractAccountNumber(PRODUCT, new byte[RECORD_SIZE]))
+                             .thenReturn(ACCOUNT);
+
+        // ----- build reader ------------------------------------------------
+        reader = new CustaggCompFileReader(
+                    fileUtils, fieldOffsetTable, compCharUtil, RECORD_SIZE);
+
+        // inject execution-context entries that Spring normally does
+        jobCtx  = new ExecutionContext();
+        jobCtx.putString("directoryPath", tmp.getRoot().getAbsolutePath());
+        jobCtx.putString("FilePrefixReferData", "referData");
+        stepCtx = new ExecutionContext();
+        stepCtx.putInt("fromLine", 1);
+        stepCtx.putInt("toLine",   1);
+
+        stepExecution = TestStepUtils.stepExecution(jobCtx, stepCtx);
+        reader.beforeStep(stepExecution);
+    }
+
+    /* ----------------------------- tests -------------------------------- */
+
+    /** happy path: one record, one DTO */
+    @Test
+    public void testReadOneRecord() throws Exception {
+        reader.open(stepCtx);
+
+        CustaggRecordsDTO dto = reader.read();
+        assertThat(dto, notNullValue());
+        assertThat(dto.getProductCode(),  is(PRODUCT));
+        assertThat(dto.getEntity(),       is(NUMERIC));
+        assertThat(dto.getAccountNumber(),is(ACCOUNT));
+
+        assertNull("second read must be null (EOF)", reader.read());
+
+        reader.close();
+    }
+
+    /** restart: persist counter then open again and continue */
+    @Test
+    public void testRestart() throws Exception {
+        reader.open(stepCtx);
+        assertNotNull(reader.read());          // read first (and only) record
+        reader.update(stepCtx);                // checkpoint – counter==1
+        reader.close();
+
+        // simulate restart – same execution contexts
+        reader = new CustaggCompFileReader(fileUtils, fieldOffsetTable,
+                                           compCharUtil, RECORD_SIZE);
+        reader.beforeStep(stepExecution);      // inject same StepExecution
+        reader.open(stepCtx);
+
+        assertNull("should resume at EOF", reader.read());
+        reader.close();
+    }
+
+    /** short read (< RECORD_SIZE) throws exception & returns null */
+    @Test(expected = Exception.class)
+    public void testShortRecord() throws Exception {
+        // rewrite the file with an incomplete record
+        Files.write(tmp.getRoot().toPath().resolve("referData.lock"),
+                    "too short".getBytes(StandardCharsets.UTF_8));
+
+        reader.open(stepCtx);
+        reader.read();   // triggers Exception
+    }
+
+    /** close() twice must be safe */
+    @Test
+    public void testDoubleClose() throws Exception {
+        reader.open(stepCtx);
+        reader.close();
+        reader.close();  // second call should NOT throw
+    }
+
+    /* --------------------------- helpers -------------------------------- */
+
+    private static String buildRecord(String acct) {
+        // POS-encoded fixed layout:  0-2 product, 2-3 entity (packed),
+        //  7-23 account #, pad to RECORD_SIZE
+        String raw = PRODUCT + NUMERIC + acct;
+        return String.format("%1$-" + RECORD_SIZE + "s", raw);
+    }
+}
