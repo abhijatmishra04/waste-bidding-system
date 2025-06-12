@@ -1,18 +1,112 @@
-Collection<?> first = (Collection<?>) base.get(firstKey);
-/* … unchanged guard clauses … */
+package com.bofa.sst.batch.listener;
 
-List<String> master = new ArrayList<>((List<String>) first);   // indexed access
-List<String> result = new ArrayList<>();
+import java.util.Map;
+import java.util.concurrent.atomic.LongAdder;
 
-for (int from = 0; from < master.size(); from += 990) {
-    int to = Math.min(from + 990, master.size());
-    Map<String,Object> slice = new HashMap<>(base);
+import lombok.extern.log4j.Log4j2;
+import org.springframework.batch.core.*;
+import org.springframework.stereotype.Component;
 
-    for (String k : keysToSplit) {
-        slice.put(k,
-                  new ArrayList<>(((List<String>) base.get(k)).subList(from, to)));
+import com.bofa.sst.batch.constants.CustaggBatchConstants;
+import com.bofa.sst.batch.util.FileUtils;
+
+@Log4j2
+@Component
+public class CustaggCustomJobListener implements JobExecutionListener {
+
+    /* ------------------------------------------------------------- */
+    /*  After-job cleanup & run-stats                                */
+    /* ------------------------------------------------------------- */
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+
+        /* ---------- 1. Collect run statistics ---------- */
+        RunStats stats = new RunStats();
+        for (StepExecution se : jobExecution.getStepExecutions()) {
+            ExecutionContext ctx = se.getExecutionContext();
+
+            stats.recordsRead     .add(ctx.getLong("counter",        0L));
+            stats.dupSkipped      .add(ctx.getLong("dupSkipped",     0L));
+
+            stats.schedFetched    .add(ctx.getLong("schedFetched",   0L));
+            stats.execFetched     .add(ctx.getLong("execFetched",    0L));
+            stats.instrFetched    .add(ctx.getLong("instrFetched",   0L));
+
+            stats.schedUpdated    .add(ctx.getLong("schedUpdated",   0L));
+            stats.execUpdated     .add(ctx.getLong("execUpdated",    0L));
+            stats.instrUpdated    .add(ctx.getLong("instrUpdated",   0L));
+        }
+
+        /* ---------- 2. Log run-stats in one block ---------- */
+        log.info("\n================ Custagg Run Stats ================\n" +
+                 "Records read        : {}\n" +
+                 "Duplicates skipped  : {}\n" +
+                 "Fetched   S/E/I     : {}/{}/{}\n" +
+                 "Updated   S/E/I     : {}/{}/{}\n" +
+                 "Job exit status     : {}\n" +
+                 "====================================================",
+                 stats.recordsRead.sum(),
+                 stats.dupSkipped  .sum(),
+                 stats.schedFetched.sum(),
+                 stats.execFetched .sum(),
+                 stats.instrFetched.sum(),
+                 stats.schedUpdated.sum(),
+                 stats.execUpdated .sum(),
+                 stats.instrUpdated.sum(),
+                 jobExecution.getExitStatus());
+
+        /* ---------- 3. Unlock & move files ---------- */
+        String dir         = jobExecution.getExecutionContext()
+                                         .getString(CustaggBatchConstants.DIRECTORY_PATH, null);
+        String prefixData  = jobExecution.getExecutionContext()
+                                         .getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA, null);
+        String prefixEnty  = jobExecution.getExecutionContext()
+                                         .getString(CustaggBatchConstants.FILE_PREFIX_REFERENTY, null);
+
+        if (dir == null || prefixData == null || prefixEnty == null) {
+            log.warn("afterJob(): file path values missing – skip file housekeeping.");
+            return;
+        }
+
+        try {
+            if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
+                unlockAndArchive(dir, prefixData);
+                unlockAndArchive(dir, prefixEnty);
+            } else {
+                unlockAndError(dir, prefixData);
+                unlockAndError(dir, prefixEnty);
+            }
+        } catch (Exception ex) {
+            log.error("afterJob(): file housekeeping failed", ex);
+            /* decide whether to re-throw – here we swallow to preserve COMPLETED */
+        }
     }
-    log.trace("fetchPaged(): executing slice {}-{} ({} elems)", from, to - 1, (to - from));
-    result.addAll(npJdbc.queryForList(sql, slice, String.class));
+
+    /* ------------------------------------------------------------- */
+    /*  Helper methods                                               */
+    /* ------------------------------------------------------------- */
+
+    private void unlockAndArchive(String dir, String prefix) throws Exception {
+        FileUtils.unlockFile (dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
+        FileUtils.archiveFile(dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
+    }
+
+    private void unlockAndError(String dir, String prefix) throws Exception {
+        FileUtils.unlockFile(dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
+        FileUtils.errorFile (dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
+    }
+
+    /** simple holder with LongAdders so we can += across steps */
+    private static final class RunStats {
+        final LongAdder recordsRead   = new LongAdder();
+        final LongAdder dupSkipped    = new LongAdder();
+
+        final LongAdder schedFetched  = new LongAdder();
+        final LongAdder execFetched   = new LongAdder();
+        final LongAdder instrFetched  = new LongAdder();
+
+        final LongAdder schedUpdated  = new LongAdder();
+        final LongAdder execUpdated   = new LongAdder();
+        final LongAdder instrUpdated  = new LongAdder();
+    }
 }
-return result;
