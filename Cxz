@@ -1,112 +1,32 @@
-package com.bofa.sst.batch.listener;
+<!-- Appender for Splunk forwarding -->
+<RollingFile name="splunkAppender"
+             fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_custagg/batch/splunk.log"
+             filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_custagg/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
 
-import java.util.Map;
-import java.util.concurrent.atomic.LongAdder;
+    <!--  [12/Jun/2025:13:55:42.173 Z]  actual-log-line -->
+    <PatternLayout>
+        <Pattern>[%%d{dd/MMM/yyyy:HH:mm:ss.SSS' Z'}] %%m%%n</Pattern>
+    </PatternLayout>
 
-import lombok.extern.log4j.Log4j2;
-import org.springframework.batch.core.*;
-import org.springframework.stereotype.Component;
+    <Policies>
+        <!-- roll every 300 MB -->
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+    </Policies>
 
-import com.bofa.sst.batch.constants.CustaggBatchConstants;
-import com.bofa.sst.batch.util.FileUtils;
+    <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_custagg/batch/">
+            <IfFileName glob="splunk-*.log.gz">
+                <IfAny>
+                    <!-- keep at most 7 days OR 15 files -->
+                    <IfLastModified age="7d"/>
+                    <IfAccumulatedFileCount exceeds="15"/>
+                </IfAny>
+            </IfFileName>
+        </Delete>
+    </DefaultRolloverStrategy>
+</RollingFile>
 
-@Log4j2
-@Component
-public class CustaggCustomJobListener implements JobExecutionListener {
-
-    /* ------------------------------------------------------------- */
-    /*  After-job cleanup & run-stats                                */
-    /* ------------------------------------------------------------- */
-    @Override
-    public void afterJob(JobExecution jobExecution) {
-
-        /* ---------- 1. Collect run statistics ---------- */
-        RunStats stats = new RunStats();
-        for (StepExecution se : jobExecution.getStepExecutions()) {
-            ExecutionContext ctx = se.getExecutionContext();
-
-            stats.recordsRead     .add(ctx.getLong("counter",        0L));
-            stats.dupSkipped      .add(ctx.getLong("dupSkipped",     0L));
-
-            stats.schedFetched    .add(ctx.getLong("schedFetched",   0L));
-            stats.execFetched     .add(ctx.getLong("execFetched",    0L));
-            stats.instrFetched    .add(ctx.getLong("instrFetched",   0L));
-
-            stats.schedUpdated    .add(ctx.getLong("schedUpdated",   0L));
-            stats.execUpdated     .add(ctx.getLong("execUpdated",    0L));
-            stats.instrUpdated    .add(ctx.getLong("instrUpdated",   0L));
-        }
-
-        /* ---------- 2. Log run-stats in one block ---------- */
-        log.info("\n================ Custagg Run Stats ================\n" +
-                 "Records read        : {}\n" +
-                 "Duplicates skipped  : {}\n" +
-                 "Fetched   S/E/I     : {}/{}/{}\n" +
-                 "Updated   S/E/I     : {}/{}/{}\n" +
-                 "Job exit status     : {}\n" +
-                 "====================================================",
-                 stats.recordsRead.sum(),
-                 stats.dupSkipped  .sum(),
-                 stats.schedFetched.sum(),
-                 stats.execFetched .sum(),
-                 stats.instrFetched.sum(),
-                 stats.schedUpdated.sum(),
-                 stats.execUpdated .sum(),
-                 stats.instrUpdated.sum(),
-                 jobExecution.getExitStatus());
-
-        /* ---------- 3. Unlock & move files ---------- */
-        String dir         = jobExecution.getExecutionContext()
-                                         .getString(CustaggBatchConstants.DIRECTORY_PATH, null);
-        String prefixData  = jobExecution.getExecutionContext()
-                                         .getString(CustaggBatchConstants.FILE_PREFIX_REFERDATA, null);
-        String prefixEnty  = jobExecution.getExecutionContext()
-                                         .getString(CustaggBatchConstants.FILE_PREFIX_REFERENTY, null);
-
-        if (dir == null || prefixData == null || prefixEnty == null) {
-            log.warn("afterJob(): file path values missing – skip file housekeeping.");
-            return;
-        }
-
-        try {
-            if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
-                unlockAndArchive(dir, prefixData);
-                unlockAndArchive(dir, prefixEnty);
-            } else {
-                unlockAndError(dir, prefixData);
-                unlockAndError(dir, prefixEnty);
-            }
-        } catch (Exception ex) {
-            log.error("afterJob(): file housekeeping failed", ex);
-            /* decide whether to re-throw – here we swallow to preserve COMPLETED */
-        }
-    }
-
-    /* ------------------------------------------------------------- */
-    /*  Helper methods                                               */
-    /* ------------------------------------------------------------- */
-
-    private void unlockAndArchive(String dir, String prefix) throws Exception {
-        FileUtils.unlockFile (dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
-        FileUtils.archiveFile(dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
-    }
-
-    private void unlockAndError(String dir, String prefix) throws Exception {
-        FileUtils.unlockFile(dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
-        FileUtils.errorFile (dir, prefix, CustaggBatchConstants.LOCK_FILE_EXTENSION);
-    }
-
-    /** simple holder with LongAdders so we can += across steps */
-    private static final class RunStats {
-        final LongAdder recordsRead   = new LongAdder();
-        final LongAdder dupSkipped    = new LongAdder();
-
-        final LongAdder schedFetched  = new LongAdder();
-        final LongAdder execFetched   = new LongAdder();
-        final LongAdder instrFetched  = new LongAdder();
-
-        final LongAdder schedUpdated  = new LongAdder();
-        final LongAdder execUpdated   = new LongAdder();
-        final LongAdder instrUpdated  = new LongAdder();
-    }
-}
+<Logger name="com.bofa.sst.batch" level="debug" additivity="false">
+    <AppenderRef ref="appAppender"/>
+    <AppenderRef ref="splunkAppender"/>   <!-- NEW -->
+</Logger>
