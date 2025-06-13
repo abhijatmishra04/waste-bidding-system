@@ -1,24 +1,134 @@
-/* ------------------------------------------ *
- * fix in BatchUpdatePaged test method
- * ------------------------------------------ */
-Method m = CustaggWriter.class.getDeclaredMethod(
-        "batchUpdatePaged",
-        String.class,                      // sql
-        List.class,                        // ids  (2nd)
-        java.sql.Timestamp.class,          // ts   (3rd)
-        int.class);                        // paramCount
-m.setAccessible(true);
+package com.bofa.sst.batch.core.impl;
 
-int upd3 = (Integer) m.invoke(
-        writer,
-        "SQL",
-        ids,                               // ids  (2nd arg)
-        new java.sql.Timestamp(System.currentTimeMillis()),  // ts (3rd)
-        3);                                // paramCount
+import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
-int upd2 = (Integer) m.invoke(
-        writer,
-        "SQL",
-        ids,
-        new java.sql.Timestamp(System.currentTimeMillis()),
-        2);
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.junit.*;
+import org.junit.runner.RunWith;
+import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.batch.core.*;
+
+/**
+ * Line-&-branch coverage for {@link CustaggProcessor}.
+ */
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggProcessorTest {
+
+    private CustaggProcessor processor;
+    private StepExecution    step;           // reused per test
+
+    /* ------------------------------------------------------------ *
+     *  Test scaffolding
+     * ------------------------------------------------------------ */
+    @Before
+    public void init() {
+        processor = new CustaggProcessor();
+
+        JobExecution job = new JobExecution(1L);
+        step            = new StepExecution("procStep", job);
+    }
+
+    private void putCtx(String key, Object value) {
+        step.getJobExecution()
+            .getExecutionContext()
+            .put(key, value);
+    }
+
+    /* ------------------------------------------------------------ *
+     *  1. Happy path – record enriched & emitted
+     * ------------------------------------------------------------ */
+    @Test
+    public void process_happyPath_returnsEnrichedDto() throws Exception {
+
+        // job-wide context prepared by a previous validation step
+        putCtx("entityMap", Map.of("001", "ABC"));           // numeric→alpha
+        putCtx("dedupCache", new ConcurrentHashMap<String, Boolean>());
+
+        processor.beforeStep(step);
+
+        CustaggProcessedRecordsDTO dto = processor.process(
+                dtoRaw("P01", "001", "ACC123"));
+
+        assertDto(dto, "P01", "001", "ABC", "ACC123");
+        processor.afterStep(step);
+
+        // dupSkipped stays 0
+        assertThat(step.getExecutionContext().getLong("dupSkipped"), is(0L));
+    }
+
+    /* ------------------------------------------------------------ *
+     *  2. No alpha mapping → record skipped (returns null)
+     * ------------------------------------------------------------ */
+    @Test
+    public void process_whenNoAlphaMapping_returnsNull() throws Exception {
+
+        putCtx("entityMap", Map.of("999", "ZZZ"));           // missing 001→ABC
+        putCtx("dedupCache", new ConcurrentHashMap<String, Boolean>());
+
+        processor.beforeStep(step);
+
+        CustaggProcessedRecordsDTO dto = processor.process(
+                dtoRaw("P01", "001", "ACC123"));
+
+        assertNull(dto);
+        processor.afterStep(step);
+        assertThat(step.getExecutionContext().getLong("dupSkipped"), is(0L));
+    }
+
+    /* ------------------------------------------------------------ *
+     *  3. Duplicate key → second record skipped, dupSkipped=1
+     * ------------------------------------------------------------ */
+    @Test
+    public void process_duplicateSecondRecord_skipsAndCounts() throws Exception {
+
+        putCtx("entityMap", Map.of("001", "ABC"));
+        putCtx("dedupCache", new ConcurrentHashMap<String, Boolean>());
+
+        processor.beforeStep(step);
+
+        // first time ⇒ accepted
+        CustaggProcessedRecordsDTO first = processor.process(
+                dtoRaw("P01", "001", "ACC123"));
+        assertNotNull(first);
+
+        // second time ⇒ same key ⇒ null
+        CustaggProcessedRecordsDTO second = processor.process(
+                dtoRaw("P01", "001", "ACC123"));
+        assertNull(second);
+
+        processor.afterStep(step);
+        assertThat(step.getExecutionContext().getLong("dupSkipped"), is(1L));
+    }
+
+    /* ------------------------------------------------------------ *
+     *  Helper – build a “raw” DTO as the reader emits it
+     * ------------------------------------------------------------ */
+    private static CustaggRecordsDTO dtoRaw(String prod,
+                                            String entity,
+                                            String acc) {
+        CustaggRecordsDTO d = new CustaggRecordsDTO();
+        d.setProductCode(prod);
+        d.setEntity(entity);           // numeric entity comes in
+        d.setAccountNumber(acc);
+        return d;
+    }
+
+    /* ------------------------------------------------------------ *
+     *  Helper – assert the enriched DTO
+     * ------------------------------------------------------------ */
+    private static void assertDto(CustaggProcessedRecordsDTO dto,
+                                  String prod,
+                                  String numEnt,
+                                  String alphaEnt,
+                                  String acc) {
+        assertNotNull(dto);
+        assertThat(dto.getProductCode(),    is(prod));
+        assertThat(dto.getEntity(),         is(numEnt));
+        assertThat(dto.getAlphaEntity(),    is(alphaEnt));
+        assertThat(dto.getAccountNumber(),  is(acc));
+    }
+}
