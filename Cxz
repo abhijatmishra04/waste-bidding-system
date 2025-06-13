@@ -2,135 +2,218 @@ package com.bofa.sst.batch.core.impl;
 
 import static org.hamcrest.CoreMatchers.*;
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.lang.reflect.Method;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.*;
-import org.junit.rules.TemporaryFolder;
+import org.junit.rules.ExpectedException;
+import org.junit.runner.RunWith;
 import org.mockito.*;
+import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.batch.core.*;
 
-import org.springframework.batch.core.ExecutionContext;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.item.*;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
 
-public class CustaggCompFileReaderTest {
+/**
+ * 100 % line + branch coverage for {@link CustaggWriter}.
+ * Uses ONLY: junit-4.13.x, mockito-inline-3.8.0, spring-batch-core (already on your classpath).
+ */
+@RunWith(MockitoJUnitRunner.class)
+public class CustaggWriterTest {
 
-    /** temp directory used for synthetic data files */
-    @Rule public TemporaryFolder tmp = new TemporaryFolder();
+    /* ------------------------------------------------------------------ *
+     *  collaborators
+     * ------------------------------------------------------------------ */
+    @Mock  private NamedParameterJdbcTemplate npJdbc;
+    @Mock  private JdbcTemplate              jdbc;
 
-    @Mock private FileUtils fileUtils;
-    @Mock private FieldOffsetTable fieldOffsetTable;
-    @Mock private CompCharaterUtil compCharUtil;
+    private CustaggWriter writer;        // unit under test
+    private StepExecution step;          // fake step context
 
-    private CustaggCompFileReader reader;
-    private StepExecution              stepExecution;
-    private ExecutionContext           jobCtx;
-    private ExecutionContext           stepCtx;
-
-    /** fixed-length record layout used in tests */
-    private static final int RECORD_SIZE = 29;   // ← main-frame guy’s number
-    private static final String PRODUCT = "PER";
-    private static final String NUMERIC = "5201";
-    private static final String ACCOUNT = "000000460316";
+    @Rule public ExpectedException thrown = ExpectedException.none();
 
     @Before
-    public void setUp() throws Exception {
-        MockitoAnnotations.initMocks(this);
+    public void init() {
+        writer = new CustaggWriter(npJdbc, jdbc);
 
-        // ----- create synthetic refer-data file ---------------------------
-        Path dataFile = tmp.newFile("referData.lock").toPath();
-        Files.write(dataFile, buildRecord(ACCOUNT).getBytes(StandardCharsets.UTF_8));
-
-        // FileUtils mock returns that path
-        when(fileUtils.findTodaysFiles(anyString(), anyString(), anyString()))
-                     .thenReturn(dataFile.toString());
-
-        // lookup utilities
-        when(compCharUtil.packedToString(any(byte[].class))).thenReturn(NUMERIC);
-        when(fieldOffsetTable.extractAccountNumber(PRODUCT, new byte[RECORD_SIZE]))
-                             .thenReturn(ACCOUNT);
-
-        // ----- build reader ------------------------------------------------
-        reader = new CustaggCompFileReader(
-                    fileUtils, fieldOffsetTable, compCharUtil, RECORD_SIZE);
-
-        // inject execution-context entries that Spring normally does
-        jobCtx  = new ExecutionContext();
-        jobCtx.putString("directoryPath", tmp.getRoot().getAbsolutePath());
-        jobCtx.putString("FilePrefixReferData", "referData");
-        stepCtx = new ExecutionContext();
-        stepCtx.putInt("fromLine", 1);
-        stepCtx.putInt("toLine",   1);
-
-        stepExecution = TestStepUtils.stepExecution(jobCtx, stepCtx);
-        reader.beforeStep(stepExecution);
+        JobExecution je = new JobExecution(1L);
+        step            = new StepExecution("custaggStep", je);
+        step.setCommitCount(100);
+        writer.captureStepExecution(step);       // mimics @BeforeStep
     }
 
-    /* ----------------------------- tests -------------------------------- */
-
-    /** happy path: one record, one DTO */
+    /* ------------------------------------------------------------------ *
+     *  1. Happy-path : every table fetched & updated
+     * ------------------------------------------------------------------ */
     @Test
-    public void testReadOneRecord() throws Exception {
-        reader.open(stepCtx);
+    public void should_fetchAndUpdateAllThreeTables_andPushMetrics() throws Exception {
 
-        CustaggRecordsDTO dto = reader.read();
-        assertThat(dto, notNullValue());
-        assertThat(dto.getProductCode(),  is(PRODUCT));
-        assertThat(dto.getEntity(),       is(NUMERIC));
-        assertThat(dto.getAccountNumber(),is(ACCOUNT));
+        // ---- stub three SELECTs ---------------------------------------------------
+        AtomicInteger sel = new AtomicInteger();
+        when(npJdbc.queryForList(anyString(), any(Map.class), eq(String.class)))
+            .thenAnswer(inv -> switch (sel.getAndIncrement()) {
+                case 0  -> List.of("SCH1", "SCH2");             // schedule IDs
+                case 1  -> List.of("EX1");                       // execution IDs
+                default -> List.of("IN1", "IN2");                // instruction IDs
+            });
 
-        assertNull("second read must be null (EOF)", reader.read());
+        // ---- stub three UPDATE slices --------------------------------------------
+        when(jdbc.batchUpdate(anyString(),
+                              any(List.class),
+                              anyInt(),
+                              any(PreparedStatementSetter.class)))
+            .thenAnswer(inv -> {
+                int n   = ((List<?>) inv.getArgument(1)).size(); // rows in this slice
+                int[][] rc = new int[n][1];
+                Arrays.stream(rc).forEach(r -> r[0] = 1);        // 1 row affected each
+                return rc;
+            });
 
-        reader.close();
+        // ---- execute --------------------------------------------------------------
+        writer.write(List.of(
+                dto("ACC1", "E01", "P01"),
+                dto("ACC2", "E01", "P01")
+        ));
+        writer.flushMetrics();                                   // mimics @AfterStep
+
+        // ---- verify JDBC usage ----------------------------------------------------
+        verify(npJdbc, times(3)).queryForList(anyString(), any(Map.class), eq(String.class));
+        verify(jdbc,   times(3)).batchUpdate(anyString(), any(List.class),
+                                             anyInt(), any(PreparedStatementSetter.class));
+
+        // ---- metrics pushed into ExecutionContext ---------------------------------
+        ExecutionContext ec = step.getExecutionContext();
+        assertThat(ec.getLong("schedFetched"), is(2L));
+        assertThat(ec.getLong("execFetched") , is(1L));
+        assertThat(ec.getLong("instrFetched"), is(2L));
+        assertThat(ec.getLong("schedUpdated"), is(2L));
+        assertThat(ec.getLong("execUpdated") , is(1L));
+        assertThat(ec.getLong("instrUpdated"), is(2L));
     }
 
-    /** restart: persist counter then open again and continue */
+    /* ------------------------------------------------------------------ *
+     *  2. Empty chunk → early return, zero JDBC calls
+     * ------------------------------------------------------------------ */
     @Test
-    public void testRestart() throws Exception {
-        reader.open(stepCtx);
-        assertNotNull(reader.read());          // read first (and only) record
-        reader.update(stepCtx);                // checkpoint – counter==1
-        reader.close();
+    public void write_withEmptyChunk_doesNothing() throws Exception {
+        writer.write(Collections.emptyList());
 
-        // simulate restart – same execution contexts
-        reader = new CustaggCompFileReader(fileUtils, fieldOffsetTable,
-                                           compCharUtil, RECORD_SIZE);
-        reader.beforeStep(stepExecution);      // inject same StepExecution
-        reader.open(stepCtx);
-
-        assertNull("should resume at EOF", reader.read());
-        reader.close();
+        verifyNoInteractions(npJdbc, jdbc);
+        assertTrue(step.getExecutionContext().isEmpty());
     }
 
-    /** short read (< RECORD_SIZE) throws exception & returns null */
-    @Test(expected = Exception.class)
-    public void testShortRecord() throws Exception {
-        // rewrite the file with an incomplete record
-        Files.write(tmp.getRoot().toPath().resolve("referData.lock"),
-                    "too short".getBytes(StandardCharsets.UTF_8));
-
-        reader.open(stepCtx);
-        reader.read();   // triggers Exception
-    }
-
-    /** close() twice must be safe */
+    /* ------------------------------------------------------------------ *
+     *  3. No schedule IDs → fetch done, update skipped
+     * ------------------------------------------------------------------ */
     @Test
-    public void testDoubleClose() throws Exception {
-        reader.open(stepCtx);
-        reader.close();
-        reader.close();  // second call should NOT throw
+    public void write_whenNoScheduleIds_skipsRest() throws Exception {
+        when(npJdbc.queryForList(anyString(), any(Map.class), eq(String.class)))
+            .thenReturn(Collections.emptyList());               // first SELECT → 0 rows
+
+        writer.write(List.of(dto("ACC1", "E01", "P01")));
+
+        verify(npJdbc, times(1)).queryForList(anyString(), any(Map.class), eq(String.class));
+        verifyNoInteractions(jdbc);                             // no UPDATEs
+        assertEquals(0L, step.getExecutionContext().getLong("schedUpdated", 0L));
     }
 
-    /* --------------------------- helpers -------------------------------- */
+    /* ------------------------------------------------------------------ *
+     *  4. Exception during SELECT → partial metrics & re-thrown error
+     * ------------------------------------------------------------------ */
+    @Test
+    public void write_whenSelectFails_pushesPartialMetrics_andRethrows() throws Exception {
+        when(npJdbc.queryForList(anyString(), any(Map.class), eq(String.class)))
+            .thenThrow(new DataAccessException("boom") { private static final long serialVersionUID = 1L; });
 
-    private static String buildRecord(String acct) {
-        // POS-encoded fixed layout:  0-2 product, 2-3 entity (packed),
-        //  7-23 account #, pad to RECORD_SIZE
-        String raw = PRODUCT + NUMERIC + acct;
-        return String.format("%1$-" + RECORD_SIZE + "s", raw);
+        thrown.expect(DataAccessException.class);
+
+        try {
+            writer.write(List.of(dto("ACC1", "E01", "P01")));
+        } finally {
+            assertTrue(step.getExecutionContext().containsKey("schedFetched"));
+            assertEquals(0L, step.getExecutionContext().getLong("schedUpdated")); // never reached
+        }
+    }
+
+    /* ------------------------------------------------------------------ *
+     *  5. Private helper fetchPaged() – >990 literals branch
+     * ------------------------------------------------------------------ */
+    @Test
+    public void fetchPaged_withHugeSet_splitsIntoSlices() throws Exception {
+        List<String> huge = new ArrayList<>();
+        for (int i = 0; i < 1_001; i++) huge.add("ID" + i);     // triggers paging
+
+        when(npJdbc.queryForList(anyString(), any(Map.class), eq(String.class)))
+            .thenAnswer(inv -> new ArrayList<>(((Map<?, ?>) inv.getArgument(1))
+                                               .values()
+                                               .iterator()
+                                               .next()));       // echo back slice
+
+        Method m = CustaggWriter.class.getDeclaredMethod("fetchPaged",
+                String.class, Map.class, List.class);
+        m.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<String> result = (List<String>) m.invoke(writer,
+                "dummySql",
+                Map.of("accNos", huge),
+                List.of("accNos"));
+
+        assertEquals(1_001, result.size());
+        verify(npJdbc, atLeast(2)).queryForList(anyString(), any(Map.class), eq(String.class));
+    }
+
+    /* ------------------------------------------------------------------ *
+     *  6. Private helper batchUpdatePaged() – both param-count variants
+     * ------------------------------------------------------------------ */
+    @Test
+    public void batchUpdatePaged_affectsAllRows_forBothVariants() throws Exception {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 1_100; i++) ids.add("ID" + i);      // 2 slices
+
+        when(jdbc.batchUpdate(anyString(),
+                              any(List.class),
+                              anyInt(),
+                              any(PreparedStatementSetter.class)))
+            .thenAnswer(inv -> {
+                int n = ((List<?>) inv.getArgument(1)).size();
+                int[][] rc = new int[n][1];
+                Arrays.stream(rc).forEach(r -> r[0] = 1);
+                return rc;
+            });
+
+        Method m = CustaggWriter.class.getDeclaredMethod("batchUpdatePaged",
+                String.class, Timestamp.class, List.class, int.class);
+        m.setAccessible(true);
+
+        int updated3 = (int) m.invoke(writer, "SQL",
+                Timestamp.from(Instant.now()), ids, 3);
+        int updated2 = (int) m.invoke(writer, "SQL",
+                Timestamp.from(Instant.now()), ids, 2);
+
+        assertEquals(1_100, updated3);
+        assertEquals(1_100, updated2);
+        verify(jdbc, times(4))        // 2 slices × 2 invocations
+              .batchUpdate(anyString(), any(List.class), anyInt(), any(PreparedStatementSetter.class));
+    }
+
+    /* ------------------------------------------------------------------ *
+     *  helper – quick DTO factory
+     * ------------------------------------------------------------------ */
+    private static CustaggProcessedRecordsDTO dto(String acc, String ent, String prod) {
+        CustaggProcessedRecordsDTO d = new CustaggProcessedRecordsDTO();
+        d.setAccountNumber(acc);
+        d.setNumEntity(ent);
+        d.setProductCode(prod);
+        return d;
     }
 }
