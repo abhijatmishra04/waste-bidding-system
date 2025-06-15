@@ -1,52 +1,22 @@
-package com.bofa.sst.batch.util;
+Hi Ketan, Milind, and Team,
 
-import static org.hamcrest.CoreMatchers.*;
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+As we continue delivering Spring Batch jobs aligned with the defined QA checklist, I would like to highlight a recurring issue that is significantly impacting our delivery timelines and quality.
 
-import org.junit.Test;
-import org.mockito.MockedStatic;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+We’ve observed a consistent gap between the batch job requirements shared by the mainframe architect team and what the client actually expects during review. While we as developers are fulfilling all the steps outlined in the pre-QA checklist (property validation, post-deployment testing, documentation, etc.), the batch jobs are frequently getting rejected at the client end due to:
+	•	Business rules or transformation logic not aligning with actual client requirements
+	•	Layout/format discrepancies in output files, despite us matching what’s shared
+	•	Incomplete or inconsistent information in the original mainframe requirement documentations
 
-/**
- * Dependency-free test that drives every public method of {@link LoggingUtil}.
- * Uses Mockito static-mocking instead of Logback's ListAppender.
- */
-public class LoggingUtilTest {
+This gap is leading to repetitive rework, extended debugging cycles, and delays in delivery, putting considerable pressure on the development team and reducing our overall efficiency.
 
-    @Test
-    public void everyPublicMethod_logsSomething() {
+To avoid further back-and-forth and delivery rejection, I suggest the following:
+	1.	A joint review session with Milind and the client-side SME before development starts, for each batch or group of related batches.
+	2.	A clear and signed-off requirement mapping document from mainframe architect → client → dev team.
+	3.	Early clarification of edge scenarios or exceptions that the client wants handled (e.g., in file layouts, NULL handling, DB mismatches).
 
-        // 1️⃣  prepare a mock Logger
-        Logger mockLog = mock(Logger.class);
-        // let every level be enabled so calls go through
-        when(mockLog.isInfoEnabled()).thenReturn(true);
-        when(mockLog.isErrorEnabled()).thenReturn(true);
-        when(mockLog.isDebugEnabled()).thenReturn(true);
+This will help streamline the delivery process and minimize rework.
 
-        /* 2️⃣  static-mock LoggerFactory.getLogger("splunkAppender") */
-        try (MockedStatic<LoggerFactory> lf = mockStatic(LoggerFactory.class)) {
-            lf.when(() -> LoggerFactory.getLogger("splunkAppender"))
-              .thenReturn(mockLog);
+Please let me know your thoughts on this or if we can set up a call to align further.
 
-            /* ─── invoke every overload ─── */
-            LoggingUtil.logJobMessage(111L, "job-info");
-            LoggingUtil.logJobError  (111L, "job-err");
-
-            LoggingUtil.logMessage("ACC", "A1", "simple-info");
-            LoggingUtil.logErrorMessage("ACC", "A1", "simple-err");
-
-            LoggingUtil.logJobMessage(222L, "ENT", "E2", "full-info");
-            LoggingUtil.logError    (222L, "ENT", "E2", "full-err");
-
-            LoggingUtil.logTransactionTraceLogger(
-                    "CRM", "MSG-01", "Sync", "payload", true);
-
-            /* ─── assertions: at least one info and one error call recorded ─── */
-            verify(mockLog, atLeastOnce()).info(anyString());
-            verify(mockLog, atLeastOnce()).error(anyString());
-        }
-    }
-}
+Regards,
+Abhijat Mishra
