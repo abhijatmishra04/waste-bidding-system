@@ -1,1 +1,40 @@
+Step No
+Description (WHAT happens)
+Business Field(s) Affected / Meaning
+1
+Extract every record in Refer DATA file that belongs to the current run-window.
+Raw file columns only (no DB write).
+2
+Extract every record in Refer ENTY file for the same run-window.
+Raw file columns only.
+3
+Match the numeric ENTITY CODE from Refer ENTY to the numeric ENTITY CODE in Refer DATA.  • When a match is found, carry forward ACCOUNT NUMBER & PRODUCT CODE from Refer DATA.
+entity, accountNumber, productCode (in-memory working set)
+4
+Remove duplicate customer triples (entity + account + product).
+—
+5
+Look up Schedule IDs that belong to each unique triple.  Data sources searched in business order: Account_BOA, then Account_M2M.
+scheduleId list (working set)
+6
+For every Schedule ID just found, look up related Transfer Execution IDs.
+transferExecutionId list (working set)
+7
+For every Schedule ID just found, look up related Transfer Instruction IDs.
+transferInstructionId list (working set)
+8
+Mark Transfer Executions as processed/failed. • Action indicator → “F” • Updated-by → “Custagg” • Updated-ts → current time
+Table TRANSFER_EXECUTION_M2M Columns updated: act_indct, updt_by, updt_ts
+9
+Mark Transfer Instructions as processed. • Schedule status → “H02” • Updated-by → “Custagg” • Updated-ts → current time
+Table TRANSFER_INSTRUCTION_M2M Columns updated: schd_stat, updt_by, updt_ts
+10
+Close Schedules that were handled. • Close-date → now • Schedule status → “S02” • Updated-ts → current time
+Table SCHEDULE_M2M Columns updated: cls_dt, schd_stat, updt_ts
+11
+Produce end-of-run statistics: records read, duplicates skipped, Schedule IDs fetched/updated, Execution IDs fetched/updated, Instruction IDs fetched/updated, job exit status.
+Log line “Custagg Run Stats” (no DB write)
+12
+House-keep the files used in this run: • On success → unlock & archive • On failure → unlock & move to error folder
+File system only
 
