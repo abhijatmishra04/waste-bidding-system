@@ -1,40 +1,32 @@
-Step No
-Description (WHAT happens)
-Business Field(s) Affected / Meaning
-1
-Extract every record in Refer DATA file that belongs to the current run-window.
-Raw file columns only (no DB write).
-2
-Extract every record in Refer ENTY file for the same run-window.
-Raw file columns only.
-3
-Match the numeric ENTITY CODE from Refer ENTY to the numeric ENTITY CODE in Refer DATA.  • When a match is found, carry forward ACCOUNT NUMBER & PRODUCT CODE from Refer DATA.
-entity, accountNumber, productCode (in-memory working set)
-4
-Remove duplicate customer triples (entity + account + product).
-—
-5
-Look up Schedule IDs that belong to each unique triple.  Data sources searched in business order: Account_BOA, then Account_M2M.
-scheduleId list (working set)
-6
-For every Schedule ID just found, look up related Transfer Execution IDs.
-transferExecutionId list (working set)
-7
-For every Schedule ID just found, look up related Transfer Instruction IDs.
-transferInstructionId list (working set)
-8
-Mark Transfer Executions as processed/failed. • Action indicator → “F” • Updated-by → “Custagg” • Updated-ts → current time
-Table TRANSFER_EXECUTION_M2M Columns updated: act_indct, updt_by, updt_ts
-9
-Mark Transfer Instructions as processed. • Schedule status → “H02” • Updated-by → “Custagg” • Updated-ts → current time
-Table TRANSFER_INSTRUCTION_M2M Columns updated: schd_stat, updt_by, updt_ts
-10
-Close Schedules that were handled. • Close-date → now • Schedule status → “S02” • Updated-ts → current time
-Table SCHEDULE_M2M Columns updated: cls_dt, schd_stat, updt_ts
-11
-Produce end-of-run statistics: records read, duplicates skipped, Schedule IDs fetched/updated, Execution IDs fetched/updated, Instruction IDs fetched/updated, job exit status.
-Log line “Custagg Run Stats” (no DB write)
-12
-House-keep the files used in this run: • On success → unlock & archive • On failure → unlock & move to error folder
-File system only
+Slide Title
+POE Batch Job – 8-Digit BIN Enablement
 
+⸻
+
+1 ▪ Business Objective
+	•	Enable SST systems to recognise new 8-digit Bank-Identification Numbers (BINs) while retaining full support for existing 6-digit BINs.
+	•	Guarantee uninterrupted card authorisation & settlement for Consumer and Small-Business portfolios.
+
+2 ▪ Weekly Execution Snapshot
+	•	Trigger: Arrival of POE file ISBP.NDM.POE.ISB.UPLOAD.BINTABLE (fixed-length, LRECL = 50).
+	•	Schedule: Autosys file-trigger, every Wednesday 12 – 1 PM CT.
+	•	Environments: 1s & 3s LPARs processed in sequence.
+
+3 ▪ High-Level Workflow
+	1.	File Validation – Locate file, duplicate check, lock, header/trailer count match.
+	2.	Read & Map – Extract key fields (BANK_ID_NO, HOST_NO, ISSUER_NO, etc.).
+	3.	Upsert Logic –
+	•	Match found  →  UPDATE existing BIN row.
+	•	No match  →  INSERT new BIN row.
+	4.	Delete Cycle – Identify BINs absent from today’s file, write audit report, bulk-delete obsolete rows.
+	5.	Post-Processing – Rename input to .done / .err, archive, Splunk log push.
+
+4 ▪ Outputs & Controls
+	•	Database: SST_OWNER.BIN table refreshed (insert, update, delete).
+	•	Audit: DeleteBin_<timestamp>.txt with full detail + footer record count.
+	•	Logs & Alerts: End-of-batch totals, error summaries, restart checkpoints.
+
+5 ▪ Business Value Delivered
+	•	Future-proofs BIN processing ahead of Visa/Mastercard mandate.
+	•	Mirrors legacy mainframe jobs ISBD1BUP / ISBD0BUP while adding modern safeguards (duplicate lock, chunk commits, restartability).
+	•	Zero downstream impact—ESB programs consume the same BIN table seamlessly.
