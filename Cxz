@@ -1,1 +1,49 @@
+#
+Question from e-mail
+Precise answer
+Where it lives / Code proof-point
+1
+When was this business objective given to the Re-platform team?
+✔ Requirement came to Re-platform in the Kick-off workshop on 12 April 2025 (Sprint 22 planning). The PRD from Prod-Support was tagged “ENTPAYTECH-8667 – 8-digit BIN”.
+JIRA ENTPAYTECH-8667 → “Assignee: Re-platform / Created 12-Apr-25”.
+2
+File name to be changed?
+Input file follows the naming rule ISBP.NDM.POE.ISB.UPLOAD.BINTABLE_YYYYMMDD.txt. The date stamp is appended by the upstream provider; we do not rename it before read.
+poe-DEV.properties → poe.file.input.prefix
+3
+Locate file in which folder?
+Folder is parameter-driven: /landing_zone/sst53071_lz/<env>/file/inbound/poe. (Property poe.file.input.directoryPath)
+PoeBinItemReaderImpl#getFlatFileItemReader() – lines 68-71
+4
+Duplicate check – on file or on records?
+Both levels covered  • File-level: FileValidatorTasklet rejects if the same file name already exists in /archive.  • Record-level: PoeBinProcessor keeps an in-memory HashSet<String> bankIdInFlatFile; duplicate Bank ID rows in the same run are skipped (return null).
+File: Excel “File Validation” tab, step 3.  Records: PoeBinProcessor#process() lines 44-50.
+5
+What fields are updated?
+If a BIN already exists we refresh:HOST_NO, ISU_NO, PROD_BRND_NO, BUS_LINE_TP_NO, HOST_PLTF_NO, PMT_CPN_MICR_NO, GL_DEST_NO, LST_UPDT_TS.(Bank ID is the key; other columns get default constants when absent.)
+SQL Query 2 – UPDATE in “Query Details” sheet.
+6
+For any SQL error – where is it logged?
+• All JDBC exceptions caught in PoeBinProcessor and JdbcBatchItemWriter bubble to JobExecutionListener, then to application log (log4j2-rolling.log).  • Splunk forwards the same log file in near-real-time via UF.
+LoggingUtil.logErrorMessage(…) wrapper & Splunk UF config.
+7
+While processing, are we changing the file extension?
+Yes – after step success we rename to .done; on failure we rename to .err. Autosys then moves the file to /archive.
+Excel “Archival & Logging” tab lines 1-2.
+8
+What is the error summary / sample for QA?
+End-of-job INFO line:  `POE-BIN-SUMMARY
+Inserts=431
+9
+Which errors land in app log & Splunk?
+Non-exhaustive list: File not found, duplicate file, header/trailer mismatch, record length ≠ 50, invalid brand-code map, JDBC duplicate-key, deadlock, commit failure, audit-file IO errors. All go through log.error() → both logs.
+Centralised in LoggingUtil + log4j2 config.
+10
+Autosys file trigger – will it launch the job?
+Yes. Job POE_BIN_LOAD is defined with FILE_TRIGGER condition on the inbound directory & prefix; the .txt arrival plus 0-byte .trg sentinel kicks off the job.
+Autosys JIL definition (see deployment run-book §4.1).
+11
+Every Wednesday 12 – 1 PM CST – is that guaranteed?
+The window is tentative and mirrors mainframe SLA. Because we use a file trigger, the actual start time depends on when the upstream NDM drop occurs; Ops has historically delivered the file between 12:10–12:25 PM CT, so the job finishes well before 1 PM.
+
 
