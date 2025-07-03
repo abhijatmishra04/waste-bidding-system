@@ -2,7 +2,6 @@
 <Configuration name="UdapRequestLogger" status="debug" monitorInterval="30">
 
   <Appenders>
-
     <!-- 1) Main application log -->
     <RollingFile name="appAppender"
                  fileName="${sys:jboss.server.log.dir}/batch/application.log"
@@ -13,6 +12,7 @@
       </Policies>
       <DefaultRolloverStrategy max="10">
         <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_batch_template/batch/">
+          <!-- Make sure 'glob' is not split across lines! -->
           <IfFileName glob="application-*.log.gz">
             <IfAny>
               <IfLastModified age="7d"/>
@@ -23,7 +23,7 @@
       </DefaultRolloverStrategy>
     </RollingFile>
 
-    <!-- 2) Target-request-response log -->
+    <!-- 2) Target request/response log -->
     <RollingFile name="targetReqResAppender"
                  fileName="${sys:jboss.server.log.dir}/batch/target_reqres.log"
                  filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/target_reqres-%d{MM-dd-yyyy}-%i.log.gz">
@@ -43,7 +43,7 @@
       </DefaultRolloverStrategy>
     </RollingFile>
 
-    <!-- 3) Splunk tail (mirror of everything) -->
+    <!-- 3) Splunk mirror of everything -->
     <RollingFile name="splunkAppender"
                  fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_udap/batch/splunk.log"
                  filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
@@ -62,56 +62,52 @@
         </Delete>
       </DefaultRolloverStrategy>
     </RollingFile>
-
   </Appenders>
 
-
   <Loggers>
-
-    <!-- Suppress framework chatter but still mirror it to Splunk -->
-    <Logger name="org.hibernate"       level="info" additivity="false">
+    <!-- Framework logs, still mirrored to Splunk -->
+    <Logger name="org.hibernate"       level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
-    <Logger name="org.springframework" level="info" additivity="false">
+    <Logger name="org.springframework" level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
-    <Logger name="org.apache.ws4j"     level="info" additivity="false">
+    <Logger name="org.apache.ws4j"     level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
-    <Logger name="org.apache.xml"      level="info" additivity="false">
+    <Logger name="org.apache.xml"      level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
-    <Logger name="org.opensaml"        level="info" additivity="false">
+    <Logger name="org.opensaml"        level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
-    <Logger name="com.bofa.ctu"        level="info" additivity="false">
-      <AppenderRef ref="appAppender"/>
-      <AppenderRef ref="splunkAppender"/>
-    </Logger>
-
-    <!-- Your own code -->
-    <Logger name="com.bofa.sst.batch"  level="debug" additivity="false">
+    <Logger name="com.bofa.ctu"        level="info"    additivity="false">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
 
-    <!-- Dedicated R/R logger stays in its file + Splunk -->
-    <Logger name="targetReqResLogger"  level="trace" additivity="false">
+    <!-- Your application code -->
+    <Logger name="com.bofa.sst.batch"  level="debug"   additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+
+    <!-- Special R/R logger -->
+    <Logger name="targetReqResLogger"  level="trace"   additivity="false">
       <AppenderRef ref="targetReqResAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Logger>
 
-    <!-- Finally, the root logger: everything you didn’t explicitly override -->
+    <!-- Everything else -->
     <Root level="debug">
       <AppenderRef ref="appAppender"/>
       <AppenderRef ref="splunkAppender"/>
     </Root>
-
   </Loggers>
 
 </Configuration>
