@@ -1,1 +1,65 @@
-git reset --soft HEAD~1
+<!--  log4j2-DEV.xml  ─── only the parts that change/are added  -->
+<Configuration name="UdapRequestLogger" status="debug">
+
+    <!-- ─────────────  existing Appenders stay AS-IS  ───────────── -->
+    <Appenders>
+        <!-- appAppender, targetReqResAppender, splunkAppender … -->
+    </Appenders>
+
+    <Loggers>
+
+        <!-- 1️⃣  Every package-level logger that was “appAppender only”  
+                  gains an extra <AppenderRef> to splunkAppender           -->
+
+        <Logger name="org.hibernate" level="info" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <Logger name="org.springframework" level="info" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <Logger name="org.apache.ws4j" level="info" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <Logger name="org.apache.xml" level="info" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <Logger name="org.opensaml" level="info" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <Logger name="com.bofa.ctu"      level="info"  additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <!-- Your application’s own package -->
+        <Logger name="com.bofa.sst.batch" level="debug" additivity="false">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+        <!-- Target-request/response logger still keeps its dedicated file,
+             but a copy also goes to Splunk                                            -->
+        <Logger name="targetReqResLogger" level="trace" additivity="false">
+            <AppenderRef ref="targetReqResAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Logger>
+
+
+        <!-- 2️⃣  Root logger now writes to Splunk, too -->
+        <Root level="debug">
+            <AppenderRef ref="appAppender"/>
+            <AppenderRef ref="splunkAppender"/>      <!-- NEW -->
+        </Root>
+
+    </Loggers>
+</Configuration>
