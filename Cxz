@@ -1,122 +1,117 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--  log4j2-DEV.xml  -->
 <Configuration name="UdapRequestLogger" status="debug" monitorInterval="30">
 
-    <!-- ▒▒▒ 10 MB / 300 MB etc. values are left exactly as you had them ▒▒▒ -->
-    <Appenders>
+  <Appenders>
 
-        <!-- ── 1. Main application log ─────────────────────────────── -->
-        <RollingFile name="appAppender"
-                     fileName="${sys:jboss.server.log.dir}/batch/application.log"
-                     filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap_req/batch/application-%d{MM-dd-yyyy}-%i.log.gz">
-            <PatternLayout pattern="%d %p %t %c{2}:%L - %m%n"/>
-            <Policies>
-                <SizeBasedTriggeringPolicy size="300 MB"/>
-            </Policies>
-            <DefaultRolloverStrategy max="10">
-                <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_batch_template/batch/">
-                    <IfFileName glob="application-*.log.gz">
-                        <IfAny>
-                            <IfLastModified age="7d"/>
-                            <IfAccumulatedFileCount exceeds="15"/>
-                        </IfAny>
-                    </IfFileName>
-                </Delete>
-            </DefaultRolloverStrategy>
-        </RollingFile>
+    <!-- 1) Main application log -->
+    <RollingFile name="appAppender"
+                 fileName="${sys:jboss.server.log.dir}/batch/application.log"
+                 filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap_req/batch/application-%d{MM-dd-yyyy}-%i.log.gz">
+      <PatternLayout pattern="%d %p %t %c{2}:%L - %m%n"/>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_batch_template/batch/">
+          <IfFileName glob="application-*.log.gz">
+            <IfAny>
+              <IfLastModified age="7d"/>
+              <IfAccumulatedFileCount exceeds="15"/>
+            </IfAny>
+          </IfFileName>
+        </Delete>
+      </DefaultRolloverStrategy>
+    </RollingFile>
 
-        <!-- ── 2. Target-request-response dedicated log ────────────── -->
-        <RollingFile name="targetReqResAppender"
-                     fileName="${sys:jboss.server.log.dir}/batch/target_reqres.log"
-                     filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/target_reqres-%d{MM-dd-yyyy}-%i.log.gz">
-            <PatternLayout pattern="%d %p %t %c{2}:%L - %m%n"/>
-            <Policies>
-                <SizeBasedTriggeringPolicy size="300 MB"/>
-            </Policies>
-            <DefaultRolloverStrategy max="10">
-                <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/">
-                    <IfFileName glob="target_reqres-*.log.gz">
-                        <IfAny>
-                            <IfLastModified age="7d"/>
-                            <IfAccumulatedFileCount exceeds="15"/>
-                        </IfAny>
-                    </IfFileName>
-                </Delete>
-            </DefaultRolloverStrategy>
-        </RollingFile>
+    <!-- 2) Target-request-response log -->
+    <RollingFile name="targetReqResAppender"
+                 fileName="${sys:jboss.server.log.dir}/batch/target_reqres.log"
+                 filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/target_reqres-%d{MM-dd-yyyy}-%i.log.gz">
+      <PatternLayout pattern="%d %p %t %c{2}:%L - %m%n"/>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/">
+          <IfFileName glob="target_reqres-*.log.gz">
+            <IfAny>
+              <IfLastModified age="7d"/>
+              <IfAccumulatedFileCount exceeds="15"/>
+            </IfAny>
+          </IfFileName>
+        </Delete>
+      </DefaultRolloverStrategy>
+    </RollingFile>
 
-        <!-- ── 3. Copy for Splunk Forwarder / HEC tail ─────────────── -->
-        <RollingFile name="splunkAppender"
-                     fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_udap/batch/splunk.log"
-                     filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
-            <PatternLayout pattern="%d{dd/MMM/yyyy:HH:mm:ss.SSS} 'Z'|%p|%c|%m%n"/>
-            <Policies>
-                <SizeBasedTriggeringPolicy size="300 MB"/>
-            </Policies>
-            <DefaultRolloverStrategy max="10">
-                <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/">
-                    <IfFileName glob="splunk-*.log.gz">
-                        <IfAny>
-                            <IfLastModified age="7d"/>
-                            <IfAccumulatedFileCount exceeds="15"/>
-                        </IfAny>
-                    </IfFileName>
-                </Delete>
-            </DefaultRolloverStrategy>
-        </RollingFile>
+    <!-- 3) Splunk tail (mirror of everything) -->
+    <RollingFile name="splunkAppender"
+                 fileName="${sys:jboss.server.log.dir}/sst_bp_m2m_udap/batch/splunk.log"
+                 filePattern="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/splunk-%d{MM-dd-yyyy}-%i.log.gz">
+      <PatternLayout pattern="%d{dd/MMM/yyyy:HH:mm:ss.SSS} 'Z'|%p|%c|%m%n"/>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="300 MB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="10">
+        <Delete basePath="${sys:jboss.server.log.dir}/archive/sst_bp_m2m_udap/batch/">
+          <IfFileName glob="splunk-*.log.gz">
+            <IfAny>
+              <IfLastModified age="7d"/>
+              <IfAccumulatedFileCount exceeds="15"/>
+            </IfAny>
+          </IfFileName>
+        </Delete>
+      </DefaultRolloverStrategy>
+    </RollingFile>
 
-    </Appenders>
+  </Appenders>
 
-    <Loggers>
 
-        <!--  Suppress noisy libs but keep records in both files  -->
-        <Logger name="org.hibernate"       level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+  <Loggers>
 
-        <Logger name="org.springframework" level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+    <!-- Suppress framework chatter but still mirror it to Splunk -->
+    <Logger name="org.hibernate"       level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <Logger name="org.springframework" level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <Logger name="org.apache.ws4j"     level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <Logger name="org.apache.xml"      level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <Logger name="org.opensaml"        level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
+    <Logger name="com.bofa.ctu"        level="info" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
 
-        <Logger name="org.apache.ws4j"     level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+    <!-- Your own code -->
+    <Logger name="com.bofa.sst.batch"  level="debug" additivity="false">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
 
-        <Logger name="org.apache.xml"      level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+    <!-- Dedicated R/R logger stays in its file + Splunk -->
+    <Logger name="targetReqResLogger"  level="trace" additivity="false">
+      <AppenderRef ref="targetReqResAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Logger>
 
-        <Logger name="org.opensaml"        level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+    <!-- Finally, the root logger: everything you didn’t explicitly override -->
+    <Root level="debug">
+      <AppenderRef ref="appAppender"/>
+      <AppenderRef ref="splunkAppender"/>
+    </Root>
 
-        <Logger name="com.bofa.ctu"        level="info" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
+  </Loggers>
 
-        <!--  Your application packages  -->
-        <Logger name="com.bofa.sst.batch"  level="debug" additivity="false">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
-
-        <!--  Dedicated R/R logger: still own file + copy to Splunk  -->
-        <Logger name="targetReqResLogger"  level="trace" additivity="false">
-            <AppenderRef ref="targetReqResAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Logger>
-
-        <!--  Root logger replicated to Splunk  -->
-        <Root level="debug">
-            <AppenderRef ref="appAppender"/>
-            <AppenderRef ref="splunkAppender"/>
-        </Root>
-
-    </Loggers>
 </Configuration>
