@@ -1,119 +1,18 @@
-1.	Drop any record with no Recurring‐Amount‐Type
-	•	If RecurringAmtType is null
-	•	Then throw the record away (do not process it).
-	2.	Case “MIN” (minimum payment):
-	•	If RecurringAmtType == MIN
-	•	If either ProcessCode or MinOrRecurAmt is null
-	•	Then drop the record.
-	•	Else
-	•	If ProcessCode == P00
-	•	Then set PaymentType = SST_ONETIME_MIN
-	•	Else
-	•	Then set PaymentType = SST_AUTOPAY_MIN
-	•	Set OrigPaymentAmt = MinOrRecurAmt
-	•	Set AmtType = MIN
-	3.	Case “MIN_ADDL” (minimum plus additional fee):
-	•	If RecurringAmtType == MIN_ADDL
-	•	If either ProcessCode or AdditionalAmt is null
-	•	Then drop the record.
-	•	Else
-	•	If ProcessCode == P00
-	•	Then set PaymentType = SST_ONETIME_MIN
-	•	Else
-	•	Then set PaymentType = SST_AUTOPAY_MIN
-	•	Then
-	•	If ProcessCode == P00
-	•	Then overwrite PaymentType = SST_FIXED_ONETIME
-	•	Else
-	•	Then overwrite PaymentType = SST_FIXED_RECURR
-	•	Set OrigPaymentAmt = AdditionalAmt
-	•	Set AmtType = MIN
-	4.	Case “STMT_BAL” (statement balance):
-	•	If RecurringAmtType == STMT_BAL
-	•	If either ProcessCode or MinStmtCrtRegAmt is null
-	•	Then drop the record.
-	•	Else
-	•	If ProcessCode == P00
-	•	Then set PaymentType = SST_ONETIME_PIF
-	•	Else
-	•	Then set PaymentType = SST_AUTOPAY_PIF
-	•	Set OrigPaymentAmt = MinStmtCrtRegAmt
-	•	Set AmtType = BAL
-	5.	Case “CUR_BAL” or “OTHER_AMT” (current balance or other amount):
-	•	If RecurringAmtType == CUR_BAL or == OTHER_AMT
-	•	If PmtAmt is null
-	•	Then drop the record.
-	•	Else
-	•	Set PaymentType = SST_FIXED_ONETIME
-	•	Set OrigPaymentAmt = PmtAmt
-	•	Set AmtType = FIX
-	6.	Case “CONST_RECUR” (constant recurring):
-	•	If RecurringAmtType == CONST_RECUR
-	•	If AdditionalAmt is null
-	•	Then drop the record.
-	•	Else
-	•	Set PaymentType = SST_FIXED_RECURR
-	•	Set OrigPaymentAmt = AdditionalAmt
-	•	Set AmtType = FIX
-	7.	Case “OTHER” (miscellaneous):
-	•	If RecurringAmtType == OTHER
-	•	If ProcessCode is null
-	•	Then drop the record.
-	•	Else
-	•	If ProcessCode == P00
-	•	Then set PaymentType = SST_FIXED_ONETIME
-	•	Else
-	•	Then set PaymentType = SST_FIXED_RECURR
-	•	If (ProcessCode == P03 && RemainOccurrences == 1)
-	•	Then set OrigPaymentAmt = FinalAmt
-	•	Else
-	•	Then set OrigPaymentAmt = PmtAmt
-	•	Set AmtType = CCA
-	8.	Case “RMPD” (remitted):
-	•	If RecurringAmtType == RMPD
-	•	If PmtAmt is null
-	•	Then drop the record.
-	•	Else
-	•	Set PaymentType = SST_RMPD_ONETIME
-	•	Set OrigPaymentAmt = PmtAmt
-	•	Set AmtType = FIX
-	9.	Case “REM_STMT_BAL” (remitted statement balance):
-	•	If RecurringAmtType == REM_STMT_BAL
-	•	If PmtAmt is null
-	•	Then drop the record.
-	•	Else
-	•	Set PaymentType = SST_REM_STMT_BAL_ONETIME
-	•	Set OrigPaymentAmt = PmtAmt
-	•	Set AmtType = RSB
-	10.	Case “ISB” (interest statement balance):
-	•	If RecurringAmtType == ISB
-	•	If either ProcessCode or MinStmtCrtRegAmt is null
-	•	Then drop the record.
-	•	Else
-	•	If ProcessCode == P00
-	•	Then set PaymentType = SST_ONETIME_ISB
-	•	Else
-	•	Then set PaymentType = SST_AUTOPAY_ISB
-	•	Set OrigPaymentAmt = MinStmtCrtRegAmt
-	•	Set AmtType = ISB
-	11.	Case “REM_ISB” (remitted interest statement balance):
-	•	If RecurringAmtType == REM_ISB
-	•	If PmtAmt is null
-	•	Then drop the record.
-	•	Else
-	•	Set PaymentType = SST_REM_ISB
-	•	Set OrigPaymentAmt = PmtAmt
-	•	Set AmtType = RIS
-	12.	All other types:
-	•	If no recognized RecurringAmtType
-	•	Then drop the record.
-	13.	Special Transfer‐Reference fix:
-	•	If TransferReferenceId is null
-	•	If ProcessCode is null → drop the record.
-	•	If ProcessCode == P03 && RemainOccurrences == 1
-	•	Then override OrigPaymentAmt = FinalAmt.
-	•	Else
-	•	Then leave OrigPaymentAmt as-is (from above).
-	14.	Copy everything else unchanged:
-	•	System ID, schedule ID, SST key, system identifier, remaining‐occurrences, account number, confirmation number, schedule ID, input/output file names, action ID, response status, free‐text fields, created‐by and timestamps all flow straight into the staging table with no alteration.
+📧 Subject: Onboarding Blocked for State Street Due to BofA HDD Restrictions
 
+Hi ,
+
+I hope you’re doing well.
+
+I am currently in the process of transitioning from the BofA account to the State Street project. While my last working day in the BofA account is officially set as 24th July, the onboarding process for State Street has already begun.
+
+However, I am currently facing a blocker in completing the Sterling background verification, as I am unable to upload the required documents through the portal. The issue seems to be caused by existing BofA HDD and hardening policies on my laptop, which are restricting access to the Sterling upload functionality.
+
+I kindly request your support in helping me with either:
+	1.	Getting temporary access or permissions to complete the Sterling upload,
+or
+	2.	Providing an alternative solution so I can continue with my State Street onboarding without delays.
+
+Please let me know how to proceed. This is currently holding back my onboarding timeline, and I would really appreciate your quick guidance.
+
+Thank you for your support.
