@@ -1,1 +1,107 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+RAI Gateway → Model smoke test (Python 3.12)
+- Writes a temporary Option-A config using inline creds (for TESTING ONLY)
+- Builds a LangChain LLM via SSRAIClient
+- Sends a tiny prompt and prints the response
 
+Usage:
+  python rai_smoketest.py
+"""
+
+import os, sys, tempfile, textwrap
+
+# --- ⬇️ FILL THESE WITH YOUR REAL VALUES (TEST-ONLY!) -------------------------
+GATEWAY_URL    = "https://rai.example.com"
+TENANT_ID      = "YOUR_TENANT_ID"
+CLIENT_ID      = "YOUR_CLIENT_ID"
+CLIENT_SECRET  = "YOUR_CLIENT_SECRET"
+
+# Model route name must match the [routes] key in the config below.
+MODEL_ROUTE    = "azure-openai.gpt4-32k"
+
+# Provider-specific mapping the gateway expects (examples shown).
+# If your org uses a different provider/format, adjust accordingly.
+AZURE_DEPLOYMENT = "YOUR_AZURE_DEPLOYMENT_NAME"
+API_VERSION      = "2024-06-01"
+
+# Optional RAI profile (e.g., "WITH_GUARDRAIL") or leave as None
+PROFILE = None
+# -----------------------------------------------------------------------------
+
+
+def _write_inline_cfg() -> str:
+    """
+    Creates a temp Option-A .cfg on disk using the inline credentials above
+    and returns its path.
+    """
+    cfg_text = textwrap.dedent(f"""\
+    [gateway]
+    url = {GATEWAY_URL}
+    tenant_id = {TENANT_ID}
+    client_id = {CLIENT_ID}
+    client_secret = {CLIENT_SECRET}
+
+    [routes]
+    # Left side is the route name you'll call as model_name
+    {MODEL_ROUTE} = provider=azure-openai; deployment={AZURE_DEPLOYMENT}; api_version={API_VERSION}
+
+    [profiles]
+    WITH_GUARDRAIL = content_filter=on; pii_mask=on; log_prompt=redact
+    DEFAULT = content_filter=default; pii_mask=off
+    """)
+    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".cfg")
+    tf.write(cfg_text.encode("utf-8"))
+    tf.flush()
+    tf.close()
+    return tf.name
+
+
+def main():
+    try:
+        cfg_path = _write_inline_cfg()
+
+        # Lazy imports so the error messages are clear if deps are missing
+        from ssrai import SSRAIClient
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import StrOutputParser
+
+        # Build RAI client from the temp config
+        ssc = SSRAIClient(config_file=cfg_path, profile=PROFILE) if PROFILE else SSRAIClient(config_file=cfg_path)
+
+        # Get a LangChain LLM from RAI (LCEL-ready)
+        llm = ssc.llm(
+            "langchain",
+            MODEL_ROUTE,
+            temperature=0.0,
+            n=1,
+            max_tokens=64,
+        )
+
+        # Minimal chain: prompt → llm → string
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a health check. Reply briefly."),
+            ("user",   "Say 'pong' and echo ROUTE={route}. Nothing else.")
+        ])
+        chain = prompt | llm | StrOutputParser()
+
+        print("=== RAI Smoke Test ===")
+        out = chain.invoke({"route": MODEL_ROUTE})
+        print(out.strip())
+
+        # Simple sanity check
+        if "pong" in out.lower():
+            print("✅ RAI model call looks good.")
+            sys.exit(0)
+        else:
+            print("⚠️ Got a response but it didn't include 'pong'. Check guardrails/profile.")
+            sys.exit(0)
+
+    except Exception as e:
+        print(f"❌ RAI smoke test failed: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
