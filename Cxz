@@ -1,11 +1,1 @@
 
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip setuptools wheel
-
-# PUBLIC packages from PyPI (note: no 'langchain' needed for the smoketest)
-pip install --index-url https://pypi.org/simple \
-            --trusted-host pypi.org \
-            --trusted-host files.pythonhosted.org \
-            "langchain-core>=0.2.10,<0.3.0" "Jinja2>=3.1,<4"
-
