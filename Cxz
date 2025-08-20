@@ -1,1 +1,6 @@
-
+python .\pdf_to_json_agent_langchain.py `
+  --cfg .\rai_config.cfg `
+  --model "azure-openai.gpt-4o" `
+  --pdf .\docs\sample.pdf `
+  --out .\outputs\sample.kv.json `
+  --allowed_keys "invoice_number,invoice_date,total_amount,vendor_name"
