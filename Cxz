@@ -1,1 +1,286 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+PDF → JSON key–value extractor (LangChain LCEL + RAI default config)
+
+- Uses your RAI config file (the same one that worked with [DEFAULT]).
+- Uses server-managed route names (e.g., "azure-openai.gpt-4o").
+- LangChain LCEL chain: PromptTemplate (jinja2) → RAI Runnable → JSON sanitizer → PydanticOutputParser
+- Writes a flat JSON file of key→value pairs.
+
+Usage:
+  python pdf_to_json_agent_langchain.py \
+    --cfg rai_config.cfg \
+    --model "azure-openai.gpt-4o" \
+    --pdf ./docs/invoice.pdf \
+    --out ./outputs/invoice_fields.json \
+    --allowed_keys "invoice_number,invoice_date,total_amount"
+"""
+
+import os, re, json, argparse
+from typing import List, Optional, OrderedDict as TOrderedDict
+from collections import OrderedDict
+
+import pdfplumber
+from jinja2 import Template
+from pydantic import BaseModel, Field, field_validator
+
+# LangChain core (0.3.x compatible)
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import RunnableLambda
+
+# RAI SDK
+from ssrai import SSRAIClient
+
+
+# ---------- Pydantic v2 schema ----------
+
+class KV(BaseModel):
+    key: str = Field(..., description="Field name (normalized)")
+    value: str = Field(..., description="Extracted value as plain text")
+    page: int = Field(..., ge=1, description="1-based page number")
+    confidence: float = Field(..., ge=0, le=1, description="0..1 model confidence")
+
+    @field_validator("key")
+    @classmethod
+    def _strip_key(cls, v: str) -> str:
+        return v.strip()
+
+class ExtractedDoc(BaseModel):
+    items: List[KV] = Field(default_factory=list)
+
+
+# ---------- Agent (LangChain) ----------
+
+class PDF2JSONLangChainAgent:
+    """
+    Reads a PDF, calls RAI via a LangChain Runnable, parses strict JSON, and returns a flat KV map.
+    """
+
+    def __init__(
+        self,
+        cfg_path: str,
+        model_name: str,
+        temperature: float = 0.0,
+        max_tokens: int = 900,
+        allowed_keys: Optional[List[str]] = None,
+    ):
+        self.cli = SSRAIClient(config_file=cfg_path)
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.allowed_keys = allowed_keys or []
+
+        # Pydantic parser + format instructions
+        self.parser = PydanticOutputParser(pydantic_object=ExtractedDoc)
+
+        # Prompt (jinja2) — base and stricter variants
+        allowed_keys_block = (
+            "Only output keys from this list:\n- " + "\n- ".join(self.allowed_keys) + "\n"
+            if self.allowed_keys else
+            "Output any clearly labeled field names as keys.\n"
+        )
+
+        base_template_text = r"""
+You are a precise information-extraction engine.
+Given TEXT from a PDF page, extract explicit **key-value** pairs (field name and its value).
+
+Rules:
+- {{ allowed_keys_block }}
+- Keep values verbatim; normalize whitespace only.
+- If a field repeats across pages, still return it (we will dedupe later).
+- If nothing certain is present, return {"items": []}.
+- Estimate confidence between 0 and 1.
+- Return **ONLY** valid JSON following the schema.
+
+{{format_instructions}}
+
+PAGE_NUMBER={{page}}
+TEXT:
+{{text}}
+""".strip()
+
+        strict_suffix = "\n\nREMINDER: Output JSON ONLY. No markdown, no prose, no comments."
+
+        self.prompt = PromptTemplate(
+            template=base_template_text,
+            template_format="jinja2",
+            input_variables=["text", "page", "allowed_keys_block"],
+            partial_variables={"format_instructions": self.parser.get_format_instructions()},
+        )
+        self.prompt_strict = PromptTemplate(
+            template=base_template_text + strict_suffix,
+            template_format="jinja2",
+            input_variables=["text", "page", "allowed_keys_block"],
+            partial_variables={"format_instructions": self.parser.get_format_instructions()},
+        )
+
+        # --- LangChain runnables ---
+        # 1) RAI runnable: takes a prompt string → returns model text
+        def _rai_call(prompt_str: str) -> str:
+            messages = [
+                {"role": "system", "content": "You are a precise extraction engine. Reply ONLY with JSON matching the required schema."},
+                {"role": "user",   "content": [{"type": "text", "text": prompt_str}]},
+            ]
+            resp = self.cli.chat.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                n=1,
+            )
+            msg = resp["choices"][0]["message"]
+            content = msg.get("content", "")
+            if isinstance(content, list) and content and isinstance(content[0], dict):
+                content = content[0].get("text", "")
+            return str(content)
+
+        self.rai_runnable = RunnableLambda(_rai_call)
+
+        # 2) JSON sanitizer: strips ```json fences or trims to the outermost {...}
+        def _extract_json_payload(text: str) -> str:
+            try:
+                json.loads(text)
+                return text
+            except Exception:
+                pass
+            m = re.search(r"```json\s*(\{.*\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+            if m:
+                return m.group(1)
+            start, end = text.find("{"), text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                return text[start:end+1]
+            # Last resort: return as-is (parser will raise and we’ll retry strict)
+            return text
+
+        self.json_sanitizer = RunnableLambda(_extract_json_payload)
+
+        # 3) Parser is already a Runnable (PydanticOutputParser)
+
+        # Compose LCEL chains
+        self.chain = self.prompt | self.rai_runnable | self.json_sanitizer | self.parser
+        self.chain_strict = self.prompt_strict | self.rai_runnable | self.json_sanitizer | self.parser
+
+        # For rendering
+        self._allowed_block = allowed_keys_block
+
+    # ---- helpers ----
+
+    @staticmethod
+    def _normalize_ws(s: str) -> str:
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip()
+
+    @staticmethod
+    def _text_blocks_from_page(page, max_chars=12000):
+        txt = page.extract_text() or ""
+
+        # include simple tables → "left: right | ..."
+        try:
+            tables = page.extract_tables()
+        except Exception:
+            tables = None
+
+        if tables:
+            for t in tables or []:
+                for row in t or []:
+                    if not row:
+                        continue
+                    left = (row[0] or "").strip()
+                    right = " | ".join([(c or "").strip() for c in row[1:]]) if len(row) > 1 else ""
+                    if left or right:
+                        txt += f"\n{left}: {right}"
+
+        txt = PDF2JSONLangChainAgent._normalize_ws(txt)
+        if not txt:
+            return
+        for i in range(0, len(txt), max_chars):
+            yield txt[i:i+max_chars]
+
+    @staticmethod
+    def _merge_items(items: List[KV]) -> List[KV]:
+        by_key: dict[str, KV] = {}
+        for it in items:
+            k = re.sub(r"[^a-z0-9]+", " ", it.key.lower()).strip()
+            if k not in by_key:
+                by_key[k] = it
+            else:
+                keep = by_key[k]
+                if len(it.value) > len(keep.value) or it.confidence > keep.confidence:
+                    by_key[k] = it
+        return [by_key[k] for k in OrderedDict.fromkeys(by_key.keys())]
+
+    # ---- LLM call (with retry) ----
+
+    def _parse_chunk(self, text: str, page_no: int) -> ExtractedDoc:
+        inputs = {"text": text, "page": page_no, "allowed_keys_block": self._allowed_block}
+        try:
+            return self.chain.invoke(inputs)
+        except Exception:
+            return self.chain_strict.invoke(inputs)
+
+    # ---- public API ----
+
+    def ingest(self, pdf_path: str, page_chunk_chars: int = 12000) -> TOrderedDict[str, str]:
+        """
+        Process a PDF into a flat dict: { key: value, ... }
+        """
+        all_items: List[KV] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_no, page in enumerate(pdf.pages, start=1):
+                for chunk in self._text_blocks_from_page(page, max_chars=page_chunk_chars):
+                    parsed: ExtractedDoc = self._parse_chunk(chunk, page_no)
+                    all_items.extend(parsed.items or [])
+
+        merged = self._merge_items(all_items)
+        kv = OrderedDict()
+        for item in merged:
+            kv[item.key] = item.value
+        return kv
+
+
+# ---------- CLI ----------
+
+def _default_out_path(pdf_path: str) -> str:
+    base, _ = os.path.splitext(pdf_path)
+    return f"{base}.kv.json"
+
+def main():
+    ap = argparse.ArgumentParser(description="PDF → flat JSON KV extractor (LangChain + RAI default config)")
+    ap.add_argument("--cfg", required=True, help="Path to RAI config file (the [DEFAULT] one you tested)")
+    ap.add_argument("--model", required=True, help="Server-managed route name (e.g., 'azure-openai.gpt-4o')")
+    ap.add_argument("--pdf", required=True, help="Path to input PDF")
+    ap.add_argument("--out", default=None, help="Output JSON path (defaults to <pdf_basename>.kv.json)")
+    ap.add_argument("--allowed_keys", default=None, help="Comma-separated whitelist of expected keys (optional)")
+    ap.add_argument("--page_chunk_chars", type=int, default=12000, help="Per-page chunk size")
+    ap.add_argument("--max_tokens", type=int, default=900, help="Max tokens per chunk")
+    ap.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
+    args = ap.parse_args()
+
+    allowed = [k.strip() for k in args.allowed_keys.split(",")] if args.allowed_keys else None
+
+    agent = PDF2JSONLangChainAgent(
+        cfg_path=args.cfg,
+        model_name=args.model,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        allowed_keys=allowed,
+    )
+
+    kv = agent.ingest(args.pdf, page_chunk_chars=args.page_chunk_chars)
+
+    out_path = args.out or _default_out_path(args.pdf)
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(kv, f, indent=2, ensure_ascii=False)
+
+    print(f"Wrote key–value JSON to: {out_path}")
+
+if __name__ == "__main__":
+    main()
 
