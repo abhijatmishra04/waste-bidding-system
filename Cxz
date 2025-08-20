@@ -1,5 +1,1 @@
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -U pip setuptools wheel
-pip install "langchain>=0.2.10,<0.3.0" "Jinja2>=3.1,<4" ssrai
-python rai_smoketest_pat.py
+
