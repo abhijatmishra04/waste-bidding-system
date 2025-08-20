@@ -1,1 +1,428 @@
 
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+PDF -> PNG -> LLM (RAI) JSON KV extractor with detailed logging.
+- Converts the PDF to PNG images first, then calls the LLM with those images.
+- No OCR/regex; the model does the extraction.
+- LangChain LCEL pipeline takes care of prompting & strict JSON parsing.
+
+Run (CMD):
+  python pdf_to_json_agent_langchain.py ^
+    --cfg .\config\rai_config.cfg ^
+    --model "azure-openai.gpt35t-16k" ^
+    --pdf .\docs\sample-invoice.pdf ^
+    --out .\outputs\sample-invoice.kv.json ^
+    --max-pages 5 --dpi 200 --log-level INFO --log-file .\logs\agent.log
+"""
+
+import os
+import re
+import io
+import json
+import time
+import base64
+import shutil
+import argparse
+import logging
+import tempfile
+from typing import List, Optional, OrderedDict as TOrderedDict
+from collections import OrderedDict
+
+# ---------- PDF -> PNG ----------
+try:
+    import fitz  # PyMuPDF
+    _HAVE_FITZ = True
+except Exception:
+    _HAVE_FITZ = False
+
+import pdfplumber  # fallback renderer uses Pillow via pdfplumber
+
+# ---------- Pydantic v2 ----------
+from pydantic import BaseModel, Field, field_validator
+
+# ---------- LangChain core ----------
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import RunnableLambda
+
+# ---------- RAI SDK ----------
+from ssrai import SSRAIClient
+
+
+# ======================== Data Models ========================
+
+class KV(BaseModel):
+    key: str = Field(..., description="Field name (normalized)")
+    value: str = Field(..., description="Extracted value as plain text")
+    page: int = Field(..., ge=1, description="1-based page number")
+    confidence: float = Field(..., ge=0, le=1, description="0..1 model confidence")
+
+    @field_validator("key")
+    @classmethod
+    def _strip_key(cls, v: str) -> str:
+        return v.strip()
+
+class ExtractedDoc(BaseModel):
+    items: List[KV] = Field(default_factory=list)
+
+
+# ======================== Agent ========================
+
+class PDF2JSONLangChainAgent:
+    """
+    1) Convert PDF to PNGs (PyMuPDF if available, else pdfplumber).
+    2) Send PNGs to the RAI model in a single chat call.
+    3) Parse strict JSON (Pydantic), merge duplicates, write flat KV JSON.
+
+    Detailed logging throughout.
+    """
+
+    def __init__(
+        self,
+        cfg_path: str,
+        model_name: str,
+        temperature: float = 0.0,
+        max_tokens: int = 1300,
+        allowed_keys: Optional[List[str]] = None,
+        max_pages: int = 10,
+        dpi: int = 200,
+        dump_images: Optional[str] = None,
+        keep_images: bool = False,
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.cli = SSRAIClient(config_file=cfg_path)
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.allowed_keys = allowed_keys or []
+        self.max_pages = max_pages
+        self.dpi = dpi
+        self.dump_images = dump_images  # if provided, PNGs will be saved here
+        self.keep_images = keep_images
+
+        self.log = logger or logging.getLogger(__name__)
+
+        # Parser and prompts
+        self.parser = PydanticOutputParser(pydantic_object=ExtractedDoc)
+        allowed_keys_block = (
+            "Only output keys from this list:\n- " + "\n- ".join(self.allowed_keys) + "\n"
+            if self.allowed_keys else
+            "Output any clearly labeled field names as keys.\n"
+        )
+
+        prompt_text = r"""
+You are a precise information-extraction engine.
+Given attached INVOICE PAGE IMAGES (PNG), extract explicit **key-value** pairs.
+
+Rules:
+- {{ allowed_keys_block }}
+- Keep values verbatim; normalize whitespace only.
+- If a field repeats across pages, still return it (we will dedupe later).
+- If nothing certain is present, return {"items": []}.
+- Estimate confidence between 0 and 1.
+- Return **ONLY** valid JSON following the schema.
+
+{{format_instructions}}
+""".strip()
+
+        strict_suffix = "\n\nREMINDER: Output JSON ONLY. No markdown, no prose, no comments."
+
+        self.prompt = PromptTemplate(
+            template=prompt_text,
+            template_format="jinja2",
+            input_variables=["allowed_keys_block"],
+            partial_variables={"format_instructions": self.parser.get_format_instructions()},
+        )
+        self.prompt_strict = PromptTemplate(
+            template=prompt_text + strict_suffix,
+            template_format="jinja2",
+            input_variables=["allowed_keys_block"],
+            partial_variables={"format_instructions": self.parser.get_format_instructions()},
+        )
+
+        # Coerce LangChain PromptValue -> str before sending to RAI
+        self.to_text = RunnableLambda(lambda p: p.to_string() if hasattr(p, "to_string") else str(p))
+
+        def _rai_call(payload: dict) -> str:
+            prompt_str: str = payload["prompt"]
+            content_parts: List[dict] = payload["content"]
+
+            self.log.debug("Building RAI messages; content parts: %d", len(content_parts))
+            messages = [
+                {"role": "system",
+                 "content": "You are a precise extraction engine. Reply ONLY with JSON matching the required schema."},
+                {"role": "user", "content": [{"type": "text", "text": prompt_str}] + content_parts},
+            ]
+            t0 = time.perf_counter()
+            resp = self.cli.chat.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                n=1,
+            )
+            dt = (time.perf_counter() - t0) * 1000
+            self.log.info("RAI chat.create ok in %.1f ms", dt)
+
+            msg = resp["choices"][0]["message"]
+            content = msg.get("content", "")
+            if isinstance(content, list) and content and isinstance(content[0], dict):
+                content = content[0].get("text", "")
+            text = str(content)
+            self.log.debug("RAI raw content length: %d chars", len(text))
+            return text
+
+        self.rai = RunnableLambda(_rai_call)
+
+        def _sanitize(text: str) -> str:
+            # Try as-is
+            try:
+                json.loads(text)
+                self.log.debug("Sanitizer: raw content is valid JSON.")
+                return text
+            except Exception:
+                pass
+            # ```json fenced code
+            m = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+            if m:
+                self.log.debug("Sanitizer: extracted fenced JSON block.")
+                return m.group(1)
+            # best-effort braces
+            s, e = text.find("{"), text.rfind("}")
+            if s != -1 and e != -1 and e > s:
+                self.log.debug("Sanitizer: sliced content between outer braces.")
+                return text[s:e+1]
+            self.log.warning("Sanitizer: could not find JSON payload; returning original text.")
+            return text
+
+        self.sanitize = RunnableLambda(_sanitize)
+
+        self._allowed_block = allowed_keys_block
+
+    # -------------- PDF → PNG --------------
+
+    def _pdf_to_png_paths(self, pdf_path: str) -> List[str]:
+        """
+        Convert PDF to PNG files and return the file paths (up to self.max_pages).
+        Uses PyMuPDF if available; otherwise pdfplumber render.
+        """
+        # Decide output dir (caller may pass a fixed dump dir)
+        if self.dump_images:
+            out_dir = self.dump_images
+            os.makedirs(out_dir, exist_ok=True)
+            temp_dir = None
+        else:
+            temp_dir = tempfile.mkdtemp(prefix="pdfpng_")
+            out_dir = temp_dir
+
+        paths: List[str] = []
+        t0 = time.perf_counter()
+
+        if _HAVE_FITZ:
+            self.log.info("Rendering PDF with PyMuPDF at %ddpi (max_pages=%d)...", self.dpi, self.max_pages)
+            doc = fitz.open(pdf_path)
+            total = min(doc.page_count, self.max_pages)
+            self.log.info("PDF has %d pages; rendering %d.", doc.page_count, total)
+            for i in range(total):
+                page = doc.load_page(i)
+                mat = fitz.Matrix(self.dpi / 72.0, self.dpi / 72.0)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                out_path = os.path.join(out_dir, f"page_{i+1:03d}.png")
+                pix.save(out_path)
+                paths.append(out_path)
+                self.log.debug("Rendered page %d -> %s (%dx%d)", i+1, out_path, pix.width, pix.height)
+            doc.close()
+        else:
+            self.log.info("PyMuPDF not found; rendering with pdfplumber at %ddpi (max_pages=%d)...", self.dpi, self.max_pages)
+            with pdfplumber.open(pdf_path) as pdf:
+                total = min(len(pdf.pages), self.max_pages)
+                self.log.info("PDF has %d pages; rendering %d.", len(pdf.pages), total)
+                for i in range(total):
+                    page = pdf.pages[i]
+                    img = page.to_image(resolution=self.dpi).original  # PIL.Image
+                    out_path = os.path.join(out_dir, f"page_%03d.png" % (i+1))
+                    img.save(out_path, format="PNG")
+                    paths.append(out_path)
+                    self.log.debug("Rendered page %d -> %s (%s)", i+1, out_path, str(img.size))
+
+        dt = (time.perf_counter() - t0) * 1000
+        total_bytes = sum(os.path.getsize(p) for p in paths)
+        self.log.info("Rendered %d PNG(s) in %.1f ms (%.1f MB total).",
+                      len(paths), dt, total_bytes / (1024 * 1024))
+
+        # Remember temp dir to delete later if needed
+        if not self.keep_images:
+            self._temp_render_dir = temp_dir  # may be None if dump_images supplied
+        else:
+            self._temp_render_dir = None
+
+        return paths
+
+    # -------------- Helper: merge items --------------
+
+    @staticmethod
+    def _merge_items(items: List[KV]) -> List[KV]:
+        """Deduplicate by normalized key; prefer longer value or higher confidence."""
+        by_key: dict[str, KV] = {}
+        for it in items:
+            k = re.sub(r"[^a-z0-9]+", " ", it.key.lower()).strip()
+            if k not in by_key:
+                by_key[k] = it
+            else:
+                keep = by_key[k]
+                if len(it.value) > len(keep.value) or it.confidence > keep.confidence:
+                    by_key[k] = it
+        return [by_key[k] for k in OrderedDict.fromkeys(by_key.keys())]
+
+    # -------------- Build content parts --------------
+
+    @staticmethod
+    def _paths_to_image_content(paths: List[str], logger: logging.Logger) -> List[dict]:
+        """Read PNG files and return list of image content parts with base64 payloads."""
+        parts: List[dict] = []
+        for p in paths:
+            with open(p, "rb") as f:
+                raw = f.read()
+            b64 = base64.b64encode(raw).decode("ascii")
+            parts.append({"type": "image", "mime_type": "image/png", "data": b64})
+            logger.debug("Prepared content for %s (%.1f KB, b64=%d chars)",
+                         os.path.basename(p), len(raw) / 1024, len(b64))
+        return parts
+
+    # -------------- Main flow --------------
+
+    def ingest(self, pdf_path: str) -> TOrderedDict[str, str]:
+        self.log.info("==== Start ingest ====")
+        self.log.info("PDF: %s", pdf_path)
+        t_start = time.perf_counter()
+
+        # 1) render PDF to PNG
+        png_paths = self._pdf_to_png_paths(pdf_path)
+        if not png_paths:
+            raise RuntimeError("No PNGs were produced from PDF.")
+
+        # 2) prepare prompt & content
+        prompt = (self.prompt | self.to_text).invoke({"allowed_keys_block": self._allowed_block})
+        content = self._paths_to_image_content(png_paths, self.log)
+
+        # 3) call RAI (strict retry on parse fail)
+        try:
+            raw = self.rai.invoke({"prompt": prompt, "content": content})
+            payload = self.sanitize.invoke(raw)
+            doc = self.parser.parse(payload)
+        except Exception as e:
+            self.log.warning("Parse failed on first attempt (%s). Retrying with strict prompt...", e)
+            prompt_strict = (self.prompt_strict | self.to_text).invoke({"allowed_keys_block": self._allowed_block})
+            raw = self.rai.invoke({"prompt": prompt_strict, "content": content})
+            payload = self.sanitize.invoke(raw)
+            doc = self.parser.parse(payload)
+
+        # 4) merge & flatten
+        items = doc.items or []
+        self.log.info("Model returned %d item(s).", len(items))
+        merged = self._merge_items(items)
+        self.log.info("After merge: %d unique key(s).", len(merged))
+        for it in merged:
+            self.log.debug("KV: key=%r value=%r page=%s conf=%.2f", it.key, it.value, it.page, it.confidence)
+
+        kv = OrderedDict((it.key, it.value) for it in merged)
+
+        # 5) cleanup temp images (unless keep_images or dump_images specified)
+        if getattr(self, "_temp_render_dir", None):
+            try:
+                shutil.rmtree(self._temp_render_dir, ignore_errors=True)
+                self.log.debug("Deleted temp render dir: %s", self._temp_render_dir)
+            except Exception as e:
+                self.log.warning("Failed to delete temp render dir: %s (%s)", self._temp_render_dir, e)
+
+        dt_total = (time.perf_counter() - t_start) * 1000
+        self.log.info("==== Done in %.1f ms ====", dt_total)
+        return kv
+
+
+# ======================== CLI ========================
+
+def _default_out_path(pdf_path: str) -> str:
+    base, _ = os.path.splitext(pdf_path)
+    return f"{base}.kv.json"
+
+def _setup_logger(level: str, log_file: Optional[str]) -> logging.Logger:
+    lvl = getattr(logging, (level or "INFO").upper(), logging.INFO)
+    logger = logging.getLogger("pdf2json")
+    logger.setLevel(lvl)
+    logger.handlers.clear()
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    ch = logging.StreamHandler()
+    ch.setLevel(lvl)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+
+    if log_file:
+        os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(lvl)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+
+    # quiet some noisy libs unless in DEBUG
+    if lvl > logging.DEBUG:
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+        logging.getLogger("ssrai").setLevel(logging.INFO)
+        logging.getLogger("pdfplumber").setLevel(logging.WARNING)
+
+    return logger
+
+def main():
+    ap = argparse.ArgumentParser(description="PDF -> PNG -> LLM KV extractor (RAI, LangChain, detailed logging)")
+    ap.add_argument("--cfg", required=True, help="Path to RAI config file ([DEFAULT] format)")
+    ap.add_argument("--model", required=True, help="Server-managed route (e.g., 'azure-openai.gpt35t-16k')")
+    ap.add_argument("--pdf", required=True, help="Input PDF path")
+    ap.add_argument("--out", default=None, help="Output JSON path (defaults to <pdf>.kv.json)")
+    ap.add_argument("--allowed_keys", default=None, help="Comma-separated whitelist of keys (optional)")
+    ap.add_argument("--max-pages", type=int, default=10, help="Max pages to render and send as images")
+    ap.add_argument("--dpi", type=int, default=200, help="PNG render DPI")
+    ap.add_argument("--max-tokens", type=int, default=1300, help="Max tokens for model output")
+    ap.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
+    ap.add_argument("--dump-images", default=None,
+                    help="Folder to save rendered PNGs (kept after run). If omitted, uses a temp dir.")
+    ap.add_argument("--keep-images", action="store_true",
+                    help="Keep temp images even when dump-images is not set (debugging).")
+    ap.add_argument("--log-level", default="INFO", choices=["DEBUG","INFO","WARNING","ERROR"],
+                    help="Logging verbosity")
+    ap.add_argument("--log-file", default=None, help="Optional log file path")
+    args = ap.parse_args()
+
+    logger = _setup_logger(args.log_level, args.log_file)
+
+    allowed = [k.strip() for k in args.allowed_keys.split(",")] if args.allowed_keys else None
+
+    agent = PDF2JSONLangChainAgent(
+        cfg_path=args.cfg,
+        model_name=args.model,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        allowed_keys=allowed,
+        max_pages=args.max_pages,
+        dpi=args.dpi,
+        dump_images=args.dump_images,
+        keep_images=args.keep_images,
+        logger=logger,
+    )
+
+    kv = agent.ingest(args.pdf)
+
+    out_path = args.out or _default_out_path(args.pdf)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(kv, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote key–value JSON to: %s", out_path)
+
+if __name__ == "__main__":
+    main()
