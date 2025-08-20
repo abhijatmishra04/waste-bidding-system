@@ -1,5 +1,1 @@
 
-python -m pip install --index-url https://pypi.org/simple ^
-  --extra-index-url https://gmas.statestr.com/gmasfiles/Components/PYTHON ^
-  --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host gmas.statestr.com ^
-  pypdf
