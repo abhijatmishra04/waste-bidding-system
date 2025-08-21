@@ -2,27 +2,23 @@
 # -*- coding: utf-8 -*-
 
 """
-PDF -> PNG -> LLM (RAI) JSON KV extractor with detailed logging
-and a robust TEXT-only fallback when image calls fail.
+PDF -> PNG -> LLM (via RAI) KV extractor with:
+- Detailed logging
+- Robust image payload fallback chain (dataurl -> base64 -> generic)
+- TEXT-only fallback if image calls fail (no regex; LLM still extracts)
+- Route preflight that tolerates various return types from model.search()
+- Optional guardrail profile and forced image payload format
 
-- Converts PDF pages to PNGs (PyMuPDF if available; else pdfplumber)
-- Tries image payload in 1..3 formats (dataurl, base64, generic)
-- If all image attempts fail (or you enable skip via flags), falls back to
-  sending only TEXT extracted by pdfplumber (no regex; LLM still extracts KVs)
-- Uses LangChain PromptTemplate + PydanticOutputParser for strict JSON
-
-USAGE (Windows CMD example):
+Windows CMD example:
 
   python pdf_to_json_agent_langchain.py ^
-    --cfg .\config\rai_config.cfg ^
+    --cfg ".\config\rai_config.cfg" ^
     --model "azure-oai-use2.gpt-4o-2024-11-20" ^
-    --pdf .\docs\sample-invoice.pdf ^
-    --out .\outputs\sample-invoice.kv.json ^
-    --log-level DEBUG --log-file .\logs\agent.log ^
-    --dump-images .\debug\pngs ^
-    --text-fallback
+    --pdf ".\docs\sample-invoice.pdf" ^
+    --out ".\outputs\sample-invoice.kv.json" ^
+    --log-level DEBUG --dump-images ".\debug\pngs" --text-fallback
 
-If your route requires a profile that disables guardrail:
+If your org needs a profile to disable guardrails:
   ... --profile NO_GUARDRAIL
 """
 
@@ -38,19 +34,19 @@ import tempfile
 from typing import List, Optional, OrderedDict as TOrderedDict
 from collections import OrderedDict
 
-# ---------- PDF -> PNG ----------
+# ---------- PDF rendering ----------
 try:
-    import fitz  # PyMuPDF (faster/better renderer)
+    import fitz  # PyMuPDF
     _HAVE_FITZ = True
 except Exception:
     _HAVE_FITZ = False
 
-import pdfplumber  # also used for text fallback and as renderer fallback
+import pdfplumber  # also used for TEXT fallback
 
 # ---------- Pydantic v2 ----------
 from pydantic import BaseModel, Field, field_validator
 
-# ---------- LangChain core ----------
+# ---------- LangChain Core ----------
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.runnables import RunnableLambda
@@ -59,7 +55,7 @@ from langchain_core.runnables import RunnableLambda
 from ssrai import SSRAIClient
 
 
-# ======================== Data Models ========================
+# ======================== Data models ========================
 
 class KV(BaseModel):
     key: str = Field(..., description="Field name (normalized)")
@@ -71,6 +67,7 @@ class KV(BaseModel):
     @classmethod
     def _strip_key(cls, v: str) -> str:
         return v.strip()
+
 
 class ExtractedDoc(BaseModel):
     items: List[KV] = Field(default_factory=list)
@@ -101,7 +98,6 @@ def setup_logger(level: str, log_file: Optional[str]) -> logging.Logger:
         fh.setFormatter(fmt)
         logger.addHandler(fh)
 
-    # quiet noisy libs unless debugging
     if lvl > logging.DEBUG:
         logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
         logging.getLogger("ssrai").setLevel(logging.INFO)
@@ -128,7 +124,7 @@ class PDF2JSON:
         logger: Optional[logging.Logger] = None,
         text_fallback: bool = True,
         page_chunk_chars: int = 12000,
-        force_format: Optional[str] = None,
+        force_format: Optional[str] = None,  # "dataurl" | "base64" | "generic"
         profile: Optional[str] = None,
     ):
         # RAI client
@@ -145,7 +141,7 @@ class PDF2JSON:
         self.keep_images = keep_images
         self.text_fallback = text_fallback
         self.page_chunk_chars = page_chunk_chars
-        self.force_format = force_format  # "dataurl" | "base64" | "generic" | None
+        self.force_format = force_format
 
         # logging
         self.log = logger or logging.getLogger("pdf2json")
@@ -157,7 +153,6 @@ class PDF2JSON:
             if self.allowed_keys else
             "Output any clearly labeled field names as keys.\n"
         )
-
         prompt_t = r"""
 You are a precise information-extraction engine.
 Given attached INVOICE PAGE IMAGES (PNG) or plain TEXT, extract explicit **key-value** pairs.
@@ -205,23 +200,84 @@ Rules:
 
         self.sanitize = RunnableLambda(_sanitize)
 
-    # ---------- Route preflight ----------
-    def _validate_model_route(self):
+    # ---------- normalize model.search() results ----------
+    def _iter_model_rows(self):
+        """
+        Normalize whatever ssrai.model.search() returns into dicts:
+        {"modelName": <str>, "features": <any>}
+        """
         rows = self.cli.model.search()
-        names = [r.get("modelName") for r in rows]
-        match = [r for r in rows if r.get("modelName") == self.model]
+
+        # 1) pandas DataFrame
+        try:
+            import pandas as pd  # noqa
+            if hasattr(rows, "to_dict") and hasattr(rows, "columns"):
+                cols = [str(c) for c in list(rows.columns)]
+                name_col = None
+                for c in ("modelName", "name", "model", "route"):
+                    if c in cols:
+                        name_col = c
+                        break
+                if name_col is not None:
+                    for _, r in rows.iterrows():
+                        yield {
+                            "modelName": str(r.get(name_col)),
+                            "features": r.get("features", {}) if "features" in cols else {},
+                        }
+                    return
+        except Exception:
+            pass
+
+        # 2) dict mapping
+        if isinstance(rows, dict):
+            for k, v in rows.items():
+                yield {"modelName": str(k), "features": v}
+            return
+
+        # 3) list/tuple
+        if isinstance(rows, (list, tuple)):
+            for r in rows:
+                if isinstance(r, dict):
+                    name = r.get("modelName") or r.get("name") or r.get("route") or r.get("model")
+                    yield {"modelName": str(name), "features": r.get("features", {})}
+                elif isinstance(r, str):
+                    yield {"modelName": r, "features": {}}
+                elif isinstance(r, (list, tuple)):
+                    name = r[0] if r else ""
+                    feats = r[1] if len(r) > 1 else {}
+                    yield {"modelName": str(name), "features": feats}
+                else:
+                    yield {"modelName": str(r), "features": {}}
+            return
+
+        # 4) single object fallback
+        yield {"modelName": str(rows), "features": {}}
+
+    def _validate_model_route(self):
+        models = list(self._iter_model_rows())
+        names = [m.get("modelName") for m in models]
+        self.log.info("Found %d models matching the search criteria.", len(models))
+
+        match = [m for m in models if m.get("modelName") == self.model]
         if not match:
-            raise ValueError(f"Model '{self.model}' not found. Available routes: {names}")
+            match = [m for m in models if str(m.get("modelName","")).strip().lower() == self.model.strip().lower()]
+        if not match:
+            raise ValueError(
+                f"Model '{self.model}' not found on the gateway.\n"
+                f"Available routes (first 10): {names[:10]} ..."
+            )
+
         feats = (match[0].get("features") or {})
         looks_vision = any(k in str(feats).lower() for k in ["4o", "vision", "image", "multimodal"])
         if not looks_vision:
             self.log.warning(
-                "Model '%s' may NOT be image-enabled (features=%s). "
-                "Image path might fail; TEXT fallback can still work.", self.model, feats
+                "Model '%s' may not be image-enabled (features=%s). "
+                "Image path may fail; TEXT fallback is enabled.",
+                self.model, feats
             )
         self.log.info("Using model '%s' (features=%s)", self.model, feats)
 
-    # ---------- PDF → PNG ----------
+    # ---------- PDF -> PNG ----------
     def _pdf_to_png_paths(self, pdf_path: str) -> List[str]:
         if self.dump_images:
             out_dir, temp_dir = self.dump_images, None
@@ -289,10 +345,11 @@ Rules:
                 parts.append(self._as_base64(b64))
             else:
                 parts.append(self._as_generic(b64))
-            self.log.debug("Prepared %s (%s) for format=%s", os.path.basename(p), f"{len(b64)} b64 chars", variant)
+            self.log.debug("Prepared %s (%s b64 chars) for format=%s",
+                           os.path.basename(p), len(b64), variant)
         return parts
 
-    # ---------- call with image formats (with fallback) ----------
+    # ---------- call with image formats ----------
     def _call_with_formats(self, prompt: str, paths: List[str]) -> str:
         formats = [self.force_format] if self.force_format else ["dataurl", "base64", "generic"]
         last_err = None
@@ -321,13 +378,12 @@ Rules:
                 self.log.warning("Format '%s' failed: %s", fmt, e)
         raise last_err
 
-    # ---------- TEXT fallback helpers ----------
+    # ---------- TEXT fallback ----------
     @staticmethod
     def _normalize_ws(s: str) -> str:
         s = s.replace("\r", "\n")
         lines = [ln.strip() for ln in s.split("\n")]
-        compact = []
-        blank = False
+        compact, blank = [], False
         for ln in lines:
             if not ln:
                 if not blank:
@@ -345,7 +401,7 @@ Rules:
             for i in range(total):
                 page = pdf.pages[i]
                 txt = page.extract_text() or ""
-                # stitch simple tables row-wise into text lines
+                # keep simple tables (row-wise)
                 try:
                     tables = page.extract_tables() or []
                 except Exception:
@@ -403,11 +459,11 @@ Rules:
     def run(self, pdf_path: str) -> TOrderedDict[str, str]:
         self._validate_model_route()
 
-        # Prepare prompt now (stringify PromptValue)
+        # prompt as string
         prompt = (self.prompt | self.to_text).invoke({"allowed_keys_block": self.allowed_block})
         prompt = prompt if isinstance(prompt, str) else str(prompt)
 
-        # Try images first
+        # Try images
         try:
             pngs = self._pdf_to_png_paths(pdf_path)
             if not pngs:
@@ -478,7 +534,7 @@ def main():
     ap.add_argument("--text-fallback", action="store_true", default=True,
                     help="Enable TEXT-only fallback if image calls fail (default on)")
     ap.add_argument("--page-chars", type=int, default=12000,
-                    help="Max characters per page chunk when sending TEXT fallback")
+                    help="Max chars per page chunk for TEXT fallback")
     ap.add_argument("--force-format", choices=["dataurl","base64","generic"], default=None,
                     help="Force a single image payload format (skip others)")
     ap.add_argument("--profile", default=None,
