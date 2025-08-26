@@ -1,1 +1,684 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
+"""
+LangGraph agent: PDF -> PNG -> LLM (via RAI Gateway) -> KV JSON
+
+- Uses SSRAIClient (Option A config file) and your working image payload:
+  {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+- Route preflight via model.search() (tolerant to multiple return shapes)
+- Primary: IMAGE path (PNG pages) -> chat.create
+- Fallback: TEXT-only via pdfplumber -> chat.create
+- Strict re-ask if TEXT parse fails once
+- Confidence preserved (Pydantic schema)
+- Writes merged KV map (key -> value), longest/highest-conf kept on duplicates
+- CLI compatible with your previous flags
+
+Example:
+  python pdf_to_json_agent_langgraph.py \
+    --cfg ".\\config\\rai_config.cfg" \
+    --model "azure-openai.gpt-4o" \
+    --pdf ".\\docs\\sample-invoice.pdf" \
+    --out ".\\outputs\\sample-invoice.kv.json" \
+    --log-level DEBUG --dump-images ".\\debug\\pngs" --text-fallback
+"""
+
+import os
+import re
+import json
+import time
+import base64
+import shutil
+import argparse
+import logging
+import tempfile
+from typing import List, Optional, Any, Literal, OrderedDict as TOrderedDict, TypedDict
+from collections import OrderedDict
+
+# ---------- PDF rendering ----------
+try:
+    import fitz  # PyMuPDF
+    _HAVE_FITZ = True
+except Exception:
+    _HAVE_FITZ = False
+
+import pdfplumber  # also used for TEXT fallback
+
+# ---------- Pydantic v2 ----------
+from pydantic import BaseModel, Field, field_validator
+
+# ---------- LangChain Core (prompts + parser) ----------
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+
+# ---------- LangGraph ----------
+from langgraph.graph import StateGraph, START, END
+
+# ---------- RAI SDK ----------
+from ssrai import SSRAIClient
+
+
+# ======================== Data models ========================
+
+class KV(BaseModel):
+    key: str = Field(..., description="Field name (normalized)")
+    value: str = Field(..., description="Extracted value as plain text")
+    page: int = Field(..., ge=1, description="1-based page number")
+    confidence: float = Field(..., ge=0, le=1, description="0..1 model confidence")
+
+    @field_validator("key")
+    @classmethod
+    def _strip_key(cls, v: str) -> str:
+        return v.strip()
+
+
+class ExtractedDoc(BaseModel):
+    items: List[KV] = Field(default_factory=list)
+
+
+# ======================== Logging ========================
+
+def setup_logger(level: str, log_file: Optional[str]) -> logging.Logger:
+    lvl = getattr(logging, (level or "INFO").upper(), logging.INFO)
+    logger = logging.getLogger("pdf2json")
+    logger.setLevel(lvl)
+    logger.handlers.clear()
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    ch = logging.StreamHandler()
+    ch.setLevel(lvl)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+
+    if log_file:
+        os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(lvl)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+
+    if lvl > logging.DEBUG:
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+        logging.getLogger("ssrai").setLevel(logging.INFO)
+        logging.getLogger("pdfplumber").setLevel(logging.WARNING)
+
+    return logger
+
+
+# ======================== Helpers (non-graph) ========================
+
+def build_prompts(allowed_keys: Optional[List[str]]) -> tuple[str, str, PydanticOutputParser]:
+    parser = PydanticOutputParser(pydantic_object=ExtractedDoc)
+    allowed_block = (
+        "Only output keys from this list:\n- " + "\n- ".join(allowed_keys) + "\n"
+        if allowed_keys else
+        "Output any clearly labeled field names as keys.\n"
+    )
+    prompt_t = r"""
+You are a precise information-extraction engine.
+Given attached INVOICE PAGE IMAGES (PNG) or plain TEXT, extract explicit **key-value** pairs.
+
+Rules:
+- {{ allowed_keys_block }}
+- Keep values verbatim; normalize whitespace only.
+- If a field repeats across pages, still return it (we will dedupe later).
+- If nothing certain is present, return {"items": []}.
+- Estimate confidence between 0 and 1.
+- Return **ONLY** valid JSON following the schema.
+
+{{format_instructions}}
+""".strip()
+    strict_suffix = "\n\nREMINDER: Output JSON ONLY. No markdown, no prose, no comments."
+
+    prompt = PromptTemplate(
+        template=prompt_t,
+        template_format="jinja2",
+        input_variables=["allowed_keys_block"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    ).format(allowed_keys_block=allowed_block)
+
+    prompt_strict = PromptTemplate(
+        template=prompt_t + strict_suffix,
+        template_format="jinja2",
+        input_variables=["allowed_keys_block"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    ).format(allowed_keys_block=allowed_block)
+
+    return prompt, prompt_strict, parser
+
+
+def sanitize_json_text(text: str) -> str:
+    """Extract the JSON object from model output, tolerating accidental wrappers."""
+    if not isinstance(text, str):
+        text = str(text)
+    try:
+        json.loads(text)
+        return text
+    except Exception:
+        pass
+    m = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        return m.group(1)
+    s, e = text.find("{"), text.rfind("}")
+    if s != -1 and e != -1 and e > s:
+        return text[s:e+1]
+    return text  # may still fail upstream; caller decides
+
+
+def validate_model_route(cli: SSRAIClient, route: str, log: logging.Logger) -> None:
+    """Preflight: check that the requested route exists; warn if not image-capable."""
+    def _iter_model_rows():
+        try:
+            rows = cli.model.search(query=route)
+        except Exception:
+            rows = cli.model.search()
+
+        # pandas DataFrame
+        try:
+            import pandas as pd  # noqa
+            if hasattr(rows, "to_dict") and hasattr(rows, "columns"):
+                cols = [str(c) for c in list(rows.columns)]
+                name_col = None
+                for c in ("modelName", "name", "model", "route"):
+                    if c in cols:
+                        name_col = c
+                        break
+                if name_col is not None:
+                    for _, r in rows.iterrows():
+                        yield {
+                            "modelName": str(r.get(name_col)),
+                            "features": r.get("features", {}) if "features" in cols else {},
+                        }
+                    return
+        except Exception:
+            pass
+
+        # dict mapping
+        if isinstance(rows, dict):
+            for k, v in rows.items():
+                yield {"modelName": str(k), "features": v}
+            return
+
+        # list/tuple
+        if isinstance(rows, (list, tuple)):
+            for r in rows:
+                if isinstance(r, dict):
+                    name = r.get("modelName") or r.get("name") or r.get("route") or r.get("model")
+                    yield {"modelName": str(name), "features": r.get("features", {})}
+                elif isinstance(r, str):
+                    yield {"modelName": r, "features": {}}
+                elif isinstance(r, (list, tuple)):
+                    name = r[0] if r else ""
+                    feats = r[1] if len(r) > 1 else {}
+                    yield {"modelName": str(name), "features": feats}
+                else:
+                    yield {"modelName": str(r), "features": {}}
+            return
+
+        # fallback
+        yield {"modelName": str(rows), "features": {}}
+
+    models = list(_iter_model_rows())
+    names = [m.get("modelName") for m in models]
+    log.info("Found %d models matching the search criteria.", len(models))
+    match = [m for m in models if (m.get("modelName") or "").strip().lower() == route.strip().lower()]
+    if not match:
+        raise ValueError(
+            f"Model '{route}' not found on the gateway.\n"
+            f"Available routes (first 10): {names[:10]} ..."
+        )
+
+    feats = (match[0].get("features") or {})
+    looks_vision = any(k in str(feats).lower() for k in ["4o", "vision", "image", "multimodal"])
+    if not looks_vision:
+        log.warning(
+            "Model '%s' may not be image-enabled (features=%s). "
+            "Image path may fail; TEXT fallback is %s.",
+            route, feats, "ON"
+        )
+    log.info("Using model '%s' (features=%s)", route, feats)
+
+
+def pdf_to_png(pdf_path: str, max_pages: int, dpi: int,
+               dump_images: Optional[str], keep_images: bool,
+               log: logging.Logger) -> tuple[List[str], Optional[str]]:
+    if dump_images:
+        out_dir, temp_dir = dump_images, None
+        os.makedirs(out_dir, exist_ok=True)
+    else:
+        temp_dir = tempfile.mkdtemp(prefix="pdfpng_")
+        out_dir = temp_dir
+
+    paths: List[str] = []
+    t0 = time.perf_counter()
+    if _HAVE_FITZ:
+        log.info("Rendering PDF with PyMuPDF @%ddpi (max_pages=%d)...", dpi, max_pages)
+        doc = fitz.open(pdf_path)
+        total = min(doc.page_count, max_pages)
+        log.info("PDF has %d pages; rendering %d.", doc.page_count, total)
+        for i in range(total):
+            page = doc.load_page(i)
+            mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            out_path = os.path.join(out_dir, f"page_{i+1:03d}.png")
+            pix.save(out_path)
+            paths.append(out_path)
+            log.debug("Rendered page %d -> %s (%dx%d)", i+1, out_path, pix.width, pix.height)
+        doc.close()
+    else:
+        log.info("Rendering PDF with pdfplumber @%ddpi (max_pages=%d)...", dpi, max_pages)
+        with pdfplumber.open(pdf_path) as pdf:
+            total = min(len(pdf.pages), max_pages)
+            log.info("PDF has %d pages; rendering %d.", len(pdf.pages), total)
+            for i in range(total):
+                page = pdf.pages[i]
+                img = page.to_image(resolution=dpi).original  # PIL.Image
+                out_path = os.path.join(out_dir, f"page_{i+1:03d}.png")
+                img.save(out_path, format="PNG")
+                paths.append(out_path)
+                log.debug("Rendered page %d -> %s (%s)", i+1, out_path, str(img.size))
+
+    dt = (time.perf_counter() - t0) * 1000
+    total_mb = sum(os.path.getsize(p) for p in paths) / (1024 * 1024) if paths else 0.0
+    log.info("Rendered %d PNG(s) in %.1f ms (%.1f MB).", len(paths), dt, total_mb)
+
+    # decide cleanup dir
+    temp_render_dir = None if keep_images or dump_images else temp_dir
+    return paths, temp_render_dir
+
+
+def _image_url_part_from_b64(b64: str, mime: str = "image/png") -> dict:
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+
+
+def paths_to_payloads(paths: List[str], log: logging.Logger, mime: str = "image/png") -> List[dict]:
+    parts = []
+    for p in paths:
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        parts.append(_image_url_part_from_b64(b64, mime=mime))
+        log.debug("Prepared %s (%s b64 chars) for image_url payload", os.path.basename(p), len(b64))
+    return parts
+
+
+def call_with_images(cli: SSRAIClient, model: str, prompt: str, paths: List[str],
+                     max_tokens: int, temperature: float, log: logging.Logger) -> str:
+    content = [{"type": "text", "text": prompt}] + paths_to_payloads(paths, log=log, mime="image/png")
+    messages = [
+        {"role": "user", "content": content},  # your working order
+        {"role": "system", "content": "You are a precise data-extraction assistant. Output JSON ONLY."},
+    ]
+    log.info("Calling model with IMAGE payload — %d page image(s).", len(paths))
+    t0 = time.perf_counter()
+    resp = cli.chat.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        n=1,
+    )
+    log.info("RAI chat.create (IMAGE) ok in %.1f ms", (time.perf_counter()-t0)*1000)
+    msg = resp["choices"][0]["message"]
+    out = msg.get("content", "")
+    if isinstance(out, list) and out and isinstance(out[0], dict):
+        out = out[0].get("text", "")
+    return str(out)
+
+
+def normalize_ws(s: str) -> str:
+    s = s.replace("\r", "\n")
+    lines = [ln.strip() for ln in s.split("\n")]
+    compact, blank = [], False
+    for ln in lines:
+        if not ln:
+            if not blank:
+                compact.append("")
+            blank = True
+        else:
+            compact.append(ln)
+            blank = False
+    return "\n".join(compact).strip()
+
+
+def text_blocks_from_pdf(pdf_path: str, max_pages: int, page_chunk_chars: int) -> List[str]:
+    blocks: List[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        total = min(len(pdf.pages), max_pages)
+        for i in range(total):
+            page = pdf.pages[i]
+            txt = page.extract_text() or ""
+            try:
+                tables = page.extract_tables() or []
+            except Exception:
+                tables = []
+            for t in tables:
+                for row in (t or []):
+                    if not row:
+                        continue
+                    cells = [(c or "").strip() for c in row]
+                    if any(cells):
+                        txt += "\n" + " | ".join(cells)
+            txt = normalize_ws(txt)
+            if not txt:
+                continue
+            for j in range(0, len(txt), page_chunk_chars):
+                chunk = txt[j:j+page_chunk_chars]
+                blocks.append(f"PAGE {i+1} CHUNK {j//page_chunk_chars+1}:\n{chunk}")
+    return blocks
+
+
+def call_text_only(cli: SSRAIClient, model: str, prompt: str, text_blocks: List[str],
+                   max_tokens: int, temperature: float, log: logging.Logger) -> str:
+    log.info("Calling model with TEXT fallback: %d block(s)", len(text_blocks))
+    content = [{"type": "text", "text": prompt}]
+    for blk in text_blocks:
+        content.append({"type": "text", "text": blk})
+    messages = [
+        {"role": "system", "content": "You are a precise extraction engine. Reply ONLY with JSON."},
+        {"role": "user", "content": content},
+    ]
+    t0 = time.perf_counter()
+    resp = cli.chat.create(
+        model=model, messages=messages, max_tokens=max_tokens, temperature=temperature, n=1
+    )
+    log.info("RAI chat.create (TEXT) ok in %.1f ms", (time.perf_counter()-t0)*1000)
+    msg = resp["choices"][0]["message"]
+    out = msg.get("content", "")
+    if isinstance(out, list) and out and isinstance(out[0], dict):
+        out = out[0].get("text", "")
+    return str(out)
+
+
+def merge_items(items: List[KV]) -> List[KV]:
+    by_key: dict[str, KV] = {}
+    for it in items:
+        norm = re.sub(r"[^a-z0-9]+", " ", it.key.lower()).strip()
+        if norm not in by_key:
+            by_key[norm] = it
+        else:
+            keep = by_key[norm]
+            if len(it.value) > len(keep.value) or it.confidence > keep.confidence:
+                by_key[norm] = it
+    return [by_key[k] for k in OrderedDict.fromkeys(by_key.keys())]
+
+
+# ======================== LangGraph State ========================
+
+class AgentState(TypedDict, total=False):
+    # inputs / config
+    cfg: str
+    model: str
+    pdf: str
+    out: Optional[str]
+    allowed_keys: Optional[List[str]]
+    max_pages: int
+    dpi: int
+    max_tokens: int
+    temperature: float
+    dump_images: Optional[str]
+    keep_images: bool
+    text_fallback: bool
+    page_chunk_chars: int
+    profile: Optional[str]
+    log_level: str
+    log_file: Optional[str]
+
+    # runtime
+    log: Any
+    cli: Any
+    prompt: str
+    prompt_strict: str
+    parser: Any
+
+    png_paths: List[str]
+    temp_render_dir: Optional[str]
+    path_taken: Literal["image", "image_failed", "text"]
+    need_strict: bool
+    raw: str
+    payload: str
+    doc: ExtractedDoc
+    merged: List[KV]
+    kv_map: TOrderedDict[str, str]
+
+
+# ======================== LangGraph Nodes ========================
+
+def node_init(state: AgentState) -> AgentState:
+    log = setup_logger(state.get("log_level", "INFO"), state.get("log_file"))
+    cli = SSRAIClient(config_file=state["cfg"], profile=state.get("profile")) if state.get("profile") \
+        else SSRAIClient(config_file=state["cfg"])
+    validate_model_route(cli, state["model"], log)
+    prompt, prompt_strict, parser = build_prompts(state.get("allowed_keys"))
+    return {"log": log, "cli": cli, "prompt": prompt, "prompt_strict": prompt_strict, "parser": parser}
+
+
+def node_render(state: AgentState) -> AgentState:
+    paths, temp_dir = pdf_to_png(
+        pdf_path=state["pdf"],
+        max_pages=state["max_pages"],
+        dpi=state["dpi"],
+        dump_images=state.get("dump_images"),
+        keep_images=state.get("keep_images", False),
+        log=state["log"],
+    )
+    if not paths:
+        raise RuntimeError("No PNGs produced from PDF.")
+    return {"png_paths": paths, "temp_render_dir": temp_dir}
+
+
+def node_try_image(state: AgentState) -> AgentState:
+    log = state["log"]
+    try:
+        raw = call_with_images(
+            cli=state["cli"], model=state["model"], prompt=state["prompt"],
+            paths=state["png_paths"], max_tokens=state["max_tokens"],
+            temperature=state["temperature"], log=log
+        )
+        return {"raw": raw, "path_taken": "image"}
+    except Exception as e:
+        log.warning("Image path failed: %s", e)
+        return {"path_taken": "image_failed"}
+
+
+def cond_after_image(state: AgentState) -> Literal["image_ok", "image_failed_no_fallback", "image_failed_with_fallback"]:
+    if state["path_taken"] == "image":
+        return "image_ok"
+    # image failed:
+    if not state.get("text_fallback", True):
+        return "image_failed_no_fallback"
+    return "image_failed_with_fallback"
+
+
+def node_extract_text(state: AgentState) -> AgentState:
+    text_blocks = text_blocks_from_pdf(
+        pdf_path=state["pdf"],
+        max_pages=state["max_pages"],
+        page_chunk_chars=state["page_chunk_chars"]
+    )
+    if not text_blocks:
+        raise RuntimeError("TEXT fallback found no extractable text in the PDF.")
+    raw = call_text_only(
+        cli=state["cli"], model=state["model"], prompt=state["prompt"],
+        text_blocks=text_blocks, max_tokens=state["max_tokens"],
+        temperature=state["temperature"], log=state["log"]
+    )
+    return {"raw": raw, "path_taken": "text", "need_strict": False}
+
+
+def node_sanitize_parse(state: AgentState) -> AgentState:
+    log = state["log"]
+    payload = sanitize_json_text(state["raw"])
+    try:
+        doc = state["parser"].parse(payload)
+        return {"payload": payload, "doc": doc}
+    except Exception as e:
+        log.warning("Parse failed: %s", e)
+        # If we came from TEXT and haven't retried strictly, signal strict path
+        if state.get("path_taken") == "text" and not state.get("need_strict"):
+            return {"need_strict": True}
+        # Otherwise, escalate
+        raise
+
+
+def cond_after_parse(state: AgentState) -> Literal["ok", "strict"]:
+    return "strict" if state.get("need_strict") else "ok"
+
+
+def node_text_strict(state: AgentState) -> AgentState:
+    # Do a strict re-ask on TEXT path
+    text_blocks = text_blocks_from_pdf(
+        pdf_path=state["pdf"],
+        max_pages=state["max_pages"],
+        page_chunk_chars=state["page_chunk_chars"]
+    )
+    if not text_blocks:
+        raise RuntimeError("Strict TEXT re-ask: no extractable text.")
+    raw = call_text_only(
+        cli=state["cli"], model=state["model"], prompt=state["prompt_strict"],
+        text_blocks=text_blocks, max_tokens=state["max_tokens"],
+        temperature=state["temperature"], log=state["log"]
+    )
+    return {"raw": raw, "need_strict": False}
+
+
+def node_merge(state: AgentState) -> AgentState:
+    items = (state["doc"].items or [])
+    state["log"].info("Model returned %d item(s).", len(items))
+    merged = merge_items(items)
+    state["log"].info("After merge: %d unique key(s).", len(merged))
+    for it in merged:
+        state["log"].debug("KV: %r = %r (p%d, conf=%.2f)", it.key, it.value, it.page, it.confidence)
+    kv_map = OrderedDict((it.key, it.value) for it in merged)
+    return {"merged": merged, "kv_map": kv_map}
+
+
+def node_cleanup(state: AgentState) -> AgentState:
+    temp_dir = state.get("temp_render_dir")
+    if temp_dir and not state.get("keep_images"):
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            state["log"].debug("Deleted temp dir %s", temp_dir)
+        except Exception as e:
+            state["log"].warning("Failed to delete temp render dir: %s", e)
+    return {}
+
+
+# ======================== Build Graph ========================
+
+def build_app() -> StateGraph:
+    g = StateGraph(AgentState)
+    g.add_node("init", node_init)
+    g.add_node("render", node_render)
+    g.add_node("try_image", node_try_image)
+    g.add_node("extract_text", node_extract_text)
+    g.add_node("sanitize_parse", node_sanitize_parse)
+    g.add_node("text_strict", node_text_strict)
+    g.add_node("merge", node_merge)
+    g.add_node("cleanup", node_cleanup)
+
+    g.add_edge(START, "init")
+    g.add_edge("init", "render")
+    g.add_edge("render", "try_image")
+
+    g.add_conditional_edges(
+        "try_image",
+        cond_after_image,
+        {
+            "image_ok": "sanitize_parse",
+            "image_failed_with_fallback": "extract_text",
+            "image_failed_no_fallback": END,  # will end early; caller should notice lack of output
+        },
+    )
+
+    g.add_conditional_edges(
+        "sanitize_parse",
+        cond_after_parse,
+        {
+            "ok": "merge",
+            "strict": "text_strict",
+        },
+    )
+    g.add_edge("text_strict", "sanitize_parse")
+    g.add_edge("merge", "cleanup")
+    g.add_edge("cleanup", END)
+
+    return g
+
+
+# ======================== CLI ========================
+
+def _default_out(pdf_path: str) -> str:
+    base, _ = os.path.splitext(pdf_path)
+    return f"{base}.kv.json"
+
+
+def main():
+    ap = argparse.ArgumentParser(description="PDF -> PNG -> LLM KV extractor (RAI, LangGraph, with TEXT fallback)")
+    ap.add_argument("--cfg", required=True, help="Path to RAI config file ([DEFAULT] format)")
+    ap.add_argument("--model", required=True, help="LLM route (must exist on your gateway)")
+    ap.add_argument("--pdf", required=True, help="Input PDF path")
+    ap.add_argument("--out", default=None, help="Output JSON path (default: <pdf>.kv.json)")
+    ap.add_argument("--allowed_keys", default=None, help="Comma-separated whitelist of keys (optional)")
+    ap.add_argument("--max-pages", type=int, default=10, help="Max pages to consider")
+    ap.add_argument("--dpi", type=int, default=200, help="PNG render DPI")
+    ap.add_argument("--max-tokens", type=int, default=1300, help="Max tokens for model output")
+    ap.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature")
+    ap.add_argument("--dump-images", default=None, help="Folder to save rendered PNGs (kept)")
+    ap.add_argument("--keep-images", action="store_true", help="Keep temp images even if dump not set")
+    ap.add_argument("--log-level", default="INFO", choices=["DEBUG","INFO","WARNING","ERROR"], help="Logging verbosity")
+    ap.add_argument("--log-file", default=None, help="Optional log file path")
+    ap.add_argument("--text-fallback", action="store_true", default=True,
+                    help="Enable TEXT-only fallback if image calls fail (default on)")
+    ap.add_argument("--page-chars", type=int, default=12000,
+                    help="Max chars per page chunk for TEXT fallback")
+    ap.add_argument("--profile", default=None,
+                    help="Optional RAI profile (e.g., NO_GUARDRAIL)")
+
+    args = ap.parse_args()
+    allowed = [k.strip()] if (args.allowed_keys and "," not in args.allowed_keys) else (
+        [k.strip() for k in args.allowed_keys.split(",")] if args.allowed_keys else None
+    )
+
+    init_state: AgentState = {
+        "cfg": args.cfg,
+        "model": args.model,
+        "pdf": args.pdf,
+        "out": args.out or _default_out(args.pdf),
+        "allowed_keys": allowed,
+        "max_pages": args.max_pages,
+        "dpi": args.dpi,
+        "max_tokens": args.max_tokens,
+        "temperature": args.temperature,
+        "dump_images": args.dump_images,
+        "keep_images": bool(args.keep_images),
+        "text_fallback": bool(args.text_fallback),
+        "page_chunk_chars": args.page_chars,
+        "profile": args.profile,
+        "log_level": args.log_level,
+        "log_file": args.log_file,
+    }
+
+    app = build_app().compile()
+
+    # Run the graph to completion
+    final_state: AgentState = app.invoke(init_state)
+
+    # Write output if available
+    kv_map = final_state.get("kv_map")
+    if not kv_map:
+        # If image failed and text_fallback was disabled, kv_map may be empty
+        raise RuntimeError("No KV output produced (image path failed and TEXT fallback disabled?).")
+
+    out_path = init_state["out"]
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(kv_map, f, indent=2, ensure_ascii=False)
+    final_state["log"].info("Wrote key–value JSON to: %s", out_path)
+
+
+if __name__ == "__main__":
+    main()
