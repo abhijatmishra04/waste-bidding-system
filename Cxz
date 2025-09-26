@@ -1,1 +1,417 @@
+import time
+import math
+import json
+import logging
+import threading
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+import requests
+
+# ------------ Logger ------------
+logger = logging.getLogger("RAIGatewayClient")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(message)s")  # we emit JSON strings
+handler.setFormatter(formatter)
+if not logger.handlers:
+    logger.addHandler(handler)
+
+# ------------ Circuit Breaker ------------
+class CircuitBreaker:
+    def __init__(self, fail_threshold: int = 10, half_open_after: float = 30.0):
+        self.state = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+        self.fail_count = 0
+        self.opened_at = 0.0
+        self.fail_threshold = fail_threshold
+        self.half_open_after = half_open_after
+        self._lock = threading.Lock()
+
+    def allow(self) -> bool:
+        with self._lock:
+            if self.state == "OPEN" and (time.time() - self.opened_at) > self.half_open_after:
+                self.state = "HALF_OPEN"
+            return self.state != "OPEN"
+
+    def on_success(self) -> None:
+        with self._lock:
+            self.fail_count = 0
+            self.state = "CLOSED"
+
+    def on_failure(self) -> None:
+        with self._lock:
+            self.fail_count += 1
+            if self.fail_count >= self.fail_threshold and self.state != "OPEN":
+                self.state = "OPEN"
+                self.opened_at = time.time()
+
+    def get_state(self) -> str:
+        with self._lock:
+            return self.state
+
+# ------------ Error Taxonomy ------------
+class RAIError(Exception):
+    def __init__(self, code: str, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
+# ------------ Client ------------
+class RAIGatewayClient:
+    """
+    Productionâhardened utility to call RAI Gateway:
+      - OAuth (client credentials)
+      - Retries with exponential backoff + jitter, Retry-After support
+      - Max total retry time
+      - Circuit breaker
+      - Structured JSON logging (PII-safe)
+      - Sliding window latency percentiles (p50/p95)
+      - HTTP connection pooling
+      - Token refresh singleâflight
+      - Error taxonomy
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        token_url: Optional[str] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        rai_client_id: Optional[str] = None,
+        default_guardrail_profile: Optional[str] = "WITH_GUARDRAIL",
+        max_retries: int = 3,
+        backoff_base_seconds: float = 0.5,
+        backoff_max_seconds: float = 10.0,
+        max_total_retry_seconds: float = 30.0,
+        connect_timeout_seconds: float = 3.0,
+        read_timeout_seconds: float = 60.0,
+        metrics_window_size: int = 5000,
+        breaker_fail_threshold: int = 10,
+        breaker_half_open_after: float = 30.0,
+        on_failure: Optional[Callable[[Dict[str, Any]], None]] = None,
+        session: Optional[requests.Session] = None,
+        extra_log_fields: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token_url = token_url
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.rai_client_id = rai_client_id
+        self.default_guardrail_profile = default_guardrail_profile
+
+        self.max_retries = max(0, int(max_retries))
+        self.backoff_base_seconds = float(backoff_base_seconds)
+        self.backoff_max_seconds = float(backoff_max_seconds)
+        self.max_total_retry_seconds = float(max_total_retry_seconds)
+        self.connect_timeout_seconds = float(connect_timeout_seconds)
+        self.read_timeout_seconds = float(read_timeout_seconds)
+
+        self.on_failure = on_failure
+        self.extra_log_fields = extra_log_fields or {}
+
+        # HTTP session with pooling
+        self._session = session or requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=200, max_retries=0)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+
+        # Metrics (thread-safe, sliding window)
+        self._latencies_ms: Deque[float] = deque(maxlen=int(metrics_window_size))
+        self._total_calls = 0
+        self._failures = 0
+        self._lock = threading.Lock()
+
+        # Circuit breaker
+        self._breaker = CircuitBreaker(fail_threshold=breaker_fail_threshold, half_open_after=breaker_half_open_after)
+
+        # OAuth token cache + singleâflight
+        self._access_token: Optional[str] = None
+        self._token_expiry_epoch: Optional[float] = None  # seconds since epoch
+        self._token_lock = threading.Lock()
+        self._token_refresh_in_flight = False
+
+    # ---------------- OAuth ----------------
+    def _get_access_token(self) -> Optional[str]:
+        if not (self.token_url and self.client_id and self.client_secret):
+            return None  # assume upstream gateway allows keyless or external auth
+
+        now = time.time()
+        with self._token_lock:
+            if self._access_token and self._token_expiry_epoch and now < self._token_expiry_epoch - 30:
+                return self._access_token
+
+            # If another thread is already refreshing, wait briefly
+            if self._token_refresh_in_flight:
+                # Wait up to 2 seconds for ongoing refresh
+                end = time.time() + 2.0
+                while self._token_refresh_in_flight and time.time() < end:
+                    time.sleep(0.05)
+                return self._access_token
+
+            self._token_refresh_in_flight = True
+
+        try:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            }
+            resp = self._session.post(self.token_url, data=data, timeout=(self.connect_timeout_seconds, self.read_timeout_seconds))
+            resp.raise_for_status()
+            payload = resp.json()
+            token = payload.get("access_token")
+            if not token:
+                raise RAIError("Auth.NoToken", "OAuth token missing in response")
+            expires_in = float(payload.get("expires_in", 3600))
+            with self._token_lock:
+                self._access_token = token
+                self._token_expiry_epoch = now + expires_in
+            self._log_json(event="oauth_success", msg="Obtained access token", extra={"expires_in": expires_in})
+            return self._access_token
+        except requests.HTTPError as e:
+            sc = e.response.status_code if e.response is not None else None
+            self._log_json(level="error", event="oauth_http_error", msg=str(e), extra={"status": sc})
+            raise RAIError("Auth.HttpError", f"OAuth HTTP error: {e}", status_code=sc)
+        except Exception as e:
+            self._log_json(level="error", event="oauth_error", msg=str(e))
+            raise RAIError("Auth.Error", f"OAuth error: {e}")
+        finally:
+            with self._token_lock:
+                self._token_refresh_in_flight = False
+
+    # ------------- Backoff Helper -------------
+    def _compute_backoff(self, attempt: int) -> float:
+        # Exponential backoff with full jitter
+        base = self.backoff_base_seconds * (2 ** attempt)
+        sleep = min(base, self.backoff_max_seconds)
+        import random
+        return random.uniform(0, sleep)
+
+    # ------------- Percentiles ----------------
+    @staticmethod
+    def _percentile(sorted_values: List[float], p: float) -> float:
+        if not sorted_values:
+            return 0.0
+        if p <= 0:
+            return sorted_values[0]
+        if p >= 100:
+            return sorted_values[-1]
+        k = (len(sorted_values) - 1) * (p / 100.0)
+        f = math.floor(k)
+        c = math.ceil(k)
+        if f == c:
+            return sorted_values[int(k)]
+        d0 = sorted_values[f] * (c - k)
+        d1 = sorted_values[c] * (k - f)
+        return d0 + d1
+
+    def get_metrics(self) -> Dict[str, Any]:
+        with self._lock:
+            lat = list(self._latencies_ms)
+            total = self._total_calls
+            fails = self._failures
+        lat_sorted = sorted(lat)
+        p50 = self._percentile(lat_sorted, 50.0) if lat_sorted else 0.0
+        p95 = self._percentile(lat_sorted, 95.0) if lat_sorted else 0.0
+        avg = sum(lat_sorted) / len(lat_sorted) if lat_sorted else 0.0
+        success = total - fails
+        success_rate = (success / total * 100.0) if total else 0.0
+        return {
+            "total_calls": total,
+            "failures": fails,
+            "success_rate_pct": round(success_rate, 2),
+            "avg_latency_ms": round(avg, 2),
+            "p50_latency_ms": round(p50, 2),
+            "p95_latency_ms": round(p95, 2),
+            "breaker_state": self._breaker.get_state(),
+        }
+
+    # ------------- Structured Log Helper -------------
+    def _log_json(self, level: str = "info", event: str = "event", msg: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+        payload = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "event": event,
+            "message": msg,
+        }
+        payload.update(self.extra_log_fields)
+        if extra:
+            payload.update(extra)
+        line = json.dumps(payload, ensure_ascii=False)
+        getattr(logger, level, logger.info)(line)
+
+    # ------------- Core Call (Chat-style) -------------
+    def call_chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        guardrail_profile: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+        endpoint: str = "/gateway/chat",
+        extra_payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Calls RAI Gateway's chat endpoint with retries & backoff.
+        Returns the JSON response on success. Raises on final failure.
+        """
+
+        if not self._breaker.allow():
+            self._record_failure()
+            raise RAIError("Circuit.Open", "Circuit breaker is OPEN")
+
+        url = f"{self.base_url}{endpoint}"
+        guardrail = guardrail_profile or self.default_guardrail_profile
+
+        merged_headers = {
+            "Content-Type": "application/json",
+        }
+        if self.rai_client_id:
+            merged_headers["rai_client_id"] = self.rai_client_id
+        if headers:
+            merged_headers.update(headers)
+
+        # OAuth (if configured)
+        token = None
+        if self.token_url and self.client_id and self.client_secret:
+            token = self._get_access_token()
+        if token:
+            merged_headers["Authorization"] = f"Bearer {token}"
+
+        payload = {
+            "model": model,
+            "messages": messages,  # DO NOT LOG THIS (PII)
+        }
+        if guardrail:
+            payload["guardrail_profile"] = guardrail
+        if extra_payload:
+            payload.update(extra_payload)
+
+        start_overall = time.perf_counter()
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                t0 = time.perf_counter()
+                resp = self._session.post(
+                    url,
+                    headers=merged_headers,
+                    data=json.dumps(payload),
+                    timeout=(self.connect_timeout_seconds, self.read_timeout_seconds),
+                )
+                latency_ms = (time.perf_counter() - t0) * 1000.0
+
+                with self._lock:
+                    self._total_calls += 1
+                    self._latencies_ms.append(latency_ms)
+
+                # Retryable server errors
+                if resp.status_code >= 500:
+                    raise requests.HTTPError(f"Server error {resp.status_code}", response=resp)
+
+                # Non-retryable 4xx except 408/429
+                if 400 <= resp.status_code < 500 and resp.status_code not in (408, 429):
+                    self._breaker.on_failure()
+                    self._record_failure()
+                    self._log_json(
+                        level="warning",
+                        event="rai_non_retryable",
+                        msg="Non-retryable client error",
+                        extra={
+                            "status": resp.status_code,
+                            "attempt": attempt + 1,
+                            "model": model,
+                            "profile": guardrail,
+                        },
+                    )
+                    resp.raise_for_status()  # raise to caller as HTTPError
+                    # unreachable
+
+                resp.raise_for_status()
+                # SUCCESS
+                self._breaker.on_success()
+                self._log_json(
+                    event="rai_success",
+                    msg="RAI call success",
+                    extra={
+                        "status": resp.status_code,
+                        "attempt": attempt + 1,
+                        "latency_ms": round(latency_ms, 2),
+                        "model": model,
+                        "profile": guardrail,
+                    },
+                )
+                return resp.json()
+
+            except Exception as e:
+                last_exception = e
+                self._breaker.on_failure()
+                self._record_failure()
+
+                retryable_statuses = {408, 429, 500, 502, 503, 504}
+                should_retry = False
+                retry_after_s = None
+                status_code = None
+
+                if isinstance(e, requests.HTTPError) and getattr(e, "response", None) is not None:
+                    status_code = e.response.status_code
+                    should_retry = status_code in retryable_statuses
+                    if status_code in (429, 503):
+                        ra = e.response.headers.get("Retry-After")
+                        if ra and ra.isdigit():
+                            retry_after_s = float(ra)
+                elif isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                    should_retry = True
+
+                elapsed = (time.perf_counter() - start_overall)
+                final_attempt = attempt >= self.max_retries or (elapsed >= self.max_total_retry_seconds)
+
+                # Log the failure event (structured)
+                self._log_json(
+                    level="warning",
+                    event="rai_failure",
+                    msg=str(e),
+                    extra={
+                        "status": status_code,
+                        "attempt": attempt + 1,
+                        "max_retries": self.max_retries,
+                        "elapsed_s": round(elapsed, 3),
+                        "model": model,
+                        "profile": guardrail,
+                        "breaker": self._breaker.get_state(),
+                        "retry_planned": bool(should_retry and not final_attempt),
+                    },
+                )
+
+                # Callback for external counters (e.g., Locust custom event)
+                if self.on_failure:
+                    try:
+                        self.on_failure({
+                            "attempt": attempt + 1,
+                            "max_retries": self.max_retries,
+                            "error": str(e),
+                            "url": url,
+                            "status": status_code,
+                        })
+                    except Exception as cb_err:
+                        self._log_json(level="error", event="failure_callback_error", msg=str(cb_err))
+
+                if (not should_retry) or final_attempt:
+                    break
+
+                # Sleep with Retry-After or exponential jitter
+                sleep_s = retry_after_s if retry_after_s is not None else self._compute_backoff(attempt)
+                time.sleep(min(sleep_s, self.backoff_max_seconds))
+
+        # After exhausting retries
+        metrics = self.get_metrics()
+        self._log_json(
+            level="error",
+            event="rai_ultimate_failure",
+            msg=f"RAI call failed after {self.max_retries + 1} attempts",
+            extra=metrics,
+        )
+        raise RAIError("Call.Failed", f"RAI call failed after {self.max_retries + 1} attempts") from last_exception
+
+    # ------------- Helpers -------------
+    def _record_failure(self) -> None:
+        with self._lock:
+            self._failures += 1
 
