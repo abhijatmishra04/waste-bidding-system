@@ -1,14 +1,251 @@
-from rai_gateway_client import RAIGatewayClient
+import os, time, math, json, logging, threading, random
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional
+from ssrai import SSRAIClient
 
-client = RAIGatewayClient(config_file="src/rai_config.cfg")
+# ------------ Logger ------------
+logger = logging.getLogger("RAIGatewayClient")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(message)s")  # JSON logs
+handler.setFormatter(formatter)
+if not logger.handlers:
+    logger.addHandler(handler)
 
-resp = client.call_chat(
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Give me a JSON with a random number."},
-    ],
-    model="azure-openai.gpt-4o",
-)
 
-print("Response:", resp)
-print("Metrics:", client.get_metrics())
+# ------------ Circuit Breaker ------------
+class CircuitBreaker:
+    def __init__(self, fail_threshold: int = 10, half_open_after: float = 30.0):
+        self.state = "CLOSED"
+        self.fail_count = 0
+        self.opened_at = 0.0
+        self.fail_threshold = fail_threshold
+        self.half_open_after = half_open_after
+        self._lock = threading.Lock()
+
+    def allow(self) -> bool:
+        with self._lock:
+            if self.state == "OPEN" and (time.time() - self.opened_at) > self.half_open_after:
+                self.state = "HALF_OPEN"
+            return self.state != "OPEN"
+
+    def on_success(self) -> None:
+        with self._lock:
+            self.fail_count = 0
+            self.state = "CLOSED"
+
+    def on_failure(self) -> None:
+        with self._lock:
+            self.fail_count += 1
+            if self.fail_count >= self.fail_threshold and self.state != "OPEN":
+                self.state = "OPEN"
+                self.opened_at = time.time()
+
+    def get_state(self) -> str:
+        with self._lock:
+            return self.state
+
+
+# ------------ Error Taxonomy ------------
+class RAIError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+# ------------ Client ------------
+class RAIGatewayClient:
+    """
+    Production wrapper around SSRAIClient:
+      - Supports PAT & OAuth (auto-detects from config)
+      - Retries with exponential backoff + jitter
+      - Circuit breaker
+      - Structured JSON logging (PII-safe)
+      - Sliding window latency metrics (p50/p95/avg)
+      - Failure callbacks
+    """
+
+    def __init__(
+        self,
+        config_file: str,
+        profile: Optional[str] = None,
+        max_retries: int = 3,
+        backoff_base_seconds: float = 0.5,
+        backoff_max_seconds: float = 8.0,
+        max_total_retry_seconds: float = 30.0,
+        metrics_window_size: int = 5000,
+        breaker_fail_threshold: int = 10,
+        breaker_half_open_after: float = 30.0,
+        on_failure: Optional[Callable[[Dict[str, Any]], None]] = None,
+        extra_log_fields: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        # Core SSRAI client
+        self.cli = SSRAIClient(config_file=config_file, profile=profile)
+
+        # --- Auto-inject PAT if missing ---
+        if getattr(self.cli, "auth_type", None) == "pat":
+            if not getattr(self.cli, "pat_token", None):
+                env_pat = os.getenv("SSRAI_PAT_TOKEN")
+                if env_pat:
+                    self.cli.pat_token = env_pat
+                    logger.info(json.dumps({
+                        "event": "pat_injected",
+                        "message": "Using PAT from environment variable SSRAI_PAT_TOKEN"
+                    }))
+                else:
+                    creds_file = os.path.expanduser("~/.ssrai/credentials.json")
+                    if os.path.exists(creds_file):
+                        try:
+                            with open(creds_file, "r", encoding="utf-8") as f:
+                                import json as _json
+                                data = _json.load(f)
+                                token = data.get("pat_token")
+                                if token:
+                                    self.cli.pat_token = token
+                                    logger.info(json.dumps({
+                                        "event": "pat_injected",
+                                        "message": f"Using PAT from {creds_file}"
+                                    }))
+                        except Exception as e:
+                            logger.warning(json.dumps({
+                                "event": "pat_read_error",
+                                "message": str(e)
+                            }))
+
+        # retry / breaker / metrics
+        self.max_retries = max_retries
+        self.backoff_base_seconds = backoff_base_seconds
+        self.backoff_max_seconds = backoff_max_seconds
+        self.max_total_retry_seconds = max_total_retry_seconds
+
+        self._latencies_ms: Deque[float] = deque(maxlen=int(metrics_window_size))
+        self._total_calls = 0
+        self._failures = 0
+        self._lock = threading.Lock()
+        self._breaker = CircuitBreaker(
+            fail_threshold=breaker_fail_threshold,
+            half_open_after=breaker_half_open_after,
+        )
+
+        self.on_failure = on_failure
+        self.extra_log_fields = extra_log_fields or {}
+
+    # --- Backoff ---
+    def _compute_backoff(self, attempt: int) -> float:
+        base = self.backoff_base_seconds * (2 ** attempt)
+        return random.uniform(0, min(base, self.backoff_max_seconds))
+
+    # --- Percentile + metrics ---
+    @staticmethod
+    def _percentile(sorted_values: List[float], p: float) -> float:
+        if not sorted_values:
+            return 0.0
+        k = (len(sorted_values) - 1) * (p / 100.0)
+        f = math.floor(k)
+        c = math.ceil(k)
+        if f == c:
+            return sorted_values[int(k)]
+        d0 = sorted_values[f] * (c - k)
+        d1 = sorted_values[c] * (k - f)
+        return d0 + d1
+
+    def get_metrics(self) -> Dict[str, Any]:
+        with self._lock:
+            lat = list(self._latencies_ms)
+            total = self._total_calls
+            fails = self._failures
+        lat_sorted = sorted(lat)
+        p50 = self._percentile(lat_sorted, 50.0) if lat_sorted else 0.0
+        p95 = self._percentile(lat_sorted, 95.0) if lat_sorted else 0.0
+        avg = sum(lat_sorted) / len(lat_sorted) if lat_sorted else 0.0
+        success = total - fails
+        success_rate = (success / total * 100.0) if total else 0.0
+        return {
+            "total_calls": total,
+            "failures": fails,
+            "success_rate_pct": round(success_rate, 2),
+            "avg_latency_ms": round(avg, 2),
+            "p50_latency_ms": round(p50, 2),
+            "p95_latency_ms": round(p95, 2),
+            "breaker_state": self._breaker.get_state(),
+        }
+
+    # --- Structured logging ---
+    def _log_json(self, level: str = "info", event: str = "event", msg: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+        payload = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "event": event,
+            "message": msg,
+        }
+        payload.update(self.extra_log_fields)
+        if extra:
+            payload.update(extra)
+        line = json.dumps(payload, ensure_ascii=False)
+        getattr(logger, level, logger.info)(line)
+
+    def _record_failure(self) -> None:
+        with self._lock:
+            self._failures += 1
+
+    # --- Core call ---
+    def call_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        guardrail_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not self._breaker.allow():
+            self._record_failure()
+            raise RAIError("Circuit.Open", "Circuit breaker is OPEN")
+
+        start_overall = time.perf_counter()
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                t0 = time.perf_counter()
+                resp = self.cli.chat.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    guardrail_profile=guardrail_profile,
+                )
+                latency_ms = (time.perf_counter() - t0) * 1000.0
+
+                with self._lock:
+                    self._total_calls += 1
+                    self._latencies_ms.append(latency_ms)
+
+                self._breaker.on_success()
+                self._log_json(event="rai_success", msg="RAI call success",
+                               extra={"latency_ms": round(latency_ms, 2), "attempt": attempt + 1})
+                return resp
+
+            except Exception as e:
+                last_exception = e
+                self._record_failure()
+                self._breaker.on_failure()
+
+                elapsed = (time.perf_counter() - start_overall)
+                final_attempt = attempt >= self.max_retries or elapsed >= self.max_total_retry_seconds
+
+                self._log_json(level="warning", event="rai_failure", msg=str(e),
+                               extra={"attempt": attempt + 1, "breaker": self._breaker.get_state(),
+                                      "retry_planned": not final_attempt})
+
+                if self.on_failure:
+                    try:
+                        self.on_failure({"attempt": attempt + 1, "error": str(e)})
+                    except Exception as cb_err:
+                        self._log_json(level="error", event="failure_callback_error", msg=str(cb_err))
+
+                if final_attempt:
+                    break
+                time.sleep(self._compute_backoff(attempt))
+
+        self._log_json(level="error", event="rai_ultimate_failure",
+                       msg=f"RAI call failed after {self.max_retries + 1} attempts")
+        raise RAIError("Call.Failed", "RAI call failed") from last_exception
