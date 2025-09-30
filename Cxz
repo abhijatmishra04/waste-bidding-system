@@ -1,17 +1,1 @@
 
-Hey folks 👋,
-
-I’ve put together a Python utility for calling the RAI Gateway and pushed it to GitHub.
-
-Instead of everyone writing their own retry logic, error handling, or metrics, this utility takes care of it out of the box:
-	•	🔄 Retries + backoff so it doesn’t hammer the gateway when things fail
-	•	🚦 Circuit breaker to stop flooding if the service is down
-	•	📊 Metrics (latency avg/p50/p95, success rate, failures, etc.)
-	•	📝 JSON logging that’s clean and safe
-	•	🔑 Auth handled automatically (works with PAT / config)
-
-All you need to do is plug in your rai_config.cfg, call client.call_chat(...), and you’re good to go. You can also check client.get_metrics() anytime for live stats.
-
-👉 GitHub link: [Insert Repo Link]
-
-This should make our RAI calls more reliable and easier to monitor across projects. Let me know your thoughts — happy to help if anyone wants to try it out. 🚀
