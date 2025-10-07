@@ -10,7 +10,6 @@ RAI Gateway client with:
 """
 
 import os
-import sys
 import time
 import math
 import json
@@ -22,13 +21,10 @@ from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 # --------------------------------------------------------------------
-# 0) Safety: disable Locust/gevent monkey-patching (prevents SSL loops)
+# Safety: disable Locust/gevent monkey-patching (prevents SSL loops)
+# Must be set before any Locust import in this process.
 # --------------------------------------------------------------------
-# We set this before any Locust import happens (we also lazy-import later).
 os.environ.setdefault("LOCUST_NO_MONKEY_PATCH", "1")
-
-# Optional safeguard if your environment still hits deep recursion (rare)
-# sys.setrecursionlimit(3000)
 
 # Official RAI Gateway SDK
 from ssrai import SSRAIClient
@@ -36,7 +32,6 @@ from ssrai import SSRAIClient
 
 # ----------------- BASE LOGGER (general events) -----------------
 logger = logging.getLogger("RAIGatewayClient")
-logger.setLevel(logging.Info if hasattr(logging, "Info") else logging.INFO)  # be tolerant
 logger.setLevel(logging.INFO)
 logger.propagate = False
 if not logger.handlers:
@@ -60,7 +55,7 @@ class CircuitBreaker:
     def allow(self) -> bool:
         with self._lock:
             if self.state == "OPEN" and (time.time() - self.opened_at) > self.half_open_after:
-                self.state = "HALF_OPEN"  # let one probe call through
+                self.state = "HALF_OPEN"  # allow one probe call
             return self.state != "OPEN"
 
     def on_success(self):
@@ -94,7 +89,7 @@ class RAIGatewayClient:
       - Retries (exponential backoff + jitter)
       - Circuit breaker protection
       - Manual sliding-window latency metrics (avg/p50/p95)
-      - Locust-backed metrics (avg/p50/p95 + totals), with NO monkey-patching
+      - Locust-backed metrics (avg/p50/p95 + totals), without monkey-patching
       - Structured JSON logging (PII-safe) to console + rotating files
       - Auto PAT/OAuth handling (from config or env)
     """
@@ -127,6 +122,9 @@ class RAIGatewayClient:
         # 1) Create SSRAI client first (before importing Locust)
         self.cli = SSRAIClient(config_file=config_file, profile=profile)
 
+        # ✅ ensure exists BEFORE any _log() usage
+        self.extra_log_fields = extra_log_fields or {}
+
         # 2) Inject PAT if needed
         if getattr(self.cli, "auth_type", None) == "pat" and not getattr(self.cli, "pat_token", None):
             env_pat = os.getenv("SSRAI_PAT_TOKEN")
@@ -156,7 +154,6 @@ class RAIGatewayClient:
 
         # Hooks
         self.on_failure = on_failure
-        self.extra_log_fields = extra_log_fields or {}
 
         # Dedicated metrics loggers (separate files)
         self._manual_metrics_logger = logging.getLogger("RAIGatewayClient.manual")
@@ -189,7 +186,6 @@ class RAIGatewayClient:
         self._locust_env = None
         if enable_locust_metrics:
             try:
-                # Import only now; LOCUST_NO_MONKEY_PATCH already set to "1"
                 from locust.env import Environment  # type: ignore
             except Exception as e:
                 raise ImportError(
@@ -203,15 +199,17 @@ class RAIGatewayClient:
     # ----------------- Utilities -----------------
     @staticmethod
     def _add_rotating_handler(log_obj: logging.Logger, path: str, max_bytes: int, backups: int):
-        path = os.path.abspath(path)
+        # auto-create directories if needed
+        abs_path = os.path.abspath(path)
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
         except Exception:
             pass
+        # de-dupe for same path
         for h in log_obj.handlers:
-            if isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == path:
+            if isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == abs_path:
                 return
-        fh = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups)
+        fh = RotatingFileHandler(abs_path, maxBytes=max_bytes, backupCount=backups)
         fh.setFormatter(logging.Formatter("%(message)s"))
         fh.setLevel(logging.INFO)
         log_obj.addHandler(fh)
@@ -222,6 +220,7 @@ class RAIGatewayClient:
             "event": event,
             "message": msg,
         }
+        # extra fields (e.g., env, app, host) supplied by caller
         payload.update(self.extra_log_fields)
         if extra:
             payload.update(extra)
