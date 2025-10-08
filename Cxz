@@ -4,7 +4,7 @@
 """
 RAI Gateway Client (Stable Build)
 ---------------------------------
-- Calls SSRAIClient safely (no SSL monkey patching)
+- Calls SSRAIClient safely (no gevent/ssl monkey patching)
 - Retries + exponential backoff + jitter
 - Circuit breaker protection
 - Manual sliding-window metrics (avg/p50/p95)
@@ -13,6 +13,7 @@ RAI Gateway Client (Stable Build)
     • rai_client_events.jsonl
     • manual_metrics.jsonl
     • locust_metrics.jsonl
+Tested with: Python 3.12, locust==2.41.2
 """
 
 import os
@@ -27,10 +28,11 @@ from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 # --------------------------------------------------------------------
-# Safety: disable gevent monkey patching (avoid SSL recursion)
+# Safety: disable gevent monkey patching (avoid SSL recursion issues)
 # --------------------------------------------------------------------
 os.environ.setdefault("LOCUST_NO_MONKEY_PATCH", "1")
 
+# Official RAI Gateway SDK
 from ssrai import SSRAIClient
 
 
@@ -100,26 +102,29 @@ class RAIGatewayClient:
         breaker_half_open_after: float = 30.0,
         on_failure: Optional[Callable[[Dict[str, Any]], None]] = None,
         extra_log_fields: Optional[Dict[str, Any]] = None,
+        # logs
         log_file: str = "rai_client_events.jsonl",
         manual_metrics_log_file: str = "manual_metrics.jsonl",
         locust_metrics_log_file: str = "locust_metrics.jsonl",
+        # metrics/logging behavior
         enable_locust_metrics: bool = True,
         metrics_log_every_call: bool = True,
+        # rotation
         log_max_bytes: int = 10 * 1024 * 1024,
         log_backup_count: int = 3,
     ):
-        # 1️⃣ Create SSRAI client first
+        # 1) Create SSRAI client first (before touching Locust)
         self.cli = SSRAIClient(config_file=config_file, profile=profile)
         self.extra_log_fields = extra_log_fields or {}
 
-        # 2️⃣ Inject PAT if needed
+        # Inject PAT if needed
         if getattr(self.cli, "auth_type", None) == "pat" and not getattr(self.cli, "pat_token", None):
             env_pat = os.getenv("SSRAI_PAT_TOKEN")
             if env_pat:
                 self.cli.pat_token = env_pat
                 self._log("info", "pat_injected", "PAT token loaded from environment")
 
-        # 3️⃣ File-based JSONL loggers
+        # Add file handlers
         self._add_rotating_handler(logger, log_file, log_max_bytes, log_backup_count)
         self._log("info", "file_logging_enabled", f"events_log={os.path.abspath(log_file)}")
 
@@ -132,31 +137,32 @@ class RAIGatewayClient:
         self.backoff_max_seconds = float(backoff_max_seconds)
         self.max_total_retry_seconds = float(max_total_retry_seconds)
 
-        # Metrics
+        # Manual metrics
         self._latencies_ms: Deque[float] = deque(maxlen=int(metrics_window_size))
-        self._total_calls = 0
+        self._total_calls = 0      # counts attempts (success + failure)
         self._failures = 0
         self._lock = threading.Lock()
 
         # Circuit breaker
         self._breaker = CircuitBreaker(breaker_fail_threshold, breaker_half_open_after)
+
+        # Hooks / options
         self.on_failure = on_failure
         self._metrics_log_every_call = bool(metrics_log_every_call)
 
-        # 4️⃣ Init Locust safely (no gevent patch)
+        # 2) Init Locust safely (no monkey patch needed)
         self._locust_env = None
         if enable_locust_metrics:
             try:
-                from locust.env import Environment
+                from locust.env import Environment  # lazy import
                 self._locust_env = Environment(user_classes=[])
-                _ = self._locust_env.stats
+                _ = self._locust_env.stats  # materialize stats
                 self._log("info", "locust_enabled", "Locust metrics enabled (no monkey patch)")
             except Exception as e:
-                self._log("warning", "locust_disabled", f"Locust import failed: {e}")
+                # Continue without Locust if import fails
+                self._log("warning", "locust_disabled", f"Locust unavailable: {e}")
 
-    # ----------------------------------------------------------------
-    # Helpers
-    # ----------------------------------------------------------------
+    # ----------------- Utilities -----------------
     @staticmethod
     def _add_rotating_handler(log_obj: logging.Logger, path: str, max_bytes: int, backups: int):
         abs_path = os.path.abspath(path)
@@ -177,11 +183,7 @@ class RAIGatewayClient:
         return sub_logger
 
     def _log(self, level: str, event: str, msg: str, extra: Optional[Dict[str, Any]] = None):
-        payload = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-            "event": event,
-            "message": msg,
-        }
+        payload = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "event": event, "message": msg}
         payload.update(self.extra_log_fields)
         if extra:
             payload.update(extra)
@@ -191,9 +193,7 @@ class RAIGatewayClient:
         base = self.backoff_base_seconds * (2 ** attempt)
         return random.uniform(0, min(base, self.backoff_max_seconds))
 
-    # ----------------------------------------------------------------
-    # Manual metrics
-    # ----------------------------------------------------------------
+    # ----------------- Manual metrics -----------------
     @staticmethod
     def _percentile(sorted_values: List[float], p: float) -> float:
         if not sorted_values:
@@ -223,10 +223,9 @@ class RAIGatewayClient:
             "manual_p95_latency_ms": round(p95, 2),
         }
 
-    # ----------------------------------------------------------------
-    # Locust metrics (safe)
-    # ----------------------------------------------------------------
+    # ----------------- Locust metrics (no runner required) -----------------
     def _record_locust(self, *, name: str, latency_ms: float, ok: bool, err: Optional[Exception]):
+        """Record a request/response in Locust stats without needing a runner."""
         if not self._locust_env:
             return
         try:
@@ -235,13 +234,22 @@ class RAIGatewayClient:
             entry = stats.get("RAI", name)
 
             if ok:
+                # success → normal request
                 entry.log_request("RAI", name, latency, response_length=0)
+                stats.total.log_request("RAI", name, latency, response_length=0)
             else:
-                entry.log_error("RAI", name, latency, err or Exception("Unknown failure"))
+                # failure → increment failure counters + log exception
+                entry.num_failures += 1
+                stats.total.num_failures += 1
+                entry.log_error(err or Exception("Unknown failure"))
 
-            stats.total.log_request("RAI", name, latency, response_length=0)
-            self._log("info", "locust_record_debug",
-                      f"name={name}, ok={ok}, latency={latency}, total={stats.total.num_requests}, fails={stats.total.num_failures}")
+            # debug trace
+            self._log(
+                "info",
+                "locust_record_debug",
+                f"name={name}, ok={ok}, latency={latency}, "
+                f"total={stats.total.num_requests}, fails={stats.total.num_failures}",
+            )
         except Exception as e:
             self._log("warning", "locust_record_error", str(e))
 
@@ -269,9 +277,7 @@ class RAIGatewayClient:
             "locust_current_rps": round(getattr(stats.total, "current_rps", 0.0), 2),
         }
 
-    # ----------------------------------------------------------------
-    # Combined metrics snapshot
-    # ----------------------------------------------------------------
+    # ----------------- Combined metrics snapshot -----------------
     def _log_metrics_snapshot(self, name: Optional[str]):
         now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
         manual = self.get_manual_metrics()
@@ -280,16 +286,21 @@ class RAIGatewayClient:
             locust = self.get_locust_metrics(name)
             self._locust_logger.info(json.dumps({"ts": now, **locust, **self.extra_log_fields}))
 
-    # ----------------------------------------------------------------
-    # Core call
-    # ----------------------------------------------------------------
-    def call_chat(self, messages: List[Dict[str, Any]], model: str,
-                  *, max_tokens: int = 512, temperature: float = 0.0,
-                  guardrail_profile: Optional[str] = None) -> Dict[str, Any]:
+    # ----------------- Core call -----------------
+    def call_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        guardrail_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
 
         if not self._breaker.allow():
             with self._lock:
                 self._failures += 1
+                self._total_calls += 1
             self._record_locust(name=model, latency_ms=0.0, ok=False, err=RAIError("Circuit.Open", "OPEN"))
             raise RAIError("Circuit.Open", "Circuit breaker is OPEN")
 
@@ -301,8 +312,10 @@ class RAIGatewayClient:
             self._log("info", "retry_attempt_start", f"attempt={attempt+1}/{self.max_retries+1}", {"model": model})
             try:
                 resp = self.cli.chat.create(
-                    model=model, messages=messages,
-                    max_tokens=max_tokens, temperature=temperature,
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
                     guardrail_profile=guardrail_profile,
                 )
                 latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -311,8 +324,10 @@ class RAIGatewayClient:
                     self._latencies_ms.append(latency_ms)
                 self._breaker.on_success()
                 self._record_locust(name=model, latency_ms=latency_ms, ok=True, err=None)
-                self._log("info", "retry_attempt_end", "success",
-                          {"attempt": attempt+1, "latency_ms": round(latency_ms, 2), "model": model})
+                self._log(
+                    "info", "retry_attempt_end", "success",
+                    {"attempt": attempt + 1, "latency_ms": round(latency_ms, 2), "model": model},
+                )
                 if self._metrics_log_every_call:
                     self._log_metrics_snapshot(name=model)
                 return resp
@@ -321,22 +336,27 @@ class RAIGatewayClient:
                 last_exc = e
                 elapsed = time.perf_counter() - start_overall
                 final = (attempt >= self.max_retries) or (elapsed >= self.max_total_retry_seconds)
+                latency_ms = (time.perf_counter() - t0) * 1000.0
                 with self._lock:
                     self._total_calls += 1
                     self._failures += 1
-                    self._latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+                    self._latencies_ms.append(latency_ms)
                 self._breaker.on_failure()
-                latency_ms = (time.perf_counter() - t0) * 1000.0
                 self._record_locust(name=model, latency_ms=latency_ms, ok=False, err=e)
-                self._log("warning", "retry_attempt_end", "failure",
-                          {"attempt": attempt+1, "error": str(e),
-                           "retry_planned": (not final),
-                           "breaker": self._breaker.get_state(),
-                           "latency_ms": round(latency_ms, 2),
-                           "model": model})
+                self._log(
+                    "warning", "retry_attempt_end", "failure",
+                    {
+                        "attempt": attempt + 1,
+                        "error": str(e),
+                        "retry_planned": (not final),
+                        "breaker": self._breaker.get_state(),
+                        "latency_ms": round(latency_ms, 2),
+                        "model": model,
+                    },
+                )
                 if self.on_failure:
                     try:
-                        self.on_failure({"attempt": attempt+1, "error": str(e), "model": model})
+                        self.on_failure({"attempt": attempt + 1, "error": str(e), "model": model})
                     except Exception as cb:
                         self._log("error", "failure_callback_error", str(cb))
                 if final:
@@ -347,3 +367,8 @@ class RAIGatewayClient:
 
         self._log("error", "rai_ultimate_failure", f"failed after {self.max_retries + 1} attempts", {"model": model})
         raise RAIError("Call.Failed", "RAI call failed") from last_exc
+
+    # ----------------- Factory -----------------
+    @classmethod
+    def from_cfg(cls, cfg_path: str, *, profile: Optional[str] = None, **kwargs):
+        return cls(config_file=cfg_path, profile=profile, **kwargs)
