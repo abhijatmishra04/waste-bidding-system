@@ -2,124 +2,82 @@
 # -*- coding: utf-8 -*-
 
 """
-SSRAI client → writes per-call latency feed for Locust worker.
-Safe (no gevent patching).
+Locust metrics worker:
+Consumes latency_feed.jsonl and computes metrics using Locust's original RequestStats.
 """
 
-import os, time, json, random, logging, threading
+import os, time, json, logging
 from logging.handlers import RotatingFileHandler
-from typing import Any, Callable, Dict, List, Optional
-from ssrai import SSRAIClient
+os.environ.setdefault("LOCUST_NO_MONKEY_PATCH","1")
+from locust.env import Environment  # official Locust engine
 
-# ---------- logger ----------
-def _rot_logger(name, path):
-    lg = logging.getLogger(name)
-    lg.setLevel(logging.INFO)
-    lg.propagate = False
+FEED="logs/latency_feed.jsonl"; OUT="logs/locust_metrics.jsonl"
+SNAP_INT=5; OFFSET="logs/locust_feed.offset"
+
+def _rot_logger(path):
+    lg=logging.getLogger("locust.metrics"); lg.setLevel(logging.INFO); lg.propagate=False
     if not lg.handlers:
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        fh = RotatingFileHandler(path, maxBytes=10*1024*1024, backupCount=3)
-        fh.setFormatter(logging.Formatter("%(message)s"))
-        lg.addHandler(fh)
+        os.makedirs(os.path.dirname(path),exist_ok=True)
+        fh=RotatingFileHandler(path,maxBytes=10*1024*1024,backupCount=3)
+        fh.setFormatter(logging.Formatter("%(message)s")); lg.addHandler(fh)
     return lg
 
-# ---------- circuit breaker ----------
-class CircuitBreaker:
-    def __init__(self, fail_threshold=10, half_open_after=30.0):
-        self.state, self.fail_count, self.opened_at = "CLOSED", 0, 0.0
-        self.fail_threshold, self.half_open_after = fail_threshold, half_open_after
-        self._lock = threading.Lock()
-    def allow(self):
-        with self._lock:
-            if self.state=="OPEN" and (time.time()-self.opened_at)>self.half_open_after:
-                self.state="HALF_OPEN"
-            return self.state!="OPEN"
-    def on_success(self):
-        with self._lock: self.fail_count, self.state = 0, "CLOSED"
-    def on_failure(self):
-        with self._lock:
-            self.fail_count += 1
-            if self.fail_count>=self.fail_threshold:
-                self.state, self.opened_at = "OPEN", time.time()
-    def get_state(self): 
-        with self._lock: return self.state
+def _cp_read(): 
+    try: return int(open(OFFSET).read().strip() or "0")
+    except: return 0
+def _cp_write(o): 
+    os.makedirs(os.path.dirname(OFFSET),exist_ok=True)
+    open(OFFSET,"w").write(str(o))
 
-# ---------- main client ----------
-class RAIGatewayClient:
-    def __init__(self, config_file:str, profile:str=None, *,
-                 max_retries=3, backoff_base_seconds=0.5,
-                 backoff_max_seconds=10.0, max_total_retry_seconds=30.0,
-                 breaker_fail_threshold=10, breaker_half_open_after=30.0,
-                 feed_file="logs/latency_feed.jsonl",
-                 events_log="logs/rai_client_events.jsonl",
-                 extra_fields:Optional[Dict[str,Any]]=None,
-                 on_failure:Optional[Callable[[Dict[str,Any]],None]]=None):
-        self.cli = SSRAIClient(config_file=config_file, profile=profile)
-        if getattr(self.cli,"auth_type",None)=="pat" and not getattr(self.cli,"pat_token",None):
-            env_pat=os.getenv("SSRAI_PAT_TOKEN")
-            if env_pat: self.cli.pat_token=env_pat
+def _snapshot(env):
+    s=env.stats.total
+    snap={
+        "ts":time.strftime("%Y-%m-%dT%H:%M:%S",time.gmtime()),
+        "locust_num_requests":s.num_requests,
+        "locust_num_failures":s.num_failures,
+        "locust_success_rate_pct":round(((s.num_requests-s.num_failures)/s.num_requests*100) if s.num_requests else 0,2),
+        "locust_avg_latency_ms":round(getattr(s,"avg_response_time",0.0),2),
+        "locust_p50_latency_ms":round(s.get_current_response_time_percentile(0.50) or 0.0,2),
+        "locust_p95_latency_ms":round(s.get_current_response_time_percentile(0.95) or 0.0,2),
+        "current_rps":round(getattr(s,"current_rps",0.0),2)
+    }
+    for (m,name),entry in env.stats.entries.items():
+        if m!="RAI": continue
+        snap[f"model::{name}"]={
+            "num_requests":entry.num_requests,
+            "num_failures":entry.num_failures,
+            "avg_ms":round(entry.avg_response_time,2),
+            "p50_ms":round(entry.get_current_response_time_percentile(0.50) or 0.0,2),
+            "p95_ms":round(entry.get_current_response_time_percentile(0.95) or 0.0,2)
+        }
+    return snap
 
-        self.max_retries=max_retries; self.backoff_base_seconds=backoff_base_seconds
-        self.backoff_max_seconds=backoff_max_seconds; self.max_total_retry_seconds=max_total_retry_seconds
-        self._breaker=CircuitBreaker(breaker_fail_threshold,breaker_half_open_after)
-        self._events=_rot_logger("rai.events",events_log)
-        self._feed_path=os.path.abspath(feed_file)
-        os.makedirs(os.path.dirname(self._feed_path),exist_ok=True)
-        self._extra=extra_fields or {}; self.on_failure=on_failure
-        self._lock=threading.Lock(); self._latencies=[]
+def main():
+    log=_rot_logger(OUT); env=Environment(user_classes=[])
+    off=_cp_read()
+    os.makedirs(os.path.dirname(FEED),exist_ok=True)
+    f=open(FEED,"a+",encoding="utf-8"); f.seek(off)
+    last=time.time()
+    try:
+        while True:
+            line=f.readline()
+            if not line: time.sleep(0.25)
+            else:
+                off=f.tell()
+                try:
+                    r=json.loads(line)
+                    model=str(r.get("model") or "UNKNOWN"); ok=bool(r.get("ok"))
+                    lat=int(r.get("latency_ms") or 0)
+                    e=env.stats.get("RAI",model)
+                    if ok:
+                        e.log_request("RAI",model,lat,0); env.stats.total.log_request("RAI",model,lat,0)
+                    else:
+                        e.num_failures+=1; env.stats.total.num_failures+=1
+                        e.log_error(RuntimeError(r.get("error") or "error"))
+                except: pass
+            if time.time()-last>=SNAP_INT:
+                last=time.time(); log.info(json.dumps(_snapshot(env))); _cp_write(off)
+    except KeyboardInterrupt:
+        _cp_write(off); f.close()
 
-    def _log(self, event, **kv):
-        rec={"ts":time.strftime("%Y-%m-%dT%H:%M:%S",time.gmtime()),"event":event,**self._extra,**kv}
-        self._events.info(json.dumps(rec,ensure_ascii=False))
-    def _backoff(self,i): 
-        return random.uniform(0,min(self.backoff_base_seconds*(2**i),self.backoff_max_seconds))
-    def _feed(self, model, ok, latency, err=""):
-        rec={"ts":time.strftime("%Y-%m-%dT%H:%M:%S",time.gmtime()),
-             "model":model,"ok":ok,"latency_ms":int(round(latency)),"error":err}
-        with open(self._feed_path,"a",encoding="utf-8") as f:
-            f.write(json.dumps(rec,ensure_ascii=False)+"\n")
-
-    def call_chat(self, messages:List[Dict[str,Any]], model:str, *,
-                  max_tokens=512, temperature=0.0, guardrail_profile=None):
-        if not self._breaker.allow():
-            self._feed(model,False,0.0,"Circuit.Open")
-            raise RuntimeError("Circuit breaker OPEN")
-        start=time.perf_counter(); last=None
-        for attempt in range(self.max_retries+1):
-            t0=time.perf_counter(); self._log("attempt_start",attempt=attempt+1,model=model)
-            try:
-                resp=self.cli.chat.create(model=model,messages=messages,
-                                          max_tokens=max_tokens,temperature=temperature,
-                                          guardrail_profile=guardrail_profile)
-                lat=(time.perf_counter()-t0)*1000
-                self._breaker.on_success(); self._feed(model,True,lat)
-                self._log("attempt_end",status="success",latency_ms=round(lat,2))
-                return resp
-            except Exception as e:
-                last=e; lat=(time.perf_counter()-t0)*1000
-                self._breaker.on_failure(); self._feed(model,False,lat,str(e))
-                self._log("attempt_end",status="fail",error=str(e))
-                if attempt>=self.max_retries or (time.perf_counter()-start)>=self.max_total_retry_seconds:
-                    break
-                time.sleep(self._backoff(attempt))
-        raise last or RuntimeError("RAI call failed")
-
-    @staticmethod
-    def read_latest_locust_metrics(path="logs/locust_metrics.jsonl"):
-        try:
-            if not os.path.exists(path): return None
-            with open(path,"rb") as f:
-                f.seek(0,os.SEEK_END); buf=b""; pos=f.tell()
-                while pos>0:
-                    step=min(4096,pos); pos-=step; f.seek(pos)
-                    chunk=f.read(step); buf=chunk+buf
-                    if b"\n" in buf:
-                        for line in reversed(buf.split(b"\n")):
-                            if line.strip():
-                                return json.loads(line.decode("utf-8"))
-            return None
-        except Exception: return None
-
-    @classmethod
-    def from_cfg(cls,cfg,*,profile=None,**kw):
-        return cls(config_file=cfg,profile=profile,**kw)
+if __name__=="__main__": main()
