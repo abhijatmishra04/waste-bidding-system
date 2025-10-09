@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Locust Metrics Worker (event-driven)
-Reads logs/latency_feed.jsonl and updates Locust metrics by firing env.events.request,
-which is how Locust's runner populates RequestStats. Also updates env.stats directly
-as a fallback. Writes periodic snapshots to logs/locust_metrics.jsonl.
+Locust Metrics Worker (event-driven, version-compatible)
+Reads logs/latency_feed.jsonl and updates Locust metrics.
+Uses env.events.request.fire() (primary) and env.stats.log_request() (fallback, positional args).
+Writes snapshots to logs/locust_metrics.jsonl every SNAP_INTERVAL seconds.
 """
 
 import os
@@ -15,10 +15,10 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 
-# Avoid gevent monkey patching
+# Do not monkey patch (avoids SSL/requests interference)
 os.environ.setdefault("LOCUST_NO_MONKEY_PATCH", "1")
 
-from locust.env import Environment  # Locust 2.x
+from locust.env import Environment
 
 FEED = "logs/latency_feed.jsonl"
 OUT = "logs/locust_metrics.jsonl"
@@ -27,18 +27,18 @@ SNAP_INTERVAL = 5  # seconds
 
 
 def _logger(path: str) -> logging.Logger:
-    logger = logging.getLogger("locust.metrics")
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
-    if not logger.handlers:
+    lg = logging.getLogger("locust.metrics")
+    lg.setLevel(logging.INFO)
+    lg.propagate = False
+    if not lg.handlers:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         fh = RotatingFileHandler(path, maxBytes=10 * 1024 * 1024, backupCount=3)
         fh.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(fh)
+        lg.addHandler(fh)
         ch = logging.StreamHandler()
         ch.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(ch)
-    return logger
+        lg.addHandler(ch)
+    return lg
 
 
 def _read_offset() -> int:
@@ -67,7 +67,7 @@ def _snapshot(env: Environment) -> dict:
             if total.num_requests else 0.0, 2
         ),
         "locust_avg_latency_ms": round(getattr(total, "avg_response_time", 0.0), 2),
-        # Use all-time percentiles to avoid “current window” zeros
+        # Use all-time percentiles (more stable if traffic is sparse)
         "locust_p50_latency_ms": round(total.get_response_time_percentile(0.50) or 0.0, 2),
         "locust_p95_latency_ms": round(total.get_response_time_percentile(0.95) or 0.0, 2),
         "current_rps": round(getattr(total, "current_rps", 0.0), 2),
@@ -88,19 +88,31 @@ def _snapshot(env: Environment) -> dict:
 
 def _self_test(env: Environment):
     """
-    One synthetic request to prove the stats engine is wired up.
-    Disable with --no-selftest if you don't want this line in your metrics.
+    Single synthetic request to verify the stats engine is wired.
+    Uses event fire + positional fallback.
     """
-    env.events.request.fire(
-        request_type="SELFTEST",
-        name="init",
-        response_time=1,
-        response_length=0,
-        exception=None,
-        context={},
-    )
-    # Redundant direct update (fallback)
-    env.stats.log_request("SELFTEST", "init", 1, response_length=0)
+    try:
+        env.events.request.fire(
+            request_type="SELFTEST",
+            name="init",
+            response_time=1,
+            response_length=0,
+            exception=None,
+        )
+    except TypeError:
+        # In very old Locust, response_length kw may not be accepted; omit it.
+        env.events.request.fire(
+            request_type="SELFTEST",
+            name="init",
+            response_time=1,
+            exception=None,
+        )
+    # Fallback direct stats update (positional for compatibility)
+    try:
+        env.stats.log_request("SELFTEST", "init", 1, 0)
+    except TypeError:
+        # Some builds accept only three positional args
+        env.stats.log_request("SELFTEST", "init", 1)
 
 
 def main():
@@ -118,12 +130,10 @@ def main():
     print("[LocustWorker] FEED   :", os.path.abspath(FEED))
     print("[LocustWorker] OUT    :", os.path.abspath(OUT))
     print("[LocustWorker] OFFSET :", os.path.abspath(OFFSET_FILE))
-    print("[LocustWorker] Locust :", getattr(env, 'version', 'unknown'))
 
+    # Open feed and seek to saved offset (clamped to file size)
     os.makedirs(os.path.dirname(os.path.abspath(FEED)), exist_ok=True)
     f = open(FEED, "a+", encoding="utf-8")
-
-    # Clamp offset to current file size to avoid seeking past EOF
     f.seek(0, os.SEEK_END)
     size = f.tell()
     offset = _read_offset()
@@ -131,7 +141,6 @@ def main():
         offset = 0
     f.seek(offset)
 
-    # Prove stats engine is working up-front
     if not no_selftest:
         _self_test(env)
         snap0 = _snapshot(env)
@@ -145,36 +154,52 @@ def main():
             line = f.readline()
             if not line:
                 time.sleep(0.25)
-            else:
-                offset = f.tell()
-                try:
-                    rec = json.loads(line)
-                    model = str(rec.get("model") or "UNKNOWN")
-                    ok = bool(rec.get("ok"))
-                    lat = int(rec.get("latency_ms") or 0)
+                continue
 
-                    # Primary path: fire the request event (how Locust runner reports data)
+            offset = f.tell()
+            try:
+                rec = json.loads(line)
+                model = str(rec.get("model") or "UNKNOWN")
+                ok = bool(rec.get("ok"))
+                lat = int(rec.get("latency_ms") or 0)
+
+                # Primary: event bus (what Locust's runner uses)
+                try:
                     env.events.request.fire(
                         request_type="RAI",
                         name=model,
                         response_time=lat,
                         response_length=0,
                         exception=(None if ok else RuntimeError(rec.get("error") or "error")),
-                        context={},
                     )
-                    # Fallback direct stats update
+                except TypeError:
+                    # Older Locust: omit response_length kw
+                    env.events.request.fire(
+                        request_type="RAI",
+                        name=model,
+                        response_time=lat,
+                        exception=(None if ok else RuntimeError(rec.get("error") or "error")),
+                    )
+
+                # Fallback: direct stats update (positional only for compatibility)
+                try:
                     if ok:
-                        env.stats.log_request("RAI", model, lat, response_length=0)
+                        env.stats.log_request("RAI", model, lat, 0)
+                    else:
+                        env.stats.log_error("RAI", model, RuntimeError(rec.get("error") or "error"))
+                except TypeError:
+                    if ok:
+                        env.stats.log_request("RAI", model, lat)
                     else:
                         env.stats.log_error("RAI", model, RuntimeError(rec.get("error") or "error"))
 
-                    # Minimal ingestion trace to verify counters rise
-                    total = env.stats.total
-                    print(f"[ingest] model={model} ok={ok} lat={lat}ms "
-                          f"total={total.num_requests} fails={total.num_failures}")
+                # Minimal trace so you can see totals moving
+                total = env.stats.total
+                print(f"[ingest] model={model} ok={ok} lat={lat}ms "
+                      f"total={total.num_requests} fails={total.num_failures}")
 
-                except Exception as ex:
-                    print("Error processing feed line:", ex, "line:", line.strip())
+            except Exception as ex:
+                print("Error processing feed line:", ex, "line:", line.strip())
 
             if (time.time() - last_snap) >= SNAP_INTERVAL:
                 last_snap = time.time()
