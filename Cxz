@@ -2,45 +2,56 @@
 # -*- coding: utf-8 -*-
 
 """
-RAI Gateway client — SLA-only mode
-----------------------------------
-• SSRAI SDK untouched (no gevent monkey patching)
-• Retries + circuit breaker intact
-• Locust used internally to compute total SLA metrics
-• Exactly ONE JSON line written per run (final totals)
+RAI Gateway client with Locust custom event metrics.
+----------------------------------------------------
+✅ SSRAI SDK untouched
+✅ Retries + exponential backoff + circuit breaker
+✅ Uses Locust custom EventHook to fire latency events
+✅ Locust totals (avg/p50/p95/success rate) update correctly
+✅ Auto JSONL logging after every call and at exit
 """
 
-import os, time, json, random, logging, threading, atexit
+import os
+import atexit
+import time
+import json
+import random
+import logging
+import threading
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 
-# ---- Locust setup ----
+# Avoid monkey patching
 os.environ.setdefault("LOCUST_NO_MONKEY_PATCH", "1")
 from locust.env import Environment
 from locust.event import EventHook
-
-# ---- SSRAI SDK ----
 from ssrai import SSRAIClient
 
 
-# -------- Helper: rotating logger --------
+# ---------------- logging setup ----------------
 def setup_rot_logger(name: str, path: str) -> logging.Logger:
     lg = logging.getLogger(name)
     lg.setLevel(logging.INFO)
     lg.propagate = False
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    if not lg.handlers:
-        fh = RotatingFileHandler(path, maxBytes=10 * 1024 * 1024, backupCount=3)
+    abs_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+
+    # Only add file handler once
+    if not any(isinstance(h, RotatingFileHandler) for h in lg.handlers):
+        fh = RotatingFileHandler(abs_path, maxBytes=10 * 1024 * 1024, backupCount=3)
         fh.setFormatter(logging.Formatter("%(message)s"))
         lg.addHandler(fh)
     return lg
 
 
-# -------- Simple circuit breaker --------
+# ---------------- circuit breaker ----------------
 class CircuitBreaker:
     def __init__(self, fail_threshold=10, half_open_after=30.0):
-        self.state, self.fail_count, self.opened_at = "CLOSED", 0, 0.0
-        self.fail_threshold, self.half_open_after = fail_threshold, half_open_after
+        self.state = "CLOSED"
+        self.fail_count = 0
+        self.opened_at = 0.0
+        self.fail_threshold = fail_threshold
+        self.half_open_after = half_open_after
         self._lock = threading.Lock()
 
     def allow(self):
@@ -51,103 +62,136 @@ class CircuitBreaker:
 
     def on_success(self):
         with self._lock:
-            self.fail_count, self.state = 0, "CLOSED"
+            self.fail_count = 0
+            self.state = "CLOSED"
 
     def on_failure(self):
         with self._lock:
             self.fail_count += 1
             if self.fail_count >= self.fail_threshold:
-                self.state, self.opened_at = "OPEN", time.time()
+                self.state = "OPEN"
+                self.opened_at = time.time()
 
 
-# -------- Minimal Locust wrapper --------
+# ---------------- Locust custom event handler ----------------
 class LocustTotals:
-    """Maintain total metrics only, for SLA computation."""
+    """
+    Maintains Locust total stats via custom EventHook.
+    Each `fire(latency_ms, success)` call updates totals immediately.
+    """
 
     def __init__(self):
         self.env = Environment(user_classes=[])
-        self.env.create_local_runner()
+        self.env.create_local_runner()  # ensures env.stats exists
         self.event = EventHook()
-        self._attach()
+        self._attach_listener()
 
-    def _attach(self):
+    def _attach_listener(self):
         def _on_event(latency_ms: float, success: bool, error: Optional[str]):
+            """
+            Handle custom event and push it into Locust’s stats layer.
+            """
+            s = self.env.stats.total
             if success:
-                self.env.events.request.fire(
-                    request_type="SSRAI", name="TOTAL",
-                    response_time=float(latency_ms), exception=None
-                )
+                try:
+                    self.env.events.request.fire(
+                        request_type="SSRAI",
+                        name="TOTAL",
+                        response_time=float(latency_ms),
+                        response_length=0,
+                        exception=None,
+                    )
+                except TypeError:
+                    self.env.events.request.fire(
+                        request_type="SSRAI",
+                        name="TOTAL",
+                        response_time=float(latency_ms),
+                        exception=None,
+                    )
             else:
-                self.env.events.request.fire(
-                    request_type="SSRAI", name="TOTAL",
-                    response_time=float(latency_ms),
-                    exception=RuntimeError(error or "error")
-                )
+                err = RuntimeError(error or "error")
+                try:
+                    self.env.events.request.fire(
+                        request_type="SSRAI",
+                        name="TOTAL",
+                        response_time=float(latency_ms),
+                        response_length=0,
+                        exception=err,
+                    )
+                except TypeError:
+                    self.env.events.request.fire(
+                        request_type="SSRAI",
+                        name="TOTAL",
+                        response_time=float(latency_ms),
+                        exception=err,
+                    )
+
         self.event.add_listener(_on_event)
 
     def fire(self, latency_ms: float, success: bool, error: Optional[str] = None):
+        """Public API: record one latency sample."""
         self.event.fire(latency_ms=latency_ms, success=success, error=error)
 
     def snapshot_total(self) -> Dict[str, Any]:
         s = self.env.stats.total
+        try:
+            p50 = s.get_current_response_time_percentile(0.50) or 0.0
+            p95 = s.get_current_response_time_percentile(0.95) or 0.0
+        except AttributeError:
+            p50 = s.get_response_time_percentile(0.50) or 0.0
+            p95 = s.get_response_time_percentile(0.95) or 0.0
+
+        total, fails = s.num_requests, s.num_failures
         return {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-            "total_requests": s.num_requests,
-            "failures": s.num_failures,
-            "success_rate_pct": round(((s.num_requests - s.num_failures) / s.num_requests * 100)
-                                      if s.num_requests else 0.0, 2),
+            "total_requests": total,
+            "failures": fails,
+            "success_rate_pct": round(((total - fails) / total * 100.0) if total else 0.0, 2),
             "avg_latency_ms": round(getattr(s, "avg_response_time", 0.0), 2),
-            "p50_latency_ms": round(s.get_response_time_percentile(0.50) or 0.0, 2),
-            "p95_latency_ms": round(s.get_response_time_percentile(0.95) or 0.0, 2),
+            "p50_latency_ms": round(p50, 2),
+            "p95_latency_ms": round(p95, 2),
             "current_rps": round(getattr(s, "current_rps", 0.0), 2),
         }
 
 
-# -------- RAI Gateway client with SLA logging --------
+# ---------------- RAI client with Locust metrics ----------------
 class RAIGatewayClient:
-    """One-line-per-run SLA metrics logger."""
+    """SSRAI client using Locust custom event metrics."""
 
     def __init__(
         self,
         config_file: str,
         profile: Optional[str] = None,
         *,
-        max_retries=3,
-        backoff_base_seconds=0.5,
-        backoff_max_seconds=10.0,
-        max_total_retry_seconds=30.0,
-        breaker_fail_threshold=10,
-        breaker_half_open_after=30.0,
-        metrics_log="logs/locust_metrics.jsonl",
-        events_log="logs/rai_client_events.jsonl",
-        extra_fields: Optional[Dict[str, Any]] = None,
+        max_retries: int = 3,
+        backoff_base_seconds: float = 0.5,
+        backoff_max_seconds: float = 10.0,
+        max_total_retry_seconds: float = 30.0,
+        breaker_fail_threshold: int = 10,
+        breaker_half_open_after: float = 30.0,
+        events_log: str = "logs/rai_client_events.jsonl",
+        metrics_log: str = "logs/locust_metrics.jsonl",
     ):
-        # SSRAI SDK init
         self.cli = SSRAIClient(config_file=config_file, profile=profile)
         if getattr(self.cli, "auth_type", None) == "pat" and not getattr(self.cli, "pat_token", None):
             env_pat = os.getenv("SSRAI_PAT_TOKEN")
             if env_pat:
                 self.cli.pat_token = env_pat
 
-        # configs
         self.max_retries = max_retries
         self.backoff_base_seconds = backoff_base_seconds
         self.backoff_max_seconds = backoff_max_seconds
         self.max_total_retry_seconds = max_total_retry_seconds
         self.breaker = CircuitBreaker(breaker_fail_threshold, breaker_half_open_after)
-        self._extra = extra_fields or {}
 
-        # metrics
         self.metrics = LocustTotals()
         self._metrics_logger = setup_rot_logger("locust.metrics", metrics_log)
         self._events_logger = setup_rot_logger("rai.events", events_log)
-
-        # auto-flush on exit
         atexit.register(self._write_metrics_snapshot_safe)
 
-    # ---- helpers ----
+    # ---------------- helpers ----------------
     def _log_event(self, event: str, **kv):
-        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "event": event, **self._extra, **kv}
+        rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "event": event, **kv}
         self._events_logger.info(json.dumps(rec, ensure_ascii=False))
 
     def _write_metrics_snapshot_safe(self):
@@ -157,53 +201,47 @@ class RAIGatewayClient:
         except Exception:
             pass
 
-    def _backoff(self, i: int) -> float:
-        return random.uniform(0, min(self.backoff_base_seconds * (2 ** i), self.backoff_max_seconds))
+    def _backoff(self, attempt: int) -> float:
+        return random.uniform(0, min(self.backoff_base_seconds * (2 ** attempt), self.backoff_max_seconds))
 
-    # ---- main chat call ----
-    def call_chat(self, messages: List[Dict[str, Any]], model: str, *,
-                  max_tokens=512, temperature=0.0, guardrail_profile=None):
+    # ---------------- public call ----------------
+    def call_chat(self, messages: List[Dict[str, Any]], model: str, *, max_tokens=512, temperature=0.0):
         if not self.breaker.allow():
             self.metrics.fire(0.0, False, "Circuit.Open")
             self._log_event("breaker_open", model=model)
-            return {"error": "Circuit breaker OPEN"}
+            self._write_metrics_snapshot_safe()
+            raise RuntimeError("Circuit breaker OPEN")
 
-        start_time = time.perf_counter()
+        start_overall = time.perf_counter()
         last_exc = None
 
         for attempt in range(self.max_retries + 1):
-            self._log_event("attempt_start", attempt=attempt + 1, model=model)
             t0 = time.perf_counter()
+            self._log_event("attempt_start", attempt=attempt + 1, model=model)
 
             try:
-                resp = self.cli.chat.create(
-                    model=model, messages=messages,
-                    max_tokens=max_tokens, temperature=temperature,
-                    guardrail_profile=guardrail_profile,
-                )
+                resp = self.cli.chat.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
                 latency_ms = (time.perf_counter() - t0) * 1000.0
                 self.breaker.on_success()
                 self.metrics.fire(latency_ms, True)
                 self._log_event("attempt_end", status="success", latency_ms=round(latency_ms, 2), model=model)
-                self._write_metrics_snapshot_safe()  # single final entry
+                self._write_metrics_snapshot_safe()
                 return resp
 
             except Exception as e:
-                last_exc = e
                 latency_ms = (time.perf_counter() - t0) * 1000.0
                 self.breaker.on_failure()
                 self.metrics.fire(latency_ms, False, str(e))
-                self._log_event("attempt_end", status="fail", latency_ms=round(latency_ms, 2), error=str(e), model=model)
+                self._log_event("attempt_end", status="fail", error=str(e), latency_ms=round(latency_ms, 2), model=model)
+                self._write_metrics_snapshot_safe()
+                last_exc = e
 
-                elapsed = time.perf_counter() - start_time
+                elapsed = time.perf_counter() - start_overall
                 if attempt >= self.max_retries or elapsed >= self.max_total_retry_seconds:
                     break
                 time.sleep(self._backoff(attempt))
 
-        # final failure snapshot
-        self._write_metrics_snapshot_safe()
         raise RuntimeError(f"RAI call failed after retries: {last_exc}")
 
-    # ---- metric accessor ----
     def get_locust_metrics_total(self) -> Dict[str, Any]:
         return self.metrics.snapshot_total()
