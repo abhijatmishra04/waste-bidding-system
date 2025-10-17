@@ -1,1 +1,93 @@
+Savings/ Benefits initiative in Detail
+
+Project Overview
+
+Functional Area: AI Platform & Architecture / Performance Engineering
+Project: RAI Gateway Client – Resilience & Metrics Wrapper (Locust-based)
+Objective:
+Build a light wrapper around SSRAI that adds:
+	•	Resilience: retries with exponential backoff + circuit breaker to avoid waste during incidents.
+	•	Observability: in-process Locust metrics (avg/p50/p95/success-rate) without running a swarm.
+	•	Operational logs: compact JSONL snapshots with rotation for easy ingestion and audit.
+
+The utility times every API attempt using a high-resolution clock and feeds samples into Locust’s stats engine. Teams get consistent latency/percentile metrics and a fast way to detect regressions, right-size concurrency, and cut wasted LLM calls when upstream is degraded.
+
+$ Savings Opportunities
+	•	Avoid wasted LLM calls during incidents:
+When the upstream is slow/down, the circuit breaker opens after consecutive failures and suppresses further calls until half-open—stopping thousands of doomed requests (and their costs).
+	•	Reduce re-triage/MTTR:
+p50/p95 and success-rate snapshots make issues obvious; engineers spend less time guessing and more time fixing.
+	•	Right-size traffic & retries:
+Clear visibility into attempt-level latency lets teams tune retry counts/backoff and concurrency, preventing over-retry storms and excess cost.
+
+Solution (Proposed / Implemented)
+	•	Implemented in Python with SSRAIClient; no change to SDK.
+	•	LocustMetrics embeds a minimal Locust runtime and records each attempt via a custom event → env.events.request.
+	•	CircuitBreaker (thread-safe): CLOSED → OPEN → HALF_OPEN → CLOSED with configurable thresholds.
+	•	Exponential backoff + jitter between retries; total retry time is capped.
+	•	JSONL rotating logs for aggregate metric snapshots (append-only, ingestion-friendly).
+	•	Optional per-attempt events log can be disabled to reduce I/O.
+
+⸻
+
+$ Cost of the Initiative (one-time, non-billable)
+	•	Build + integration + docs: ~1 week @ 9 hours/day × 5 days × $30/hour = $1,350
+
+(Adjust rate/hours if your internal standard differs.)
+
+$ Benefit from the Initiative in CY25
+
+Assumptions (transparent & conservative):
+	•	Average LLM call cost saved when avoided: $0.10 per query.
+	•	With breaker protection, 6k–10k futile calls can be avoided per quarter across teams (during outages/partial incidents).
+	•	Snapshot-driven triage saves 24–40 hours/year of engineer time (2–3 hrs/quarter × ~4–5 quarters across 2 reviewers) @ $30/hour.
+
+Calculations:
+	•	LLM cost avoidance (per quarter):
+6,000–10,000 avoided calls × $0.10 = $600–$1,000 / quarter
+	•	LLM cost avoidance (per year):
+$2,400–$4,000 / year
+	•	Engineer time saved (per year):
+24–40 hrs × $30 = $720–$1,200 / year
+
+Total Benefits (per year):
+$3,120 – $5,200 / year
+
+Net $ Savings / Benefits for CY25
+
+Net Savings = Total Benefits – One-time Cost
+= ($3,120–$5,200) – $1,350
+= $1,770 – $3,850 net / year
+
+⸻
+
+One-time Effort Spent on Developing the Idea
+	•	Duration: ~1 week
+	•	Breakdown: design (0.5d), coding (2.5d), tests (1d), integration (0.5d), docs & handover (0.5d)
+
+End Users / Impacted Audience
+	•	Platform & application engineers calling SSRAI (review boards, API services, batch jobs).
+	•	SRE/Observability teams monitoring latency and reliability trends.
+	•	Architecture and cost-optimization groups evaluating LLM utilization.
+
+Reusable Component:
+The client is drop-in and prompt-agnostic. It can front any SSRAI model call and be reused across projects with minimal changes (config only).
+
+⸻
+
+Reusability & Rollout Notes
+	•	Config-only adoption: supply rai_config.yaml, optional profile (e.g., WITH_GUARDRAIL), and (if used) SSRAI_PAT_TOKEN.
+	•	No swarm required: metrics come from embedded Locust; works in apps, jobs, or tests.
+	•	Safe defaults: retries/backoff/breaker thresholds are configurable per service.
+	•	Logging: snapshots to logs/locust_metrics.jsonl (10 MB rotation ×3). Events log optional.
+
+Risks & Mitigations
+	•	Skewed percentiles from circuit-open failures: record those under a separate metric name (e.g., CIRCUIT) or omit latency for OPEN events.
+	•	Multi-threaded producers: if heavy concurrency is expected, funnel metric emission through a small queue to serialize updates.
+	•	Hung requests: set/propagate per-request timeouts in SSRAI to avoid blocking retries.
+
+What is needed from Stakeholders to implement (if any)
+	•	Read access to SSRAI config and credentials.
+	•	Permission to write app logs (or route JSONL to central logging).
+	•	Optional: a Grafana/Splunk lens for the snapshot JSONL (simple to wire).
 
